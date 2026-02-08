@@ -41,8 +41,8 @@ async function main() {
 
     for (const m of markets) {
        await sql`
-          INSERT INTO ex_market (id, chain, base_asset_id, quote_asset_id, symbol, status, min_base_amount, min_quote_amount)
-          VALUES (gen_random_uuid(), ${chain}, ${m.base}, ${m.quote}, ${m.symbol}, 'active', 0.1, 1.0)
+          INSERT INTO ex_market (id, chain, base_asset_id, quote_asset_id, symbol, status)
+          VALUES (gen_random_uuid(), ${chain}, ${m.base}, ${m.quote}, ${m.symbol}, 'enabled')
           ON CONFLICT (chain, symbol) DO NOTHING
        `;
        console.log(`✅ Market: ${m.symbol}`);
