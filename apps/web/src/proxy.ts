@@ -70,6 +70,22 @@ const SECURITY_HEADERS: Record<string, string> = {
 const CSRF_COOKIE = "__csrf";
 const CSRF_HEADER = "x-csrf-token";
 
+function attachCsrfCookieIfMissing(request: NextRequest, response: NextResponse) {
+  if (request.cookies.get(CSRF_COOKIE)?.value) return response;
+
+  const csrfToken = crypto.randomUUID().replace(/-/g, "");
+  const parts = [
+    `${CSRF_COOKIE}=${csrfToken}`,
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${60 * 60 * 24 * 365}`,
+  ];
+  if (isProd) parts.push("Secure");
+  response.headers.append("Set-Cookie", parts.join("; "));
+  response.headers.set("x-csrf-cookie", "set");
+  return response;
+}
+
 // ── Route classification for tiered rate limiting ─────────────────────
 
 function classifyRoute(pathname: string, method: string): "auth" | "exchange-write" | "api" | "page" {
@@ -213,8 +229,15 @@ export default async function proxy(request: NextRequest) {
     if (origin) {
       if (!isAllowed(origin)) {
         console.error(`[CSRF] Blocked Origin: '${origin}'. Allowed:`, [...allowedSet]);
-        return NextResponse.json(
-          { error: "csrf_origin_mismatch", details: `Blocked: ${origin}` },
+        const res = NextResponse.json(
+          {
+            error: "csrf_origin_mismatch",
+            details: {
+              blockedOrigin: origin,
+              requestOrigin: request.nextUrl.origin,
+              allowedOrigins: [...allowedSet],
+            },
+          },
           {
             status: 403,
             headers: {
@@ -224,27 +247,45 @@ export default async function proxy(request: NextRequest) {
             },
           },
         );
+        return attachCsrfCookieIfMissing(request, res);
       }
     } else if (referer) {
       try {
         const refOrigin = new URL(referer).origin;
         if (!isAllowed(refOrigin)) {
-          return NextResponse.json(
-            { error: "csrf_referer_mismatch" },
+          const res = NextResponse.json(
+            {
+              error: "csrf_referer_mismatch",
+              details: {
+                blockedRefererOrigin: refOrigin,
+                referer,
+                requestOrigin: request.nextUrl.origin,
+                allowedOrigins: [...allowedSet],
+              },
+            },
             { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
           );
+          return attachCsrfCookieIfMissing(request, res);
         }
       } catch {
-        return NextResponse.json(
-          { error: "csrf_invalid_referer" },
+        const res = NextResponse.json(
+          { error: "csrf_invalid_referer", details: { referer } },
           { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
         );
+        return attachCsrfCookieIfMissing(request, res);
       }
     } else {
-      return NextResponse.json(
-        { error: "csrf_no_origin" },
+      const res = NextResponse.json(
+        {
+          error: "csrf_no_origin",
+          details: {
+            requestOrigin: request.nextUrl.origin,
+            allowedOrigins: [...allowedSet],
+          },
+        },
         { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
       );
+      return attachCsrfCookieIfMissing(request, res);
     }
 
     // 2. Double-submit CSRF token check (cookie must match header)
@@ -253,10 +294,22 @@ export default async function proxy(request: NextRequest) {
     if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
       // In dev, skip if client hasn't adopted CSRF tokens yet
       if (isProd) {
-        return NextResponse.json(
-          { error: "csrf_token_mismatch" },
+        const res = NextResponse.json(
+          {
+            error: "csrf_token_mismatch",
+            details: {
+              hasCookie: Boolean(csrfCookie),
+              hasHeader: Boolean(csrfHeader),
+              cookieName: CSRF_COOKIE,
+              headerName: CSRF_HEADER,
+              origin,
+              referer,
+              requestOrigin: request.nextUrl.origin,
+            },
+          },
           { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
         );
+        return attachCsrfCookieIfMissing(request, res);
       }
     }
   }
@@ -350,17 +403,7 @@ export default async function proxy(request: NextRequest) {
   }
 
   // ── Ensure CSRF double-submit cookie is present ─────────────────────
-  if (!request.cookies.get(CSRF_COOKIE)?.value) {
-    const csrfToken = crypto.randomUUID().replace(/-/g, "");
-    const parts = [
-      `${CSRF_COOKIE}=${csrfToken}`,
-      "Path=/",
-      "SameSite=Lax",
-      `Max-Age=${60 * 60 * 24 * 365}`,
-    ];
-    if (isProd) parts.push("Secure");
-    response.headers.append("Set-Cookie", parts.join("; "));
-  }
+  attachCsrfCookieIfMissing(request, response);
 
   // Rate-limit headers (informational).
   if (rl) {
