@@ -1,11 +1,10 @@
 import Groq from "groq-sdk";
 
-if (!process.env.GROQ_API_KEY) {
-  throw new Error("GROQ_API_KEY is not set in environment variables");
-}
+// Helper to prevent build crashes if env var is missing
+const apiKey = process.env.GROQ_API_KEY || "dummy-key-for-build";
 
 export const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+  apiKey: apiKey,
 });
 
 export async function getMarketSentiment(symbol: string) {
