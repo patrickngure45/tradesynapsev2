@@ -31,41 +31,50 @@ async function main() {
     // We will set the price around $1.50
     const [market] = await sql`SELECT id FROM ex_market WHERE symbol = 'TST/USDT'`;
     
-    console.log("📈 Placing Orders...");
-    const orders = [
-        // Sells (Asks) - People selling TST for USDT
-        { side: 'sell', price: 1.55, quantity: 1000 },
-        { side: 'sell', price: 1.52, quantity: 5000 },
-        { side: 'sell', price: 1.51, quantity: 2000 },
-        
-        // Buys (Bids) - People buying TST with USDT
-        { side: 'buy', price: 1.49, quantity: 2500 },
-        { side: 'buy', price: 1.48, quantity: 6000 },
-        { side: 'buy', price: 1.45, quantity: 10000 },
-    ];
+    // Check if orders exist to avoid duplication on restart
+    const [existingCount] = await sql`SELECT count(*) as count FROM ex_order WHERE market_id = ${market.id}`;
+    
+    if (parseInt(existingCount.count) > 0) {
+        console.log("✅ Market already active (orders found). Skipping initialization.");
+    } else {
+        console.log("📈 Placing Orders...");
+        const orders = [
+            // Sells (Asks) - People selling TST for USDT
+            { side: 'sell', price: 1.55, quantity: 1000 },
+            { side: 'sell', price: 1.52, quantity: 5000 },
+            { side: 'sell', price: 1.51, quantity: 2000 },
+            
+            // Buys (Bids) - People buying TST with USDT
+            { side: 'buy', price: 1.49, quantity: 2500 },
+            { side: 'buy', price: 1.48, quantity: 6000 },
+            { side: 'buy', price: 1.45, quantity: 10000 },
+        ];
 
-    for (const o of orders) {
+        for (const o of orders) {
+            await sql`
+                INSERT INTO ex_order (
+                    id, market_id, user_id, side, type, price, quantity, remaining_quantity, status
+                ) VALUES (
+                    gen_random_uuid(), ${market.id}, ${user.id}, ${o.side}, 'limit', 
+                    ${o.price}, ${o.quantity}, ${o.quantity}, 'open'
+                )
+            `;
+        }
+        
+        // 4. Create a Fake Trade (to set the current price)
+        // A trade happens when a buy matches a sell. We'll simulate one at $1.50
         await sql`
-            INSERT INTO ex_order (
-                id, market_id, user_id, side, type, price, quantity, remaining_quantity, status
+            INSERT INTO ex_execution (
+                id, market_id, side, price, quantity, 
+                maker_order_id, taker_order_id, created_at
             ) VALUES (
-                gen_random_uuid(), ${market.id}, ${user.id}, ${o.side}, 'limit', 
-                ${o.price}, ${o.quantity}, ${o.quantity}, 'open'
+                gen_random_uuid(), ${market.id}, 'buy', 1.50, 500,
+                gen_random_uuid(), gen_random_uuid(), now()
             )
         `;
-    }
     
-    // 4. Create a Fake Trade (to set the current price)
-    // A trade happens when a buy matches a sell. We'll simulate one at $1.50
-    await sql`
-        INSERT INTO ex_execution (
-            id, market_id, side, price, quantity, 
-            maker_order_id, taker_order_id, created_at
-        ) VALUES (
-            gen_random_uuid(), ${market.id}, 'buy', 1.50, 500,
-            gen_random_uuid(), gen_random_uuid(), now()
-        )
-    `;
+        console.log("✅ Market Maker Activity Injected.");
+    }
 
     console.log("✅ Market Maker Active. Order book populated.");
 
