@@ -70,6 +70,16 @@ const SECURITY_HEADERS: Record<string, string> = {
 const CSRF_COOKIE = "__csrf";
 const CSRF_HEADER = "x-csrf-token";
 
+function getPublicOriginFromForwardedHeaders(request: NextRequest): string | null {
+  const xfProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const xfHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  if (!xfProto || !xfHost) return null;
+
+  // Basic sanity: host header should not contain spaces
+  if (/\s/.test(xfHost)) return null;
+  return `${xfProto}://${xfHost}`;
+}
+
 function attachCsrfCookieIfMissing(request: NextRequest, response: NextResponse) {
   if (request.cookies.get(CSRF_COOKIE)?.value) return response;
 
@@ -206,9 +216,11 @@ export default async function proxy(request: NextRequest) {
     // Resolve allowed origins - including CORS list from env
     const normalize = (u: string) => u?.trim().replace(/\/$/, "").toLowerCase();
     
-    // Always allow the current request origin (as seen by Next) to avoid
-    // fragile deployments where ALLOWED_ORIGIN is missing/misformatted.
+    // Always allow the current request origin (as seen by Next) and the
+    // public origin (as seen by the reverse proxy) to avoid mismatches.
     const allowedOrigins = [request.nextUrl.origin];
+    const publicOrigin = getPublicOriginFromForwardedHeaders(request);
+    if (publicOrigin) allowedOrigins.push(publicOrigin);
     if (process.env.ALLOWED_ORIGIN) allowedOrigins.push(process.env.ALLOWED_ORIGIN);
     
     if (process.env.BACKEND_CORS_ORIGINS) {
