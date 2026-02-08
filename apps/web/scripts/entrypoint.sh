@@ -9,10 +9,14 @@ npm run db:migrate
 echo "🌱 Seeding Assets..."
 npx tsx scripts/seed-prod.ts
 
-# 3. Initialize Market Data
+# 3. Ensure Admin User (optional)
+echo "👤 Ensuring Admin User..."
+npx tsx scripts/seed-admin-prod.ts
+
+# 4. Initialize Market Data
 echo "📊 Checking Market Activity..."
 npx tsx scripts/seed-market-maker.ts
 
-# 4. Start Application
+# 5. Start Application
 echo "🚀 Starting Production Server..."
 npm run start:prod

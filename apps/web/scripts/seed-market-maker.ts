@@ -1,24 +1,22 @@
 
 import { getSql } from "../src/lib/db";
-import { randomUUID } from "crypto";
 
 async function main() {
   const sql = getSql();
   console.log("🤖 Starting Market Maker Simulation...");
 
   try {
-    // 1. Ensure Admin User Exists
-    const email = "admin@tradesynapse.com";
-    const passwordHash = "$2b$10$EpRnTzVlqHNP0.fKb.UOP.777777777777777777777777777777"; // Placeholder hash
-    
-    await sql`
-      INSERT INTO app_user (id, email, password_hash, status, kyc_level, role)
-      VALUES (gen_random_uuid(), ${email}, ${passwordHash}, 'active', 'full', 'admin')
-      ON CONFLICT (email) DO NOTHING
-    `;
-    
-    const [user] = await sql`SELECT id FROM app_user WHERE email = ${email}`;
-    console.log(`👤 Market Maker User: ${user.id}`);
+        // 1. Ensure Market Maker User Exists (no password auth required)
+        const email = "marketmaker@system.local";
+
+        await sql`
+            INSERT INTO app_user (email, status, kyc_level, role, display_name)
+            VALUES (${email}, 'active', 'full', 'user', 'Market Maker')
+            ON CONFLICT (email) DO NOTHING
+        `;
+
+        const [user] = await sql`SELECT id FROM app_user WHERE email = ${email} LIMIT 1`;
+        console.log(`👤 Market Maker User: ${user.id}`);
 
     // 2. Fund the Account (USDT & TST)
     const [usdt] = await sql`SELECT id FROM ex_asset WHERE symbol = 'USDT'`;
