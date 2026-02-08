@@ -1,0 +1,96 @@
+
+import { getSql } from "../src/lib/db";
+import { randomUUID } from "crypto";
+
+async function main() {
+  const sql = getSql();
+  console.log("🤖 Starting Market Maker Simulation...");
+
+  try {
+    // 1. Ensure Admin User Exists
+    const email = "admin@tradesynapse.com";
+    const passwordHash = "$2b$10$EpRnTzVlqHNP0.fKb.UOP.777777777777777777777777777777"; // Placeholder hash
+    
+    await sql`
+      INSERT INTO app_user (id, email, password_hash, status, kyc_level, role)
+      VALUES (gen_random_uuid(), ${email}, ${passwordHash}, 'active', 'full', 'admin')
+      ON CONFLICT (email) DO NOTHING
+    `;
+    
+    const [user] = await sql`SELECT id FROM app_user WHERE email = ${email}`;
+    console.log(`👤 Market Maker User: ${user.id}`);
+
+    // 2. Fund the Account (USDT & TST)
+    const [usdt] = await sql`SELECT id FROM ex_asset WHERE symbol = 'USDT'`;
+    const [tst] = await sql`SELECT id FROM ex_asset WHERE symbol = 'TST'`;
+
+    await fundUser(sql, user.id, usdt.id, 1000000); // 1M USDT
+    await fundUser(sql, user.id, tst.id, 1000000); // 1M TST
+
+    // 3. Place Orders (TST/USDT currently at $0)
+    // We will set the price around $1.50
+    const [market] = await sql`SELECT id FROM ex_market WHERE symbol = 'TST/USDT'`;
+    
+    console.log("📈 Placing Orders...");
+    const orders = [
+        // Sells (Asks) - People selling TST for USDT
+        { side: 'sell', price: 1.55, quantity: 1000 },
+        { side: 'sell', price: 1.52, quantity: 5000 },
+        { side: 'sell', price: 1.51, quantity: 2000 },
+        
+        // Buys (Bids) - People buying TST with USDT
+        { side: 'buy', price: 1.49, quantity: 2500 },
+        { side: 'buy', price: 1.48, quantity: 6000 },
+        { side: 'buy', price: 1.45, quantity: 10000 },
+    ];
+
+    for (const o of orders) {
+        await sql`
+            INSERT INTO ex_order (
+                id, market_id, user_id, side, type, price, quantity, remaining_quantity, status
+            ) VALUES (
+                gen_random_uuid(), ${market.id}, ${user.id}, ${o.side}, 'limit', 
+                ${o.price}, ${o.quantity}, ${o.quantity}, 'open'
+            )
+        `;
+    }
+    
+    // 4. Create a Fake Trade (to set the current price)
+    // A trade happens when a buy matches a sell. We'll simulate one at $1.50
+    await sql`
+        INSERT INTO ex_execution (
+            id, market_id, side, price, quantity, 
+            maker_order_id, taker_order_id, created_at
+        ) VALUES (
+            gen_random_uuid(), ${market.id}, 'buy', 1.50, 500,
+            gen_random_uuid(), gen_random_uuid(), now()
+        )
+    `;
+
+    console.log("✅ Market Maker Active. Order book populated.");
+
+  } catch (err) {
+    console.error("❌ MM Failed:", err);
+  }
+  process.exit(0);
+}
+
+async function fundUser(sql: any, userId: string, assetId: string, amount: number) {
+    // Check if account exists
+    const [existing] = await sql`
+        SELECT id FROM ex_ledger_account WHERE user_id = ${userId} AND asset_id = ${assetId}
+    `;
+    
+    if (!existing) {
+        await sql`
+            INSERT INTO ex_ledger_account (id, user_id, asset_id, balance, locked, status)
+            VALUES (gen_random_uuid(), ${userId}, ${assetId}, ${amount}, 0, 'active')
+        `;
+    } else {
+        await sql`
+            UPDATE ex_ledger_account SET balance = ${amount} WHERE id = ${existing.id}
+        `;
+    }
+}
+
+main();
