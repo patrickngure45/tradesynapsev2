@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+:root {
+  /* Core surfaces */
+  --background: #f5f7fa;
+  --foreground: #0b1220;
+  --card: #ffffff;
+  --card-2: #eef2f9;
+  --muted: #52607a;
+  --border: rgba(15, 23, 42, 0.10);
+
+  /* Brand accent — TradeSynapse blue/cyan */
+  --accent: #2563eb;
+  --accent-2: #06b6d4;
+  --ring: rgba(37, 99, 235, 0.40);
+
+  /* Semantic: trading colors */
+  --up: #10b981;
+  --up-bg: rgba(16, 185, 129, 0.10);
+  --down: #ef4444;
+  --down-bg: rgba(239, 68, 68, 0.10);
+  --warn: #f59e0b;
+  --warn-bg: rgba(245, 158, 11, 0.10);
+
+  /* Effects */
+  --shadow: 0 1px 3px rgba(2, 8, 23, 0.06), 0 8px 24px rgba(2, 8, 23, 0.06);
+  --shadow-2: 0 4px 12px rgba(2, 8, 23, 0.08), 0 16px 40px rgba(2, 8, 23, 0.10);
+  --glow: 0 0 40px rgba(37, 99, 235, 0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-ring: var(--ring);
+  --color-up: var(--up);
+  --color-up-bg: var(--up-bg);
+  --color-down: var(--down);
+  --color-down-bg: var(--down-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #0a0e17;
+    --foreground: #e4eaf5;
+    --card: #0f1724;
+    --card-2: #141d2e;
+    --muted: #8b9ab8;
+    --border: rgba(148, 163, 194, 0.10);
+
+    --accent: #3b82f6;
+    --accent-2: #22d3ee;
+    --ring: rgba(59, 130, 246, 0.35);
+
+    --up: #34d399;
+    --up-bg: rgba(52, 211, 153, 0.12);
+    --down: #f87171;
+    --down-bg: rgba(248, 113, 113, 0.12);
+    --warn: #fbbf24;
+    --warn-bg: rgba(251, 191, 36, 0.12);
+
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.30), 0 12px 32px rgba(0, 0, 0, 0.25);
+    --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35), 0 20px 48px rgba(0, 0, 0, 0.30);
+    --glow: 0 0 60px rgba(59, 130, 246, 0.12);
+  }
+}
+
+/* Explicit dark theme override */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0e17;
+  --foreground: #e4eaf5;
+  --card: #0f1724;
+  --card-2: #141d2e;
+  --muted: #8b9ab8;
+  --border: rgba(148, 163, 194, 0.10);
+
+  --accent: #3b82f6;
+  --accent-2: #22d3ee;
+  --ring: rgba(59, 130, 246, 0.35);
+
+  --up: #34d399;
+  --up-bg: rgba(52, 211, 153, 0.12);
+  --down: #f87171;
+  --down-bg: rgba(248, 113, 113, 0.12);
+  --warn: #fbbf24;
+  --warn-bg: rgba(251, 191, 36, 0.12);
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.30), 0 12px 32px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35), 0 20px 48px rgba(0, 0, 0, 0.30);
+  --glow: 0 0 60px rgba(59, 130, 246, 0.12);
+}
+
+body {
+  color-scheme: light dark;
+  background:
+    radial-gradient(ellipse 1200px 500px at 15% -5%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 65%),
+    radial-gradient(ellipse 800px 400px at 90% 5%, color-mix(in srgb, var(--accent-2) 6%, transparent), transparent 55%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+@layer base {
+  ::selection {
+    background: rgba(37, 99, 235, 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  a {
+    text-underline-offset: 3px;
+  }
+
+  /* Scrollbar styling for dark trading UI */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  select {
+    background-color: var(--card);
+    color: var(--foreground);
+    border-color: var(--border);
+  }
+
+  option {
+    background-color: var(--card);
+    color: var(--foreground);
+  }
+}
+
+/* ── Entrance animations ──────────────────────────── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+}
+.stagger-in {
+  animation: stagger-in 0.45s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in-up, .stagger-in { animation: none; }
+}

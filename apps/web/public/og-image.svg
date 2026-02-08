@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0b0e14"/>
+      <stop offset="100%" style="stop-color:#131720"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="0" y="610" width="1200" height="20" fill="url(#accent)" opacity="0.8"/>
+  <text x="600" y="280" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="white">
+    <tspan fill="white">Trade</tspan><tspan fill="url(#accent)">Synapse</tspan>
+  </text>
+  <text x="600" y="340" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" fill="#8b92a5">
+    Spot Exchange on BNB Smart Chain
+  </text>
+  <text x="600" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" fill="#5a6178">
+    Real-time Order Books · Arbitrage Scanner · Copy Trading
+  </text>
+</svg>

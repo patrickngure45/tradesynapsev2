@@ -1,0 +1,19 @@
+/** Security Center skeleton */
+export default function Loading() {
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
+      <div className="space-y-2">
+        <div className="h-8 w-48 animate-pulse rounded bg-[var(--border)]" />
+        <div className="h-4 w-96 animate-pulse rounded bg-[var(--border)]" />
+      </div>
+      
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-24 w-full animate-pulse rounded-lg bg-[var(--border)] opacity-50" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

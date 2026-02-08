@@ -1,0 +1,213 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState, useCallback } from "react";
+
+type Fill = {
+  id: string;
+  price: string;
+  quantity: string;
+  maker_fee: string;
+  taker_fee: string;
+  created_at: string;
+};
+
+type Order = {
+  id: string;
+  market_id: string;
+  market_symbol: string;
+  side: string;
+  type: string;
+  price: string;
+  quantity: string;
+  remaining_quantity: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  fills: Fill[];
+};
+
+export function OrderHistoryClient() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const fetchOrders = useCallback(async () => {
+    setError(null);
+    try {
+      const userId = localStorage.getItem("ts_user_id") ?? "";
+      const res = await fetch(
+        `/api/exchange/orders/history?status=${statusFilter}&limit=100`,
+        { credentials: "include", headers: userId ? { "x-user-id": userId } : {} },
+      );
+      if (!res.ok) throw new Error("Failed to fetch order history");
+      const data = await res.json();
+      setOrders(data.orders ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load order history");
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const statusBadge = (status: string) => {
+    const map: Record<string, string> = {
+      open: "bg-[var(--accent)]/20 text-[var(--accent)]",
+      partially_filled: "bg-yellow-500/20 text-yellow-400",
+      filled: "bg-[var(--up)]/20 text-[var(--up)]",
+      canceled: "bg-gray-500/20 text-gray-400",
+    };
+    return map[status] ?? "bg-gray-500/20 text-gray-400";
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Filter */}
+      <div className="flex gap-2">
+        {["all", "open", "partially_filled", "filled", "canceled"].map((s) => (
+          <button
+            key={s}
+            onClick={() => { setStatusFilter(s); setLoading(true); }}
+            className={`rounded-lg px-3 py-1.5 text-xs transition ${
+              statusFilter === s
+                ? "bg-[var(--accent)] text-white"
+                : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {s === "partially_filled" ? "Partial" : s.charAt(0).toUpperCase() + s.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="py-8 text-center text-sm text-[var(--muted)]">Loading...</div>
+      ) : error ? (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-6 text-center text-sm text-rose-400">
+          {error}
+          <button onClick={() => { setLoading(true); fetchOrders(); }} className="ml-3 underline hover:text-rose-300">Retry</button>
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-8 text-center">
+            <p className="text-[var(--muted)]">No spot orders found matching criteria.</p>
+            <div className="text-sm">
+                Looking for P2P trades? <Link href="/p2p/orders" className="text-[var(--accent)] hover:underline">View P2P Order History</Link>
+            </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {orders.map((order) => {
+            const isExpanded = expanded.has(order.id);
+            const filledQty =
+              parseFloat(order.quantity) - parseFloat(order.remaining_quantity);
+            const fillPct =
+              parseFloat(order.quantity) > 0
+                ? ((filledQty / parseFloat(order.quantity)) * 100).toFixed(1)
+                : "0";
+
+            return (
+              <div
+                key={order.id}
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden"
+              >
+                <button
+                  onClick={() => toggleExpand(order.id)}
+                  className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-[var(--background)]/50"
+                >
+                  <div className="min-w-[90px]">
+                    <div className="font-mono text-sm font-medium">{order.market_symbol}</div>
+                    <div className="text-xs text-[var(--muted)]">{order.type}</div>
+                  </div>
+
+                  <span
+                    className={`text-sm font-semibold ${
+                      order.side === "buy" ? "text-[var(--up)]" : "text-[var(--down)]"
+                    }`}
+                  >
+                    {order.side.toUpperCase()}
+                  </span>
+
+                  <div className="text-right">
+                    <div className="font-mono text-sm">{parseFloat(order.price).toFixed(4)}</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {filledQty.toFixed(4)} / {parseFloat(order.quantity).toFixed(4)}
+                    </div>
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-3">
+                    <span className={`rounded px-2 py-0.5 text-xs ${statusBadge(order.status)}`}>
+                      {order.status} ({fillPct}%)
+                    </span>
+                    <span className="text-xs text-[var(--muted)]">
+                      {new Date(order.created_at).toLocaleDateString()}
+                    </span>
+                    <svg
+                      className={`h-4 w-4 text-[var(--muted)] transition ${isExpanded ? "rotate-180" : ""}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </button>
+
+                {isExpanded && order.fills.length > 0 && (
+                  <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-3">
+                    <div className="mb-2 text-xs font-medium text-[var(--muted)]">
+                      Fills ({order.fills.length})
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[var(--muted)]">
+                          <th className="pb-1">Price</th>
+                          <th className="pb-1">Qty</th>
+                          <th className="pb-1">Maker Fee</th>
+                          <th className="pb-1">Taker Fee</th>
+                          <th className="pb-1 text-right">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.fills.map((f) => (
+                          <tr key={f.id} className="border-t border-[var(--border)]/30">
+                            <td className="py-1 font-mono">{parseFloat(f.price).toFixed(4)}</td>
+                            <td className="py-1 font-mono">{parseFloat(f.quantity).toFixed(4)}</td>
+                            <td className="py-1 font-mono">{parseFloat(f.maker_fee).toFixed(6)}</td>
+                            <td className="py-1 font-mono">{parseFloat(f.taker_fee).toFixed(6)}</td>
+                            <td className="py-1 text-right text-[var(--muted)]">
+                              {new Date(f.created_at).toLocaleTimeString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {isExpanded && order.fills.length === 0 && (
+                  <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-3 text-xs text-[var(--muted)]">
+                    No fills yet
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
