@@ -206,7 +206,10 @@ export default async function proxy(request: NextRequest) {
     // Resolve allowed origins - including CORS list from env
     const normalize = (u: string) => u?.trim().replace(/\/$/, "").toLowerCase();
     
-    const allowedOrigins = [process.env.ALLOWED_ORIGIN ?? request.nextUrl.origin];
+    // Always allow the current request origin (as seen by Next) to avoid
+    // fragile deployments where ALLOWED_ORIGIN is missing/misformatted.
+    const allowedOrigins = [request.nextUrl.origin];
+    if (process.env.ALLOWED_ORIGIN) allowedOrigins.push(process.env.ALLOWED_ORIGIN);
     
     if (process.env.BACKEND_CORS_ORIGINS) {
       try {
@@ -289,11 +292,15 @@ export default async function proxy(request: NextRequest) {
     }
 
     // 2. Double-submit CSRF token check (cookie must match header)
+    // Auth bootstrap endpoints can be called before the browser has a CSRF cookie.
+    // Keep the Origin/Referer check above, but do not require the token for these.
+    const isAuthBootstrap = pathname === "/api/auth/login" || pathname === "/api/auth/signup";
     const csrfCookie = request.cookies.get(CSRF_COOKIE)?.value;
     const csrfHeader = request.headers.get(CSRF_HEADER);
     if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
       // In dev, skip if client hasn't adopted CSRF tokens yet
       if (isProd) {
+        if (isAuthBootstrap) return;
         const res = NextResponse.json(
           {
             error: "csrf_token_mismatch",
