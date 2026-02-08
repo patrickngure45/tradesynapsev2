@@ -188,19 +188,33 @@ export default async function proxy(request: NextRequest) {
     const referer = request.headers.get("referer");
     
     // Resolve allowed origins - including CORS list from env
+    const normalize = (u: string) => u?.trim().replace(/\/$/, "").toLowerCase();
+    
     const allowedOrigins = [process.env.ALLOWED_ORIGIN ?? request.nextUrl.origin];
+    
     if (process.env.BACKEND_CORS_ORIGINS) {
       try {
-        const parsed = JSON.parse(process.env.BACKEND_CORS_ORIGINS);
-        if (Array.isArray(parsed)) allowedOrigins.push(...parsed);
+        const raw = process.env.BACKEND_CORS_ORIGINS;
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch { /* fail safe */ }
+        
+        if (Array.isArray(parsed)) {
+          allowedOrigins.push(...parsed);
+        } else if (typeof raw === "string") {
+           // Fallback for user entering a raw URL or comma-separated list
+           raw.split(",").forEach(s => allowedOrigins.push(s));
+        }
       } catch { /* ignore */ }
     }
-    const isAllowed = (url: string) => allowedOrigins.includes(url);
+    
+    const allowedSet = new Set(allowedOrigins.filter(Boolean).map(normalize));
+    const isAllowed = (url: string) => allowedSet.has(normalize(url));
 
     if (origin) {
       if (!isAllowed(origin)) {
+        console.error(`[CSRF] Blocked Origin: '${origin}'. Allowed:`, [...allowedSet]);
         return NextResponse.json(
-          { error: "csrf_origin_mismatch" },
+          { error: "csrf_origin_mismatch", details: `Blocked: ${origin}` },
           {
             status: 403,
             headers: {
