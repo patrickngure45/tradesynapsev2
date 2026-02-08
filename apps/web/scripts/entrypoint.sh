@@ -5,6 +5,10 @@ set -e
 echo "📦 Running Database Migrations..."
 npm run db:migrate
 
-# 2. Start Application
+# 2. Seed Production Data (Assets/Markets)
+echo "🌱 Seeding Assets..."
+npx tsx scripts/seed-prod.ts
+
+# 3. Start Application
 echo "🚀 Starting Production Server..."
 npm run start:prod
