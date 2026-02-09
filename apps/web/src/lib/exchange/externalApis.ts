@@ -76,29 +76,50 @@ function binanceSign(queryString: string, secret: string): string {
   return createHmac("sha256", secret).update(queryString).digest("hex");
 }
 
+function uniqStrings(list: Array<string | undefined | null>): string[] {
+  const out: string[] = [];
+  for (const v of list) {
+    if (!v) continue;
+    const s = v.trim();
+    if (!s) continue;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 async function binanceRequest(
   creds: ExchangeCredentials,
   method: "GET" | "POST" | "DELETE",
   path: string,
   params: Record<string, string> = {},
 ): Promise<unknown> {
-  const baseUrl = process.env.BINANCE_API_URL || "https://api.binance.com";
+  const baseCandidates = uniqStrings([
+    process.env.BINANCE_API_URL,
+    process.env.BINANCE_PUBLIC_API_URL,
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+  ]);
   const timestamp = Date.now().toString();
   const allParams = { ...params, timestamp, recvWindow: "5000" };
   const qs = new URLSearchParams(allParams).toString();
   const signature = binanceSign(qs, creds.apiSecret);
-  const url = `${baseUrl}${path}?${qs}&signature=${signature}`;
 
-  const res = await fetch(url, {
-    method,
-    headers: { "X-MBX-APIKEY": creds.apiKey },
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Binance ${res.status}: ${body}`);
+  let lastErr: unknown;
+  for (const baseUrl of baseCandidates) {
+    const url = `${baseUrl.replace(/\/$/, "")}${path}?${qs}&signature=${signature}`;
+    try {
+      return await fetchJson(url, {
+        method,
+        timeoutMs: 10_000,
+        headers: { "X-MBX-APIKEY": creds.apiKey },
+      });
+    } catch (e) {
+      lastErr = e;
+    }
   }
-  return res.json();
+  throw new Error(`Binance request failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
 export async function binanceGetBalances(creds: ExchangeCredentials): Promise<ExchangeBalance[]> {
@@ -181,43 +202,60 @@ async function bybitRequest(
   path: string,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  const baseUrl = "https://api.bybit.com";
+  const baseCandidates = uniqStrings([
+    process.env.BYBIT_API_URL,
+    process.env.BYBIT_PUBLIC_API_URL,
+    "https://api.bybit.com",
+    // Alternate domain used in some regions
+    "https://api.bytick.com",
+  ]);
   const timestamp = Date.now().toString();
-  let url = `${baseUrl}${path}`;
+  let url = "";
   let body: string | undefined;
 
   if (method === "GET") {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     const sign = bybitSign(timestamp, creds.apiKey, qs, creds.apiSecret);
-    if (qs) url += `?${qs}`;
-    const res = await fetch(url, {
-      method,
-      headers: {
-        "X-BAPI-API-KEY": creds.apiKey,
-        "X-BAPI-SIGN": sign,
-        "X-BAPI-TIMESTAMP": timestamp,
-        "X-BAPI-RECV-WINDOW": "5000",
-      },
-    });
-    if (!res.ok) throw new Error(`Bybit ${res.status}: ${await res.text()}`);
-    return res.json();
-  }
-
-  body = JSON.stringify(params);
-  const sign = bybitSign(timestamp, creds.apiKey, body, creds.apiSecret);
-  const res = await fetch(url, {
-    method,
-    headers: {
+    const headers = {
       "X-BAPI-API-KEY": creds.apiKey,
       "X-BAPI-SIGN": sign,
       "X-BAPI-TIMESTAMP": timestamp,
       "X-BAPI-RECV-WINDOW": "5000",
-      "Content-Type": "application/json",
-    },
-    body,
-  });
-  if (!res.ok) throw new Error(`Bybit ${res.status}: ${await res.text()}`);
-  return res.json();
+    };
+
+    let lastErr: unknown;
+    for (const baseUrl of baseCandidates) {
+      url = `${baseUrl.replace(/\/$/, "")}${path}`;
+      if (qs) url += `?${qs}`;
+      try {
+        return await fetchJson(url, { method, headers, timeoutMs: 10_000 });
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw new Error(`Bybit request failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+  }
+
+  body = JSON.stringify(params);
+  const sign = bybitSign(timestamp, creds.apiKey, body, creds.apiSecret);
+  const headers = {
+    "X-BAPI-API-KEY": creds.apiKey,
+    "X-BAPI-SIGN": sign,
+    "X-BAPI-TIMESTAMP": timestamp,
+    "X-BAPI-RECV-WINDOW": "5000",
+    "Content-Type": "application/json",
+  };
+
+  let lastErr: unknown;
+  for (const baseUrl of baseCandidates) {
+    url = `${baseUrl.replace(/\/$/, "")}${path}`;
+    try {
+      return await fetchJson(url, { method, headers, body, timeoutMs: 10_000 });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`Bybit request failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
 export async function bybitGetBalances(creds: ExchangeCredentials): Promise<ExchangeBalance[]> {
@@ -236,22 +274,36 @@ export async function bybitGetBalances(creds: ExchangeCredentials): Promise<Exch
 }
 
 export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
-  const base = (process.env.BYBIT_PUBLIC_API_URL ?? "https://api.bybit.com").replace(/\/$/, "");
-  const data = (await fetchJson(
-    `${base}/v5/market/tickers?category=spot&symbol=${encodeURIComponent(symbol)}`,
-    { timeoutMs: 8000 },
-  )) as { result: { list: Record<string, string>[] } };
-  const d = data.result.list[0];
-  if (!d) throw new Error("Bybit ticker not found");
-  return {
-    symbol: d.symbol,
-    bid: d.bid1Price,
-    ask: d.ask1Price,
-    last: d.lastPrice,
-    volume24h: d.volume24h,
-    change24hPct: d.price24hPcnt ? String(parseFloat(d.price24hPcnt) * 100) : "0",
-    ts: Date.now(),
-  };
+  const baseCandidates = uniqStrings([
+    process.env.BYBIT_PUBLIC_API_URL,
+    process.env.BYBIT_API_URL,
+    "https://api.bybit.com",
+    "https://api.bytick.com",
+  ]);
+
+  let lastErr: unknown;
+  for (const base of baseCandidates) {
+    try {
+      const data = (await fetchJson(
+        `${base.replace(/\/$/, "")}/v5/market/tickers?category=spot&symbol=${encodeURIComponent(symbol)}`,
+        { timeoutMs: 8000 },
+      )) as { result: { list: Record<string, string>[] } };
+      const d = data.result.list[0];
+      if (!d) throw new Error("Bybit ticker not found");
+      return {
+        symbol: d.symbol,
+        bid: d.bid1Price,
+        ask: d.ask1Price,
+        last: d.lastPrice,
+        volume24h: d.volume24h,
+        change24hPct: d.price24hPcnt ? String(parseFloat(d.price24hPcnt) * 100) : "0",
+        ts: Date.now(),
+      };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`Bybit ticker failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
 
