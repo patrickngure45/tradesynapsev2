@@ -125,6 +125,14 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbSnapshot[]> {
 export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] {
   const opportunities: ArbOpportunity[] = [];
 
+  // Exchanges like Binance/Bybit are very efficient; spreads are often tiny.
+  // Keep a configurable floor to avoid zero/noise results.
+  const minSpreadPct = (() => {
+    const raw = process.env.ARB_MIN_SPREAD_PCT;
+    const v = raw ? Number(raw) : NaN;
+    return Number.isFinite(v) ? v : 0.001; // 0.001% default
+  })();
+
   // Group by symbol
   const bySymbol = new Map<string, ArbSnapshot[]>();
   for (const s of snapshots) {
@@ -153,8 +161,8 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
 
         const spreadPct = ((sellBid - buyAsk) / buyAsk) * 100;
 
-        // Only surface opportunities with > 0.05% spread (accounts for typical fees)
-        if (spreadPct < 0.05) continue;
+        // Surface opportunities above a configurable floor
+        if (spreadPct < minSpreadPct) continue;
 
         const potentialProfit = (spreadPct / 100) * 1000; // profit per $1000
 
