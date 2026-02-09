@@ -161,6 +161,32 @@ export async function binanceGetTicker(symbol: string): Promise<ExchangeTicker> 
       continue;
     }
   }
+
+  // Binance "vision" endpoints mirror public market data and sometimes remain
+  // accessible when the primary API is geo-restricted.
+  const visionBases = [
+    "https://data-api.binance.vision",
+    "https://api.binance.vision",
+  ];
+
+  for (const base of visionBases) {
+    try {
+      const url = `${base}/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`;
+      const d = (await fetchJson(url, { timeoutMs: 8000 })) as Record<string, string>;
+      return {
+        symbol: d.symbol ?? symbol,
+        bid: d.bidPrice,
+        ask: d.askPrice,
+        last: d.askPrice,
+        volume24h: "0",
+        change24hPct: "0",
+        ts: Date.now(),
+      };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
   throw new Error(`Binance ticker failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
@@ -279,6 +305,7 @@ export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
     process.env.BYBIT_API_URL,
     "https://api.bybit.com",
     "https://api.bytick.com",
+    "https://api2.bybit.com",
   ]);
 
   let lastErr: unknown;
