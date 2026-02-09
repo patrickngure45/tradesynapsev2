@@ -27,13 +27,25 @@ export type ArbOpportunity = {
   ts: Date;
 };
 
+export type ArbScanError = {
+  exchange: string;
+  symbol: string;
+  message: string;
+};
+
+export type ArbScanResult = {
+  snapshots: ArbSnapshot[];
+  errors: ArbScanError[];
+};
+
 // ── Pairs to track ──────────────────────────────────────────────────
 const TRACKED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
 const EXCHANGES = ["binance", "bybit"] as const;
 
 // ── Snapshot writer ─────────────────────────────────────────────────
-export async function captureArbSnapshots(sql: Sql): Promise<ArbSnapshot[]> {
+export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
   const snapshots: ArbSnapshot[] = [];
+  const errors: ArbScanError[] = [];
 
   // Fetch all tickers in parallel (grouped by exchange)
   const promises: Promise<void>[] = [];
@@ -54,8 +66,13 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbSnapshot[]> {
               ask: ticker.ask,
               ts: new Date(ticker.ts),
             });
-          } catch {
-            // Exchange might not list this pair — skip silently
+          } catch (e) {
+            // Collect error (helps debug production egress)
+            errors.push({
+              exchange,
+              symbol,
+              message: e instanceof Error ? e.message : String(e),
+            });
           }
         })(),
       );
@@ -118,7 +135,7 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbSnapshot[]> {
     `;
   }
 
-  return snapshots;
+  return { snapshots, errors };
 }
 
 // ── Opportunity detection ───────────────────────────────────────────

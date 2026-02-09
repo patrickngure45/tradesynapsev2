@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
   try {
     if (action === "scan") {
       // Trigger fresh scan
-      const snapshots = await captureArbSnapshots(sql);
+      const scan = await captureArbSnapshots(sql);
+      const snapshots = scan.snapshots;
       const opportunities = detectOpportunities(snapshots);
 
       const minSpreadPctUsed = (() => {
@@ -56,6 +57,7 @@ export async function GET(req: NextRequest) {
         minSpreadPctUsed,
         prices: priceMap,
         snapshots: debug ? snapshots : undefined,
+        errors: debug ? scan.errors : undefined,
         ts: new Date().toISOString(),
       });
     }

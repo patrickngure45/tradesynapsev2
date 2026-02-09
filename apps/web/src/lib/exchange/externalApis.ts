@@ -25,6 +25,35 @@ export type ExchangeTicker = {
   ts: number;
 };
 
+function withTimeout(ms: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout),
+  };
+}
+
+async function fetchJson(url: string, opts?: RequestInit & { timeoutMs?: number }): Promise<unknown> {
+  const timeoutMs = opts?.timeoutMs ?? 8000;
+  const { timeoutMs: _t, ...rest } = opts ?? {};
+  const t = withTimeout(timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...rest,
+      signal: t.signal,
+      headers: {
+        "User-Agent": "TradeSynapse/1.0 (+https://tradesynapsev2-production.up.railway.app)",
+        ...(rest.headers ?? {}),
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return res.json();
+  } finally {
+    t.clear();
+  }
+}
+
 export type ExchangeBalance = {
   asset: string;
   free: string;
@@ -82,20 +111,36 @@ export async function binanceGetBalances(creds: ExchangeCredentials): Promise<Ex
 }
 
 export async function binanceGetTicker(symbol: string): Promise<ExchangeTicker> {
-  const res = await fetch(
-    `https://api.binance.com/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`,
-  );
-  if (!res.ok) throw new Error(`Binance ticker ${res.status}`);
-  const d = (await res.json()) as Record<string, string>;
-  return {
-    symbol: d.symbol,
-    bid: d.bidPrice,
-    ask: d.askPrice,
-    last: d.lastPrice,
-    volume24h: d.volume,
-    change24hPct: d.priceChangePercent,
-    ts: Date.now(),
-  };
+  // Some hosts have intermittent connectivity to api.binance.com; try fallbacks.
+  const baseCandidates = [
+    process.env.BINANCE_PUBLIC_API_URL,
+    process.env.BINANCE_API_URL,
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+  ].filter(Boolean) as string[];
+
+  let lastErr: unknown;
+  for (const base of baseCandidates) {
+    try {
+      const url = `${base.replace(/\/$/, "")}/api/v3/ticker/24hr?symbol=${encodeURIComponent(symbol)}`;
+      const d = (await fetchJson(url, { timeoutMs: 8000 })) as Record<string, string>;
+      return {
+        symbol: d.symbol,
+        bid: d.bidPrice,
+        ask: d.askPrice,
+        last: d.lastPrice,
+        volume24h: d.volume,
+        change24hPct: d.priceChangePercent,
+        ts: Date.now(),
+      };
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  throw new Error(`Binance ticker failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
 export async function binancePlaceOrder(
@@ -191,11 +236,11 @@ export async function bybitGetBalances(creds: ExchangeCredentials): Promise<Exch
 }
 
 export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
-  const res = await fetch(
-    `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${encodeURIComponent(symbol)}`,
-  );
-  if (!res.ok) throw new Error(`Bybit ticker ${res.status}`);
-  const data = (await res.json()) as { result: { list: Record<string, string>[] } };
+  const base = (process.env.BYBIT_PUBLIC_API_URL ?? "https://api.bybit.com").replace(/\/$/, "");
+  const data = (await fetchJson(
+    `${base}/v5/market/tickers?category=spot&symbol=${encodeURIComponent(symbol)}`,
+    { timeoutMs: 8000 },
+  )) as { result: { list: Record<string, string>[] } };
   const d = data.result.list[0];
   if (!d) throw new Error("Bybit ticker not found");
   return {
