@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const action = url.searchParams.get("action") ?? "latest";
   const symbol = url.searchParams.get("symbol") ?? undefined;
+  const debug = url.searchParams.get("debug") === "1";
 
   const sql = getSql();
 
@@ -30,9 +31,31 @@ export async function GET(req: NextRequest) {
       const snapshots = await captureArbSnapshots(sql);
       const opportunities = detectOpportunities(snapshots);
 
+      const minSpreadPctUsed = (() => {
+        const raw = process.env.ARB_MIN_SPREAD_PCT;
+        const v = raw ? Number(raw) : NaN;
+        return Number.isFinite(v) ? v : 0.001;
+      })();
+
+      // Group latest prices by symbol + exchange
+      const priceMap: Record<string, Record<string, { bid: string; ask: string; ts: string }>> = {};
+      for (const s of snapshots) {
+        if (!priceMap[s.symbol]) priceMap[s.symbol] = {};
+        if (!priceMap[s.symbol]![s.exchange]) {
+          priceMap[s.symbol]![s.exchange] = {
+            bid: s.bid,
+            ask: s.ask,
+            ts: s.ts.toISOString(),
+          };
+        }
+      }
+
       return NextResponse.json({
         scanned: snapshots.length,
         opportunities,
+        minSpreadPctUsed,
+        prices: priceMap,
+        snapshots: debug ? snapshots : undefined,
         ts: new Date().toISOString(),
       });
     }
