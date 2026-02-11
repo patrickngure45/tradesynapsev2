@@ -178,8 +178,9 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
   for (const exchange of EXCHANGES) {
     const symbols = TRACKED_SYMBOLS.filter((s) => s !== "TSTUSDT");
 
-    // Bybit can be sensitive to bursty parallel requests on some hosts.
-    const limit = exchange === "bybit" ? 2 : 4;
+    const defaultConcurrency = Math.max(1, Math.floor(numEnv("ARB_CONCURRENCY", 4)));
+    const bybitConcurrency = Math.max(1, Math.floor(numEnv("ARB_BYBIT_CONCURRENCY", 6)));
+    const limit = exchange === "bybit" ? Math.min(bybitConcurrency, symbols.length) : Math.min(defaultConcurrency, symbols.length);
 
     promises.push(
       (async () => {

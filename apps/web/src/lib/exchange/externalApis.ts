@@ -443,7 +443,7 @@ export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
     const raw = process.env.BYBIT_TICKER_TIMEOUT_MS;
     const v = raw ? Number(raw) : NaN;
     // Default to a more forgiving timeout if unset, but allow envs to reduce it.
-    if (!Number.isFinite(v) || v <= 0) return 15_000;
+    if (!Number.isFinite(v) || v <= 0) return 8_000;
     return Math.max(2_000, v);
   })();
 
