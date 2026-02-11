@@ -442,7 +442,9 @@ export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
   const timeoutMs = (() => {
     const raw = process.env.BYBIT_TICKER_TIMEOUT_MS;
     const v = raw ? Number(raw) : NaN;
-    return Number.isFinite(v) && v > 0 ? v : 15_000;
+    if (!Number.isFinite(v) || v <= 0) return 15_000;
+    // Prevent accidental too-low timeouts in hosting envs.
+    return Math.max(15_000, v);
   })();
 
   const headers = {

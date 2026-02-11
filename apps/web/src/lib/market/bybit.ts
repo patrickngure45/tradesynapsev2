@@ -23,55 +23,76 @@ const bybitTickersSchema = z.object({
 });
 
 export async function fetchBybitSpotTicker(symbol: string): Promise<MarketSnapshot> {
-  const url = new URL("https://api.bybit.com/v5/market/tickers");
-  url.searchParams.set("category", "spot");
-  url.searchParams.set("symbol", symbol.toUpperCase());
+  const symbolUpper = symbol.toUpperCase();
+  const baseCandidates = [
+    process.env.BYBIT_PUBLIC_API_URL,
+    process.env.BYBIT_API_URL,
+    "https://api.bybit.com",
+    // Alternate domain used in some regions
+    "https://api.bytick.com",
+    "https://api2.bybit.com",
+  ].filter(Boolean) as string[];
 
-  const controller = new AbortController();
   const timeoutMs = (() => {
     const raw = process.env.BYBIT_TICKER_TIMEOUT_MS;
     const v = raw ? Number(raw) : NaN;
-    return Number.isFinite(v) && v > 0 ? v : 15_000;
+    if (!Number.isFinite(v) || v <= 0) return 15_000;
+    // Prevent accidental too-low timeouts in hosting envs.
+    return Math.max(15_000, v);
   })();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "accept": "application/json",
-        "user-agent": "TradeSynapse/1.0 (+https://tradesynapse.app)",
-      },
-      cache: "no-store",
-    });
+  let lastErr: unknown;
+  for (const base of baseCandidates) {
+    const url = new URL(`${base.replace(/\/$/, "")}/v5/market/tickers`);
+    url.searchParams.set("category", "spot");
+    url.searchParams.set("symbol", symbolUpper);
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`bybit_http_${response.status}: ${text.slice(0, 300)}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          accept: "application/json",
+          "user-agent": "TradeSynapse/1.0 (+https://tradesynapse.app)",
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(`bybit_http_${response.status}: ${text.slice(0, 300)}`);
+      }
+
+      const json = await response.json();
+      const parsed = bybitTickersSchema.parse(json);
+
+      if (parsed.retCode !== 0) {
+        throw new Error(`bybit_retCode_${parsed.retCode}: ${parsed.retMsg ?? ""}`);
+      }
+
+      const entry = parsed.result?.list?.[0];
+      if (!entry) {
+        throw new Error("bybit_no_ticker");
+      }
+
+      return {
+        exchange: "bybit",
+        symbol: entry.symbol,
+        ts: new Date(),
+        last: entry.lastPrice ?? null,
+        bid: entry.bid1Price ?? null,
+        ask: entry.ask1Price ?? null,
+        raw: json,
+      };
+    } catch (e) {
+      lastErr = e;
+      continue;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const json = await response.json();
-    const parsed = bybitTickersSchema.parse(json);
-
-    if (parsed.retCode !== 0) {
-      throw new Error(`bybit_retCode_${parsed.retCode}: ${parsed.retMsg ?? ""}`);
-    }
-
-    const entry = parsed.result?.list?.[0];
-    if (!entry) {
-      throw new Error("bybit_no_ticker");
-    }
-
-    return {
-      exchange: "bybit",
-      symbol: entry.symbol,
-      ts: new Date(),
-      last: entry.lastPrice ?? null,
-      bid: entry.bid1Price ?? null,
-      ask: entry.ask1Price ?? null,
-      raw: json,
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error(`bybit_ticker_failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }

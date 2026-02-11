@@ -14,6 +14,10 @@ const querySchema = z.object({
     .enum(["0", "1", "false", "true"])
     .optional()
     .default("0"),
+  debug: z
+    .enum(["0", "1", "false", "true"])
+    .optional()
+    .default("0"),
 });
 
 export async function GET(request: Request) {
@@ -25,14 +29,16 @@ export async function GET(request: Request) {
       exchange: url.searchParams.get("exchange"),
       symbol: url.searchParams.get("symbol"),
       persist: url.searchParams.get("persist") ?? "0",
+      debug: url.searchParams.get("debug") ?? "0",
     });
   } catch (e) {
     return apiZodError(e) ?? apiError("invalid_input");
   }
 
   const exchange = parsed.exchange as ExchangeId;
+  const debug = parsed.debug === "1" || parsed.debug === "true";
   const snapshot = await fetchMarketSnapshot(exchange, parsed.symbol).catch((err) => {
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production" && !debug) {
       return null;
     }
     return syntheticMarketSnapshot(exchange, parsed.symbol, { err });
