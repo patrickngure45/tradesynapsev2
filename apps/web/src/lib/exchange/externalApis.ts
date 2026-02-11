@@ -129,6 +129,10 @@ function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): CcxtE
   return ex;
 }
 
+export function getAuthenticatedExchangeClient(exchangeId: string, creds: ExchangeCredentials): CcxtExchange {
+  return createCcxtAuthed(exchangeId, creds);
+}
+
 async function ccxtGetTicker(exchangeId: string, symbol: string): Promise<ExchangeTicker> {
   const ex = createCcxtPublic(exchangeId);
   const s = toCcxtSymbol(symbol);

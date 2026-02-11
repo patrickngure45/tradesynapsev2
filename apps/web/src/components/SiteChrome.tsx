@@ -19,8 +19,9 @@ const products = [
 const tools = [
   { href: "/portfolio", label: "Portfolio" },
   { href: "/wallet", label: "Wallet" },
+  { href: "/connections", label: "Connections" },
   { href: "/order-history", label: "Orders" },
-  { href: "/ai", label: "Security" },
+  { href: "/ai", label: "AI Advisor" },
 ] as const;
 
 export function SiteChrome({ children }: { children: ReactNode }) {

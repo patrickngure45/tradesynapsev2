@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 type FundingSignal = {
@@ -53,6 +54,9 @@ export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
            <h2 className="text-lg font-bold">Yield Scanner</h2>
+           <Link href="/connections" className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white">
+              Connect APIs
+           </Link>
            <button 
              onClick={() => setShowGuide(!showGuide)}
              className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] text-xs text-[var(--muted)] hover:bg-[var(--accent)] hover:text-white"
