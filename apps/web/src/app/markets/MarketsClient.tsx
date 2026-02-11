@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 import { ApiErrorBanner, type ClientApiError } from "@/components/ApiErrorBanner";
 import { fromBigInt3818, toBigInt3818 } from "@/lib/exchange/fixed3818";
+import { MarketRegimeWidget } from "../arbitrage/MarketRegimeWidget";
 
 type Market = {
   id: string;
@@ -332,7 +333,63 @@ export function MarketsClient() {
     return "Symbol";
   })();
 
+  const topMovers = useMemo(() => {
+     const all = markets.map(m => {
+        const stats = statsByMarketId[m.id];
+        const chg = changePpm(stats);
+        return { m, stats, chg: Number(chg || 0n) };
+     });
+     // Sort by change (filtering out inactive markets if possible, or just strict sort)
+     const sorted = [...all].sort((a,b) => b.chg - a.chg);
+     // Filter out things with zero volume to avoid noise?
+     const active = sorted.filter(x => x.stats && toBigInt3818(x.stats?.volume || "0") > 0n);
+     
+     return {
+        gainers: active.slice(0, 3),
+        losers: active.slice(-3).reverse()
+     };
+   }, [markets, statsByMarketId]);
+
   return (
+    <div className="flex flex-col gap-6">
+      {/* 1. Intelligence Dashboard */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+         <MarketRegimeWidget symbol="BTC/USDT" />
+         <MarketRegimeWidget symbol="ETH/USDT" />
+         
+         {/* Top Gainers */}
+         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
+             <h3 className="text-xs font-bold uppercase text-[var(--muted)] mb-3 tracking-wider">Top Gainers (24h)</h3>
+             <div className="space-y-3">
+                {topMovers.gainers.map((item) => (
+                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group">
+                      <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition">{item.m.symbol}</div>
+                      <div className="font-mono text-xs font-bold text-[var(--up)] bg-[var(--up-bg)] px-1.5 py-0.5 rounded">
+                         +{(item.chg / 10000).toFixed(2)}%
+                      </div>
+                   </Link>
+                ))}
+                {topMovers.gainers.length === 0 && <div className="text-xs text-[var(--muted)] italic">No active gainers</div>}
+             </div>
+         </div>
+
+         {/* Top Losers */}
+         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
+             <h3 className="text-xs font-bold uppercase text-[var(--muted)] mb-3 tracking-wider">Top Losers (24h)</h3>
+             <div className="space-y-3">
+                {topMovers.losers.map((item) => (
+                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group">
+                      <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition">{item.m.symbol}</div>
+                      <div className="font-mono text-xs font-bold text-[var(--down)] bg-[var(--down-bg)] px-1.5 py-0.5 rounded">
+                         {(item.chg / 10000).toFixed(2)}%
+                      </div>
+                   </Link>
+                ))}
+                {topMovers.losers.length === 0 && <div className="text-xs text-[var(--muted)] italic">No active losers</div>}
+             </div>
+         </div>
+      </div>
+
     <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -560,5 +617,6 @@ export function MarketsClient() {
         </table>
       </div>
     </section>
+    </div>
   );
 }
