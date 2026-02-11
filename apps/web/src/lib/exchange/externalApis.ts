@@ -152,18 +152,18 @@ async function fetchJson(url: string, opts?: RequestInit & { timeoutMs?: number 
       const text = await doFetch(url);
       return text ? JSON.parse(text) : null;
     } catch (e) {
-      // If we already hit our timeout, don't retry via the relay; it would
-      // effectively double the worst-case latency and can push API routes
-      // past platform request limits.
-      if (isAbortError(e)) throw e;
-
       // Optional relay fallback for geo-blocked environments.
       const relayUrl = process.env.EXCHANGE_RELAY_URL;
       const relayKey = process.env.EXCHANGE_RELAY_KEY;
       if (!relayUrl) throw e;
 
+      // If the direct request already timed out, the relay retry must be
+      // strictly bounded or we can exceed platform request limits.
+      const relayBudgetMs = isAbortError(e) ? Math.min(1500, timeoutMs) : timeoutMs;
+      if (relayBudgetMs < 250) throw e;
+
       const relayEndpoint = `${relayUrl.replace(/\/$/, "")}/fetch`;
-      const relayTimeout = withTimeout(timeoutMs);
+      const relayTimeout = withTimeout(relayBudgetMs);
       try {
         const relayForwardHeaders = headersToRecord(rest.headers);
         const res = await fetch(relayEndpoint, {
