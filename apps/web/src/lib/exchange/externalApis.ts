@@ -43,6 +43,14 @@ function withTimeout(ms: number) {
   };
 }
 
+function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as any;
+  const name = typeof anyErr.name === "string" ? anyErr.name : "";
+  const message = typeof anyErr.message === "string" ? anyErr.message : "";
+  return name === "AbortError" || message.toLowerCase().includes("aborted");
+}
+
 function headersToRecord(headers?: HeadersInit): Record<string, string> {
   if (!headers) return {};
   if (headers instanceof Headers) return Object.fromEntries(headers.entries());
@@ -144,6 +152,11 @@ async function fetchJson(url: string, opts?: RequestInit & { timeoutMs?: number 
       const text = await doFetch(url);
       return text ? JSON.parse(text) : null;
     } catch (e) {
+      // If we already hit our timeout, don't retry via the relay; it would
+      // effectively double the worst-case latency and can push API routes
+      // past platform request limits.
+      if (isAbortError(e)) throw e;
+
       // Optional relay fallback for geo-blocked environments.
       const relayUrl = process.env.EXCHANGE_RELAY_URL;
       const relayKey = process.env.EXCHANGE_RELAY_KEY;
