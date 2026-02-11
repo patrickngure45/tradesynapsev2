@@ -40,7 +40,7 @@ function calcStdDev(values: number[]): number {
 
 import ccxt from "ccxt";
 
-async function fetchOHLCV(exchangeId: string, symbol: string, timeframe = '1h', limit = 24) {
+async function fetchOHLCV(exchangeId: string, symbol: string, timeframe = '1h', limit = 24): Promise<number[][]> {
   const ex = new (ccxt as any)[exchangeId]();
   // Ensure unified symbol format
   // CCXT expects "BTC/USDT" usually
@@ -50,7 +50,7 @@ async function fetchOHLCV(exchangeId: string, symbol: string, timeframe = '1h', 
   
   // OHLCV structure: [ timestamp, open, high, low, close, volume ]
   try {
-      const candles = await ex.fetchOHLCV(ccxtSymbol, timeframe, undefined, limit);
+      const candles: number[][] = await ex.fetchOHLCV(ccxtSymbol, timeframe, undefined, limit);
       return candles;
   } catch (e) {
       console.warn(`Failed to fetch candles for ${symbol}:`, e);
@@ -73,7 +73,7 @@ export async function analyzeMarketRegime(exchange: string, symbol: string): Pro
   let trendScore = 0; // +100 (Strong Up) to -100 (Strong Down)
   
   if (candles.length > 20) {
-      const closes = candles.map(c => c[4]);
+      const closes = candles.map((c: number[]) => c[4]);
       
       // ATR-like volatility (just close-to-close stddev for simplicity here, real ATR is better but this works for MVP)
       const returns = closes.map((c, i) => i === 0 ? 0 : (c - closes[i-1]) / closes[i-1]);
