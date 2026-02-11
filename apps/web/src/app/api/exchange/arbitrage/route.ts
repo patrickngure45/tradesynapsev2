@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import {
+  type ArbSnapshot,
   captureArbSnapshots,
   detectOpportunities,
   getRecentSnapshots,
@@ -8,6 +9,16 @@ import {
 } from "@/lib/exchange/arbitrage";
 
 export const runtime = "nodejs";
+
+function latestPerSymbolExchange(snapshots: ArbSnapshot[]): ArbSnapshot[] {
+  const byKey = new Map<string, ArbSnapshot>();
+  for (const s of snapshots) {
+    const key = `${s.symbol}::${s.exchange}`;
+    const prev = byKey.get(key);
+    if (!prev || s.ts > prev.ts) byKey.set(key, s);
+  }
+  return Array.from(byKey.values());
+}
 
 /**
  * GET /api/exchange/arbitrage
@@ -75,7 +86,8 @@ export async function GET(req: NextRequest) {
 
     // Get all recent snapshots and compute opportunities
     const recent = await getRecentSnapshots(sql, undefined, 0.1); // last 6 min
-    const opportunities = detectOpportunities(recent);
+    const latest = latestPerSymbolExchange(recent);
+    const opportunities = detectOpportunities(latest);
 
     // Group latest prices by symbol + exchange
     const priceMap: Record<string, Record<string, { bid: string; ask: string; ts: string }>> = {};
