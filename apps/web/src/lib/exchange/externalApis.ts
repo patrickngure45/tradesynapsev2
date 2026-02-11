@@ -442,9 +442,9 @@ export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
   const timeoutMs = (() => {
     const raw = process.env.BYBIT_TICKER_TIMEOUT_MS;
     const v = raw ? Number(raw) : NaN;
+    // Default to a more forgiving timeout if unset, but allow envs to reduce it.
     if (!Number.isFinite(v) || v <= 0) return 15_000;
-    // Prevent accidental too-low timeouts in hosting envs.
-    return Math.max(15_000, v);
+    return Math.max(2_000, v);
   })();
 
   const headers = {
@@ -452,12 +452,17 @@ export async function bybitGetTicker(symbol: string): Promise<ExchangeTicker> {
     "user-agent": "TradeSynapse/1.0 (+https://tradesynapse.app)",
   };
 
+  const startedAt = Date.now();
   let lastErr: unknown;
   for (const base of baseCandidates) {
+    const elapsed = Date.now() - startedAt;
+    const remaining = timeoutMs - elapsed;
+    if (remaining <= 0) break;
+    const attemptTimeoutMs = Math.min(5_000, remaining);
     try {
       const data = (await fetchJson(
         `${base.replace(/\/$/, "")}/v5/market/tickers?category=spot&symbol=${encodeURIComponent(symbol)}`,
-        { timeoutMs, headers },
+        { timeoutMs: attemptTimeoutMs, headers },
       )) as { result: { list: Record<string, string>[] } };
       const d = data.result.list[0];
       if (!d) throw new Error("Bybit ticker not found");
