@@ -8,7 +8,7 @@
 import { createHmac } from "node:crypto";
 import ccxt from "ccxt";
 
-type CcxtExchange = {
+export type CcxtExchange = {
   fetchTicker: (symbol: string) => Promise<any>;
   fetchBalance: () => Promise<any>;
   fetchFundingRates?: () => Promise<any>;
