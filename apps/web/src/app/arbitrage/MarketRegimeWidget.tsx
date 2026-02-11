@@ -41,38 +41,39 @@ export function MarketRegimeWidget({ symbol = "BTC/USDT" }: { symbol?: string })
   const meta = REC_META[report.recommendation] || REC_META["STAY_FLAT"];
 
   return (
-    <div className="h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 transition hover:border-[var(--accent)]/40 flex flex-col justify-between">
-       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div className="min-w-0 flex-1">
+    <div className="h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 transition hover:border-[var(--accent)]/40 flex flex-col gap-4">
+          <div className="min-w-0">
             <h3 className="text-xs font-bold uppercase text-[var(--muted)] truncate">Market Regime · {symbol}</h3>
-            <div className={`mt-1 flex items-center gap-2 text-lg sm:text-xl font-bold ${meta.color} whitespace-nowrap`}>
-                <span>{meta.icon}</span>
+            <div className={`mt-2 flex items-center gap-2 text-xl font-bold ${meta.color}`}>
+                <span className="text-2xl">{meta.icon}</span>
                 <span>{meta.label}</span>
             </div>
-            <p className="mt-2 text-xs leading-relaxed opacity-80 line-clamp-3 sm:line-clamp-none">
-               {report.reason}
-            </p>
           </div>
 
-          <div className="flex flex-row sm:flex-col justify-between sm:justify-start gap-4 sm:text-right shrink-0 border-t sm:border-t-0 border-[var(--border)] pt-3 sm:pt-0">
-             <div className="sm:mb-3">
-                 <div className="text-[10px] uppercase text-[var(--muted)]">Volatility</div>
-                 <div className="flex items-center sm:justify-end gap-2">
-                     <div className="h-1.5 w-12 sm:w-16 overflow-hidden rounded-full bg-[var(--bg)]">
+          <div className="grid grid-cols-2 gap-4 border-t border-[var(--border)] pt-3">
+             <div>
+                 <div className="text-[10px] uppercase text-[var(--muted)] mb-1">Volatility</div>
+                 <div className="flex items-center gap-2">
+                     <div className="h-1.5 w-full max-w-[80px] overflow-hidden rounded-full bg-[var(--bg)]">
                         <div className="h-full bg-orange-400" style={{width: `${report.metrics.volatilityScore}%`}} />
                      </div>
-                     <span className="text-xs font-mono">{report.metrics.volatilityScore.toFixed(0)}</span>
+                     <span className="text-xs font-mono opacity-80">{report.metrics.volatilityScore.toFixed(0)}</span>
                  </div>
              </div>
              
              <div>
-                 <div className="text-[10px] uppercase text-[var(--muted)]">Funding Cost</div>
-                 <div className={`text-sm font-mono ${report.metrics.fundingRate > 0.0002 ? "text-red-400" : "text-green-400"}`}>
+                 <div className="text-[10px] uppercase text-[var(--muted)] mb-1">Funding Cost</div>
+                 <div className={`text-sm font-mono font-medium ${report.metrics.fundingRate > 0.0002 ? "text-red-400" : "text-green-400"}`}>
                     {(report.metrics.fundingRate * 100).toFixed(4)}%
                  </div>
              </div>
           </div>
-       </div>
+
+          <p className="text-xs leading-relaxed opacity-70 line-clamp-2" title={report.reason}>
+             {report.reason}
+          </p>
     </div>
+  );
+}
   );
 }

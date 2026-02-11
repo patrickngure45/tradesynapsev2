@@ -358,13 +358,16 @@ export function MarketsClient() {
          <MarketRegimeWidget symbol="ETH/USDT" />
          
          {/* Top Gainers */}
-         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
+         <div className="flex flex-col h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
              <h3 className="text-xs font-bold uppercase text-[var(--muted)] mb-3 tracking-wider">Top Gainers (24h)</h3>
-             <div className="space-y-3">
-                {topMovers.gainers.map((item) => (
-                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group">
-                      <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition">{item.m.symbol}</div>
-                      <div className="font-mono text-xs font-bold text-[var(--up)] bg-[var(--up-bg)] px-1.5 py-0.5 rounded">
+             <div className="space-y-3 flex-1">
+                {topMovers.gainers.map((item, idx) => (
+                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[10px] font-mono text-[var(--muted)] w-4 opacity-50">#{idx + 1}</span>
+                          <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition truncate">{item.m.symbol}</div>
+                      </div>
+                      <div className="shrink-0 font-mono text-xs font-bold text-[var(--up)] bg-[var(--up-bg)] px-1.5 py-0.5 rounded">
                          +{(item.chg / 10000).toFixed(2)}%
                       </div>
                    </Link>
@@ -374,13 +377,16 @@ export function MarketsClient() {
          </div>
 
          {/* Top Losers */}
-         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
+         <div className="flex flex-col h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
              <h3 className="text-xs font-bold uppercase text-[var(--muted)] mb-3 tracking-wider">Top Losers (24h)</h3>
-             <div className="space-y-3">
-                {topMovers.losers.map((item) => (
-                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group">
-                      <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition">{item.m.symbol}</div>
-                      <div className="font-mono text-xs font-bold text-[var(--down)] bg-[var(--down-bg)] px-1.5 py-0.5 rounded">
+             <div className="space-y-3 flex-1">
+                {topMovers.losers.map((item, idx) => (
+                   <Link href={`/exchange?market_id=${encodeURIComponent(item.m.id)}`} key={item.m.id} className="flex items-center justify-between group py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[10px] font-mono text-[var(--muted)] w-4 opacity-50">#{idx + 1}</span>
+                          <div className="font-semibold text-sm group-hover:text-[var(--accent)] transition truncate">{item.m.symbol}</div>
+                      </div>
+                      <div className="shrink-0 font-mono text-xs font-bold text-[var(--down)] bg-[var(--down-bg)] px-1.5 py-0.5 rounded">
                          {(item.chg / 10000).toFixed(2)}%
                       </div>
                    </Link>
