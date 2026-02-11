@@ -80,7 +80,7 @@ function toCcxtSymbol(symbol: string): string {
   return symbol;
 }
 
-function createCcxtPublic(exchangeId: string): CcxtExchange {
+export function createCcxtPublic(exchangeId: string): CcxtExchange {
   const Ctor = (ccxt as any)[exchangeId];
   if (!Ctor) throw new Error(`Unsupported ccxt exchange: ${exchangeId}`);
   // Force swap/futures mode for funding rates if possible, though strict spot/swap separation depends on exchange
