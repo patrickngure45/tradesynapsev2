@@ -19,6 +19,10 @@ const EXCHANGE_META: Record<string, { label: string; color: string }> = {
   binance: { label: "Binance", color: "#f0b90b" },
   bybit: { label: "Bybit", color: "#f7a600" },
   okx: { label: "OKX", color: "#fff" },
+  kucoin: { label: "KuCoin", color: "var(--accent)" },
+  gateio: { label: "Gate.io", color: "var(--accent-2)" },
+  bitget: { label: "Bitget", color: "var(--warn)" },
+  mexc: { label: "MEXC", color: "var(--accent)" },
   tradesynapse: { label: "TradeSynapse", color: "var(--accent)" },
 };
 
@@ -36,7 +40,7 @@ function spreadTier(pct: number): { label: string; class: string } {
   return { label: "COOL", class: "bg-blue-500/20 text-blue-400" };
 }
 
-export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnect }: { opp: ArbOpp, connectedExchanges: string[], onConnect: () => void }) {
+export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectAction }: { opp: ArbOpp, connectedExchanges: string[], onConnectAction: () => void }) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -75,7 +79,7 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnect }: 
        
        const data = await res.json();
        
-       if (!res.ok) {
+         if (!res.ok) {
            throw new Error(data.error || data.message || "Execution failed");
        }
        
@@ -131,7 +135,7 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnect }: 
 
         if (res.ok) {
             setShowConnectModal(false);
-            onConnect(); // refresh parent
+          onConnectAction(); // refresh parent
             executeTradeLogic();
         } else {
             const data = await res.json().catch(() => ({}));

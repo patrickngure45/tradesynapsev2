@@ -18,12 +18,20 @@ const EXCHANGE_LABELS: Record<string, string> = {
   binance: "Binance",
   bybit: "Bybit",
   okx: "OKX",
+  kucoin: "KuCoin",
+  gateio: "Gate.io",
+  bitget: "Bitget",
+  mexc: "MEXC",
 };
 
 const EXCHANGE_COLORS: Record<string, string> = {
   binance: "var(--warn)",
   bybit: "var(--accent-2)",
   okx: "var(--accent)",
+  kucoin: "var(--accent)",
+  gateio: "var(--accent-2)",
+  bitget: "var(--warn)",
+  mexc: "var(--accent)",
 };
 
 export function ConnectionsClient({ userId }: { userId: string | null }) {
@@ -164,6 +172,10 @@ export function ConnectionsClient({ userId }: { userId: string | null }) {
                 <option value="binance">Binance</option>
                 <option value="bybit">Bybit</option>
                 <option value="okx">OKX</option>
+                <option value="kucoin">KuCoin</option>
+                <option value="gateio">Gate.io</option>
+                <option value="bitget">Bitget</option>
+                <option value="mexc">MEXC</option>
               </select>
             </div>
             <div>
@@ -197,9 +209,9 @@ export function ConnectionsClient({ userId }: { userId: string | null }) {
                 required
               />
             </div>
-            {exchange === "okx" && (
+            {(exchange === "okx" || exchange === "kucoin") && (
               <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Passphrase (OKX)</label>
+                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Passphrase ({exchange === "okx" ? "OKX" : "KuCoin"})</label>
                 <input
                   type="password"
                   value={passphrase}

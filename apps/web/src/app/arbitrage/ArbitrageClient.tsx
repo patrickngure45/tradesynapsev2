@@ -27,6 +27,10 @@ const EXCHANGE_META: Record<string, { label: string; color: string }> = {
   binance: { label: "Binance", color: "#f0b90b" },
   bybit: { label: "Bybit", color: "#f7a600" },
   okx: { label: "OKX", color: "#fff" },
+  kucoin: { label: "KuCoin", color: "var(--accent)" },
+  gateio: { label: "Gate.io", color: "var(--accent-2)" },
+  bitget: { label: "Bitget", color: "var(--warn)" },
+  mexc: { label: "MEXC", color: "var(--accent)" },
   tradesynapse: { label: "TradeSynapse", color: "var(--accent)" },
 };
 
@@ -363,7 +367,7 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
                 key={`${opp.symbol}-${opp.buyExchange}-${opp.sellExchange}-${i}`}
                 opp={opp}
                 connectedExchanges={connections}
-                onConnect={fetchConnections}
+                onConnectAction={fetchConnections}
               />
             ))}
             {filteredOpps.length > 50 && (

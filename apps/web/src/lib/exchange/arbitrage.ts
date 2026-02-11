@@ -38,9 +38,22 @@ export type ArbScanResult = {
   errors: ArbScanError[];
 };
 
-// ── Pairs to track ──────────────────────────────────────────────────
-const TRACKED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"];
-const EXCHANGES = ["binance", "bybit"] as const;
+// ── Pairs / exchanges to track ─────────────────────────────────────
+// Default to majors only (tight spreads, but most reliable liquidity).
+const TRACKED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"];
+
+function parseCsvEnv(name: string, fallback: string[]): string[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parts = raw
+    .split(/[\n,]/g)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return parts.length ? parts : fallback;
+}
+
+// Best coverage for Nigeria + East/Central Africa (practical picks)
+const EXCHANGES = parseCsvEnv("ARB_EXCHANGES", ["okx", "kucoin", "gateio", "bitget", "mexc", "binance", "bybit"]);
 
 // ── Snapshot writer ─────────────────────────────────────────────────
 export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {

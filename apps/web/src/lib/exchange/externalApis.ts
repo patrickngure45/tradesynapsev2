@@ -6,13 +6,14 @@
  * and real-time price feeds.
  */
 import { createHmac } from "node:crypto";
+import ccxt from "ccxt";
 
-export type SupportedExchange = "binance" | "bybit" | "okx";
+export type SupportedExchange = "binance" | "bybit" | "okx" | "kucoin" | "gateio" | "bitget" | "mexc";
 
 export type ExchangeCredentials = {
   apiKey: string;
   apiSecret: string;
-  passphrase?: string; // OKX only
+  passphrase?: string; // OKX + KuCoin
 };
 
 export type ExchangeTicker = {
@@ -34,21 +35,143 @@ function withTimeout(ms: number) {
   };
 }
 
+function headersToRecord(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+  if (Array.isArray(headers)) return Object.fromEntries(headers);
+  return Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, String(v)]));
+}
+
+function bodyToString(body: RequestInit["body"]): string | null {
+  if (!body) return null;
+  if (typeof body === "string") return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  return null;
+}
+
+function toCcxtSymbol(symbol: string): string {
+  // Our internal symbols tend to look like BTCUSDT. CCXT expects BTC/USDT.
+  if (symbol.includes("/")) return symbol;
+  const u = symbol.toUpperCase();
+  const knownQuotes = ["USDT", "USDC", "USD", "BTC", "ETH", "BNB"];
+  for (const q of knownQuotes) {
+    if (u.endsWith(q) && u.length > q.length) {
+      return `${u.slice(0, -q.length)}/${q}`;
+    }
+  }
+  return symbol;
+}
+
+function createCcxtPublic(exchangeId: string): ccxt.Exchange {
+  const Ctor = (ccxt as any)[exchangeId];
+  if (!Ctor) throw new Error(`Unsupported ccxt exchange: ${exchangeId}`);
+  return new Ctor({ enableRateLimit: true });
+}
+
+function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): ccxt.Exchange {
+  const ex = createCcxtPublic(exchangeId);
+  (ex as any).apiKey = creds.apiKey;
+  (ex as any).secret = creds.apiSecret;
+  // OKX + KuCoin use 'password' in CCXT
+  if (creds.passphrase) (ex as any).password = creds.passphrase;
+  return ex;
+}
+
+async function ccxtGetTicker(exchangeId: string, symbol: string): Promise<ExchangeTicker> {
+  const ex = createCcxtPublic(exchangeId);
+  const s = toCcxtSymbol(symbol);
+  const t = await ex.fetchTicker(s);
+  const bid = t.bid ?? 0;
+  const ask = t.ask ?? 0;
+  const last = t.last ?? 0;
+  const volume = (t.quoteVolume ?? t.baseVolume ?? 0) as number;
+  const pct = (t.percentage ?? 0) as number;
+
+  return {
+    symbol: symbol.toUpperCase(),
+    bid: String(bid || 0),
+    ask: String(ask || 0),
+    last: String(last || 0),
+    volume24h: String(volume || 0),
+    change24hPct: String(pct || 0),
+    ts: Date.now(),
+  };
+}
+
+async function ccxtGetBalances(exchangeId: string, creds: ExchangeCredentials): Promise<ExchangeBalance[]> {
+  const ex = createCcxtAuthed(exchangeId, creds);
+  const b = await ex.fetchBalance();
+  const out: ExchangeBalance[] = [];
+  for (const [asset, total] of Object.entries(b.total ?? {})) {
+    const t = typeof total === "number" ? total : Number(total);
+    if (!Number.isFinite(t) || t <= 0) continue;
+    const free = Number((b.free as any)?.[asset] ?? 0);
+    const used = Number((b.used as any)?.[asset] ?? Math.max(0, t - free));
+    out.push({ asset, free: String(free), locked: String(used) });
+  }
+  return out;
+}
+
 async function fetchJson(url: string, opts?: RequestInit & { timeoutMs?: number }): Promise<unknown> {
   const timeoutMs = opts?.timeoutMs ?? 8000;
   const { timeoutMs: _t, ...rest } = opts ?? {};
   const t = withTimeout(timeoutMs);
   try {
-    const res = await fetch(url, {
-      ...rest,
-      signal: t.signal,
-      headers: {
-        "User-Agent": "TradeSynapse/1.0 (+https://tradesynapsev2-production.up.railway.app)",
-        ...(rest.headers ?? {}),
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    return res.json();
+    const doFetch = async (targetUrl: string) => {
+      const extraHeaders = headersToRecord(rest.headers);
+      const res = await fetch(targetUrl, {
+        ...rest,
+        signal: t.signal,
+        headers: {
+          "User-Agent": "TradeSynapse/1.0 (+https://tradesynapsev2-production.up.railway.app)",
+          ...extraHeaders,
+        },
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+      return text;
+    };
+
+    try {
+      const text = await doFetch(url);
+      return text ? JSON.parse(text) : null;
+    } catch (e) {
+      // Optional relay fallback for geo-blocked environments.
+      const relayUrl = process.env.EXCHANGE_RELAY_URL;
+      const relayKey = process.env.EXCHANGE_RELAY_KEY;
+      if (!relayUrl) throw e;
+
+      const relayEndpoint = `${relayUrl.replace(/\/$/, "")}/fetch`;
+      const relayTimeout = withTimeout(timeoutMs);
+      try {
+        const relayForwardHeaders = headersToRecord(rest.headers);
+        const res = await fetch(relayEndpoint, {
+          method: "POST",
+          signal: relayTimeout.signal,
+          headers: {
+            "content-type": "application/json",
+            ...(relayKey ? { "x-relay-key": relayKey } : {}),
+          },
+          body: JSON.stringify({
+            url,
+            method: rest.method ?? "GET",
+            headers: relayForwardHeaders,
+            body: bodyToString(rest.body),
+          }),
+        });
+
+        const payloadText = await res.text();
+        if (!res.ok) throw new Error(`Relay ${res.status}: ${payloadText}`);
+        const payload = payloadText ? (JSON.parse(payloadText) as { status: number; body: string }) : null;
+        if (!payload) return null;
+        if (payload.status < 200 || payload.status >= 300) {
+          throw new Error(`HTTP ${payload.status}: ${payload.body}`);
+        }
+        return payload.body ? JSON.parse(payload.body) : null;
+      } finally {
+        relayTimeout.clear();
+      }
+    }
   } finally {
     t.clear();
   }
@@ -403,7 +526,15 @@ export async function getExchangeBalances(
     case "bybit":
       return bybitGetBalances(creds);
     case "okx":
-      throw new Error("OKX support coming soon");
+      return ccxtGetBalances("okx", creds);
+    case "kucoin":
+      return ccxtGetBalances("kucoin", creds);
+    case "gateio":
+      return ccxtGetBalances("gateio", creds);
+    case "bitget":
+      return ccxtGetBalances("bitget", creds);
+    case "mexc":
+      return ccxtGetBalances("mexc", creds);
     default:
       throw new Error(`Unsupported exchange: ${exchange}`);
   }
@@ -418,6 +549,16 @@ export async function getExchangeTicker(
       return binanceGetTicker(symbol);
     case "bybit":
       return bybitGetTicker(symbol);
+    case "okx":
+      return ccxtGetTicker("okx", symbol);
+    case "kucoin":
+      return ccxtGetTicker("kucoin", symbol);
+    case "gateio":
+      return ccxtGetTicker("gateio", symbol);
+    case "bitget":
+      return ccxtGetTicker("bitget", symbol);
+    case "mexc":
+      return ccxtGetTicker("mexc", symbol);
     default:
       throw new Error(`Ticker not supported for: ${exchange}`);
   }

@@ -16,6 +16,7 @@
     "db:migrate": "tsx scripts/db-migrate.ts",
     "outbox:worker": "tsx scripts/outbox-worker.ts",
     "outbox:worker:once": "cross-env OUTBOX_ONCE=1 tsx scripts/outbox-worker.ts",
+    "deposit:scan": "tsx scripts/deposit-scan.ts",
     "smoke:proofpack": "tsx scripts/smoke-proofpack.ts",
     "smoke:proofpack:dev": "cross-env START_DEV_SERVER=1 tsx scripts/smoke-proofpack.ts",
     "smoke:marketdata-errors": "tsx scripts/smoke-marketdata-errors.ts",

@@ -39,6 +39,10 @@ Key variables:
 - `PROOFPACK_SESSION_SECRET` — 32+ char secret for session signing
 - `NEXT_PUBLIC_BASE_URL` — Public URL (default `http://localhost:3000`)
 
+Optional (production):
+- `EXCHANGE_RELAY_URL` — Base URL of the exchange relay service (e.g. `https://your-relay.up.railway.app`)
+- `EXCHANGE_RELAY_KEY` — Shared secret sent as `x-relay-key` to protect the relay
+
 3. Run migrations:
 
 ```bash

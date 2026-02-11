@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const createSchema = z.object({
-  exchange: z.enum(["binance", "bybit", "okx"]),
+  exchange: z.enum(["binance", "bybit", "okx", "kucoin", "gateio", "bitget", "mexc"]),
   label: z.string().trim().min(1).max(100),
   api_key: z.string().trim().min(10).max(200),
   api_secret: z.string().trim().min(10).max(200),
