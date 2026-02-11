@@ -148,6 +148,25 @@ function bpsToPct(bps: number): number {
   return bps / 100; // 100 bps = 1%
 }
 
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  const concurrency = Math.max(1, Math.floor(limit));
+  let i = 0;
+
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const idx = i++;
+      if (idx >= items.length) return;
+      await worker(items[idx]!);
+    }
+  });
+
+  await Promise.allSettled(runners);
+}
+
 // ── Snapshot writer ─────────────────────────────────────────────────
 export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
   const snapshots: ArbSnapshot[] = [];
@@ -157,36 +176,37 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
   const promises: Promise<void>[] = [];
 
   for (const exchange of EXCHANGES) {
-    for (const symbol of TRACKED_SYMBOLS) {
-      // TST is only on TradeSynapse (local orderbook), skip external exchanges.
-      if (symbol === "TSTUSDT") continue;
+    const symbols = TRACKED_SYMBOLS.filter((s) => s !== "TSTUSDT");
 
-      promises.push(
-        (async () => {
+    // Bybit can be sensitive to bursty parallel requests on some hosts.
+    const limit = exchange === "bybit" ? 2 : 4;
+
+    promises.push(
+      (async () => {
+        await runWithConcurrency(symbols, limit, async (symbol) => {
           try {
             const ticker = await getExchangeTicker(exchange, symbol);
             const bidN = Number.parseFloat(ticker.bid);
             const askN = Number.parseFloat(ticker.ask);
-            // Skip clearly invalid tickers (prevents 0/0 rows which create misleading UI).
             if (!Number.isFinite(bidN) || !Number.isFinite(askN) || bidN <= 0 || askN <= 0) return;
             snapshots.push({
               symbol,
               exchange,
               bid: ticker.bid,
               ask: ticker.ask,
-              ts: new Date(ticker.ts),
+              ts: new Date(),
             });
-          } catch (e) {
-            // Collect error (helps debug production egress)
+          } catch (err) {
             errors.push({
               exchange,
               symbol,
-              message: e instanceof Error ? e.message : String(e),
+              message: err instanceof Error ? err.message : String(err),
             });
           }
-        })(),
-      );
-    }
+        });
+      })(),
+    );
+
   }
 
   // Also fetch our own prices from the TradeSynapse orderbook

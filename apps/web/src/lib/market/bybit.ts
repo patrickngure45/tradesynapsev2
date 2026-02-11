@@ -28,13 +28,19 @@ export async function fetchBybitSpotTicker(symbol: string): Promise<MarketSnapsh
   url.searchParams.set("symbol", symbol.toUpperCase());
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeoutMs = (() => {
+    const raw = process.env.BYBIT_TICKER_TIMEOUT_MS;
+    const v = raw ? Number(raw) : NaN;
+    return Number.isFinite(v) && v > 0 ? v : 15_000;
+  })();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
         "accept": "application/json",
+        "user-agent": "TradeSynapse/1.0 (+https://tradesynapse.app)",
       },
       cache: "no-store",
     });
