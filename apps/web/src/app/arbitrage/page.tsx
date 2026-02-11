@@ -3,6 +3,8 @@ import { SiteChrome } from "@/components/SiteChrome";
 import { getSessionCookieName, verifySessionToken } from "@/lib/auth/session";
 import { ArbitrageClient } from "./ArbitrageClient";
 import { AIArbitrageAnalyst } from "./AIArbitrageAnalyst";
+import { FundingDashboard } from "./FundingDashboard";
+import { MarketRegimeWidget } from "./MarketRegimeWidget";
 
 export const metadata = { title: "Arbitrage Scanner — TradeSynapse" };
 
@@ -22,19 +24,36 @@ export default async function ArbitragePage() {
 
   return (
     <SiteChrome>
-      <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
+      <div className="mx-auto max-w-5xl space-y-12 px-4 py-8">
         <div>
-          <h1 className="text-2xl font-bold">Arbitrage Scanner</h1>
+          <h1 className="text-2xl font-bold">Arbitrage & Yield Scanner</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Cross-exchange price comparison · Spot spread opportunities
+            Cross-exchange price comparison · Cash & Carry opportunities
           </p>
         </div>
         
-        {/* AI Section */}
+        {/* Market Intelligence (Regime) */}
+        <div className="grid gap-4 md:grid-cols-2">
+           <MarketRegimeWidget symbol="BTC/USDT" />
+           <MarketRegimeWidget symbol="ETH/USDT" />
+        </div>
+
+        {/* AI Section (Conversational) */}
         <AIArbitrageAnalyst />
 
-        {/* Traditional Scanner */}
-        <ArbitrageClient userId={userId} />
+        {/* 1. Cash & Carry (Safe Yield) */}
+        <section>
+          <FundingDashboard />
+        </section>
+
+        {/* 2. Spot Arbitrage (Active) */}
+        <section>
+          <div className="mb-4">
+             <h2 className="text-lg font-bold">Spot Arbitrage</h2>
+             <p className="text-xs text-[var(--muted)]">Direct price differences between exchanges.</p>
+          </div>
+          <ArbitrageClient userId={userId} />
+        </section>
       </div>
     </SiteChrome>
   );

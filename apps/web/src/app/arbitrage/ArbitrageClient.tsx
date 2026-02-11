@@ -171,7 +171,8 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
     opps.length > 0
       ? opps.reduce((s, o) => s + (o.netSpreadPct ?? 0), 0) / opps.length
       : 0;
-  const totalProfit = opps.reduce((s, o) => s + (o.netProfit ?? 0), 0);
+  // Only sum up profitable opportunities for "Total Potential"
+  const totalProfit = opps.reduce((s, o) => s + Math.max(0, o.netProfit ?? 0), 0);
 
   const filteredOpps = [...opps]
     .filter((o) => o.spreadPct >= minSpread)

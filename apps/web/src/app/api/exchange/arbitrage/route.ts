@@ -41,7 +41,8 @@ export async function GET(req: NextRequest) {
       // Trigger fresh scan
       const scan = await captureArbSnapshots(sql);
       const snapshots = scan.snapshots;
-      const opportunities = detectOpportunities(snapshots);
+      // Allow slightly negative net spreads (-1%) to show "near misses" in the UI
+      const opportunities = detectOpportunities(snapshots, { minNetSpread: -1.0 });
 
       const minSpreadPctUsed = (() => {
         const raw = process.env.ARB_MIN_SPREAD_PCT;
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
     // Default: return latest from DB
     if (symbol) {
       const latest = await getLatestPricesBySymbol(sql, symbol);
-      const opportunities = detectOpportunities(latest);
+      const opportunities = detectOpportunities(latest, { minNetSpread: -1.0 });
       return NextResponse.json({
         prices: latest,
         opportunities,
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
     // Get all recent snapshots and compute opportunities
     const recent = await getRecentSnapshots(sql, undefined, 0.1); // last 6 min
     const latest = latestPerSymbolExchange(recent);
-    const opportunities = detectOpportunities(latest);
+    const opportunities = detectOpportunities(latest, { minNetSpread: -1.0 });
 
     // Group latest prices by symbol + exchange
     const priceMap: Record<string, Record<string, { bid: string; ask: string; ts: string }>> = {};

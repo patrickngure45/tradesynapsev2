@@ -81,7 +81,43 @@ function toCcxtSymbol(symbol: string): string {
 function createCcxtPublic(exchangeId: string): CcxtExchange {
   const Ctor = (ccxt as any)[exchangeId];
   if (!Ctor) throw new Error(`Unsupported ccxt exchange: ${exchangeId}`);
+  // Force swap/futures mode for funding rates if possible, though strict spot/swap separation depends on exchange
+  // For generic use, we stick to default and let the caller specify arguments or rely on unified behavior.
   return new Ctor({ enableRateLimit: true });
+}
+
+export type FundingRate = {
+  symbol: string;
+  exchange: string;
+  fundingRate: number;
+  fundingTimestamp: number;
+  nextFundingRate?: number;
+  nextFundingTimestamp?: number;
+};
+
+export async function getExchangeFundingRates(exchangeId: string): Promise<FundingRate[]> {
+  const ex = createCcxtPublic(exchangeId);
+  // Ensure we are looking at swap markets for funding
+  if (exchangeId === 'binance' || exchangeId === 'bybit') {
+     ex.options = { ...ex.options, defaultType: 'swap' }; 
+  }
+
+  // Some exchanges don't support fetchFundingRates for ALL symbols at once,
+  // but Binance/Bybit do.
+  if (typeof ex.fetchFundingRates !== 'function') {
+     throw new Error(`${exchangeId} does not support fetchFundingRates`);
+  }
+
+  const rates: Record<string, any> = await ex.fetchFundingRates();
+  
+  return Object.values(rates).map((r: any) => ({
+    symbol: r.symbol, // CCXT symbol (e.g. BTC/USDT:USDT)
+    exchange: exchangeId,
+    fundingRate: r.fundingRate,
+    fundingTimestamp: r.fundingTimestamp,
+    nextFundingRate: r.nextFundingRate,
+    nextFundingTimestamp: r.nextFundingTimestamp
+  }));
 }
 
 function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): CcxtExchange {

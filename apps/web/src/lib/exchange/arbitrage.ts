@@ -272,7 +272,10 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
 }
 
 // ── Opportunity detection ───────────────────────────────────────────
-export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] {
+export function detectOpportunities(
+  snapshots: ArbSnapshot[], 
+  options: { minNetSpread?: number } = {}
+): ArbOpportunity[] {
   const opportunities: ArbOpportunity[] = [];
 
   // Exchanges like Binance/Bybit are very efficient; spreads are often tiny.
@@ -290,7 +293,10 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
   const transferBps = Math.max(0, numEnv("ARB_TRANSFER_BPS", 0));
 
   const costPct = bpsToPct(takerFeeBpsPerLeg * 2 + slippageBpsPerLeg * 2 + transferBps);
-  const minNetSpreadPct = Math.max(0, numEnv("ARB_MIN_NET_SPREAD_PCT", 0));
+  
+  // Use provided option or env var (default to 0 for strict profitability)
+  // If user wants to see "near misses", we can pass a negative number.
+  const minNetSpreadPct = options.minNetSpread ?? Math.max(0, numEnv("ARB_MIN_NET_SPREAD_PCT", 0));
 
   // Group by symbol
   const bySymbol = new Map<string, ArbSnapshot[]>();

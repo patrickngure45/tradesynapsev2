@@ -39,7 +39,8 @@ function exchangeColor(ex: string) {
 function spreadTier(pct: number): { label: string; class: string } {
   if (pct >= 1.0) return { label: "HOT", class: "bg-[var(--up)]/20 text-[var(--up)]" };
   if (pct >= 0.5) return { label: "WARM", class: "bg-yellow-500/20 text-yellow-400" };
-  return { label: "COOL", class: "bg-blue-500/20 text-blue-400" };
+  if (pct > 0) return { label: "COOL", class: "bg-blue-500/20 text-blue-400" };
+  return { label: "WATCH", class: "bg-[var(--muted)]/20 text-[var(--muted)]" };
 }
 
 export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectAction }: { opp: ArbOpp, connectedExchanges: string[], onConnectAction: () => void }) {
@@ -201,8 +202,8 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
         <div className="flex items-center gap-6">
             <div className="text-right">
                 <div className="text-[9px] uppercase text-[var(--muted)]">Net Spread</div>
-                <div className="font-mono text-sm font-bold text-[var(--up)]">
-                +{(opp.netSpreadPct ?? 0).toFixed(3)}%
+                <div className={`font-mono text-sm font-bold ${(opp.netSpreadPct ?? 0) > 0 ? "text-[var(--up)]" : "text-red-500"}`}>
+                {(opp.netSpreadPct ?? 0) > 0 ? "+" : ""}{(opp.netSpreadPct ?? 0).toFixed(3)}%
                 </div>
                 <div className="font-mono text-[10px] text-[var(--muted)]">
                   gross {(opp.spreadPct ?? 0).toFixed(3)}%
@@ -211,7 +212,7 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
             
             <div className="text-right">
                 <div className="text-[9px] uppercase text-[var(--muted)]">Net/1k</div>
-                <div className="font-mono text-sm font-medium">
+                <div className={`font-mono text-sm font-medium ${(opp.netProfit ?? 0) > 0 ? "" : "text-[var(--muted)]"}`}>
                 ~${(opp.netProfit ?? 0).toFixed(2)}
                 </div>
                 <div className="font-mono text-[10px] text-[var(--muted)]">
@@ -237,9 +238,11 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
 
             <button
                 onClick={handleExecute}
-                className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                disabled={executing || (opp.netProfit ?? 0) <= 0}
+                className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50 disabled:grayscale"
+                title={(opp.netProfit ?? 0) <= 0 ? "Not profitable after fees" : "Execute trade"}
             >
-               {executing ? "..." : "Auto-Trade"}
+               {executing ? "..." : (opp.netProfit ?? 0) > 0 ? "Auto-Trade" : "Unprofitable"}
             </button>
         </div>
       </div>
