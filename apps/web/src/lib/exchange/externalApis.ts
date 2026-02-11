@@ -10,6 +10,7 @@ import ccxt from "ccxt";
 
 export type CcxtExchange = {
   fetchTicker: (symbol: string) => Promise<any>;
+  fetchTickers?: (symbols?: string[]) => Promise<any>;
   fetchBalance: () => Promise<any>;
   fetchFundingRates?: () => Promise<any>;
   apiKey?: string;
@@ -95,6 +96,7 @@ export type FundingRate = {
   fundingTimestamp: number;
   nextFundingRate?: number;
   nextFundingTimestamp?: number;
+  volume24h?: number; // New field for volume filtering
 };
 
 export async function getExchangeFundingRates(exchangeId: string): Promise<FundingRate[]> {
@@ -112,13 +114,27 @@ export async function getExchangeFundingRates(exchangeId: string): Promise<Fundi
 
   const rates: Record<string, any> = await ex.fetchFundingRates();
   
+  // Optionally enrich with volume data if fetchTickers is supported (efficiently)
+  let volumes: Record<string, number> = {};
+  if (typeof ex.fetchTickers === 'function') {
+      try {
+          const tickers = await ex.fetchTickers();
+          Object.values(tickers).forEach((t: any) => {
+              volumes[t.symbol] = t.quoteVolume || t.baseVolume || 0;
+          });
+      } catch (e) {
+          console.warn(`Failed to fetch tickers for volume data on ${exchangeId}`, e);
+      }
+  }
+
   return Object.values(rates).map((r: any) => ({
     symbol: r.symbol, // CCXT symbol (e.g. BTC/USDT:USDT)
     exchange: exchangeId,
     fundingRate: r.fundingRate,
     fundingTimestamp: r.fundingTimestamp,
     nextFundingRate: r.nextFundingRate,
-    nextFundingTimestamp: r.nextFundingTimestamp
+    nextFundingTimestamp: r.nextFundingTimestamp,
+    volume24h: volumes[r.symbol] || 0
   }));
 }
 

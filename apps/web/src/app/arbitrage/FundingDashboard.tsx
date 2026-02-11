@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { BotExecutionModal } from "./BotExecutionModal";
+
 type FundingSignal = {
   id: string;
   kind: string;
@@ -16,14 +18,16 @@ type FundingSignal = {
     dailyRatePct: number;
     aprPct: number;
     nextFundingTime: number;
+    volume24h?: number;
   };
   created_at: string;
 };
 
-export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal) => void }) {
+export function FundingDashboard() {
   const [signals, setSignals] = useState<FundingSignal[]>([]);
   const [scanning, setScanning] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [selectedSignal, setSelectedSignal] = useState<FundingSignal | null>(null);
 
   const fetchSignals = async (forceScan = false) => {
     if (forceScan) setScanning(true);
@@ -50,6 +54,14 @@ export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal
 
   return (
     <div className="space-y-4">
+      {/* Modal */}
+      {selectedSignal && (
+         <BotExecutionModal 
+            signal={selectedSignal} 
+            onClose={() => setSelectedSignal(null)} 
+         />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -95,7 +107,7 @@ export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal
         {signals.length === 0 && !scanning && (
           <div className="col-span-full rounded-xl border border-dashed border-[var(--border)] py-12 text-center">
              <div className="text-2xl opacity-20">💤</div>
-             <p className="mt-2 text-sm text-[var(--muted)]">No high-yield (&gt;10% APY) opportunities right now.</p>
+             <p className="mt-2 text-sm text-[var(--muted)]">No high-yield (&gt;5% APY) opportunities right now.</p>
           </div>
         )}
 
@@ -103,7 +115,14 @@ export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal
           <div key={sig.id} className="group relative overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 transition hover:border-[var(--accent)]/50">
             <div className="flex items-start justify-between">
                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">{sig.payload_json.exchange}</div>
+                  <div className="flex items-center gap-1.5">
+                     <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">{sig.payload_json.exchange}</div>
+                     {sig.payload_json.volume24h && (
+                        <div className="text-[9px] font-medium text-[var(--muted)] bg-[var(--bg)] px-1.5 py-0.5 rounded">
+                           Vol: ${(sig.payload_json.volume24h / 1_000_000).toFixed(1)}M
+                        </div>
+                     )}
+                  </div>
                   <div className="text-lg font-bold">{sig.payload_json.symbol}</div>
                </div>
                <div className="text-right">
@@ -128,7 +147,7 @@ export function FundingDashboard({ onExecute }: { onExecute?: (sh: FundingSignal
             </div>
             
             <button 
-                onClick={() => onExecute?.(sig)}
+                onClick={() => setSelectedSignal(sig)}
                 className="mt-3 w-full rounded-lg bg-[var(--accent)]/10 py-2 text-xs font-bold text-[var(--accent)] opacity-0 transition group-hover:bg-[var(--accent)] group-hover:text-white group-hover:opacity-100"
             >
                 Start Bot

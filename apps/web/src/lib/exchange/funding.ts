@@ -16,8 +16,11 @@ export type FundingOpportunity = {
 // Only scan these exchanges for funding rates (liquid perps)
 const FUNDING_EXCHANGES = ["binance", "bybit"];
 
-// Minimum annualized yield to consider "Worthwhile" (e.g. 10%)
-const MIN_YIELD_APR = 0.10;
+// Minimum annualized yield to consider "Worthwhile" (e.g. 5%)
+const MIN_YIELD_APR = 0.05;
+
+// Minimum 24h Volume in Quoted Currency (e.g. USDT) to ensure liquidity
+const MIN_VOLUME_24H = 5_000_000; // $5M daily volume
 
 export async function captureFundingSignals(sql: Sql) {
   const signals: any[] = [];
@@ -30,6 +33,9 @@ export async function captureFundingSignals(sql: Sql) {
       for (const r of rates) {
         // Filter for USDT perps only usually
         if (!r.symbol.includes("USDT")) continue;
+
+        // Skip illiquid markets
+        if (r.volume24h && r.volume24h < MIN_VOLUME_24H) continue;
 
         // Basic sanity check: Logic assumes 8h funding interval (3x daily)
         // Some coins are 4h or 1h, but 8h is standard for major CEXs.
@@ -51,7 +57,8 @@ export async function captureFundingSignals(sql: Sql) {
              fundingRate: r.fundingRate,
              dailyRatePct: dailyRate * 100,
              aprPct: apr * 100,
-             nextFundingTime: r.nextFundingTimestamp
+             nextFundingTime: r.nextFundingTimestamp,
+             volume24h: r.volume24h
            }
         };
         signals.push(signal);
