@@ -11,9 +11,11 @@ import ccxt from "ccxt";
 type CcxtExchange = {
   fetchTicker: (symbol: string) => Promise<any>;
   fetchBalance: () => Promise<any>;
+  fetchFundingRates?: () => Promise<any>;
   apiKey?: string;
   secret?: string;
   password?: string;
+  options?: any;
 };
 
 export type SupportedExchange = "binance" | "bybit" | "okx" | "kucoin" | "gateio" | "bitget" | "mexc";
