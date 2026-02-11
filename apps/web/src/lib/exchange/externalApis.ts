@@ -8,6 +8,14 @@
 import { createHmac } from "node:crypto";
 import ccxt from "ccxt";
 
+type CcxtExchange = {
+  fetchTicker: (symbol: string) => Promise<any>;
+  fetchBalance: () => Promise<any>;
+  apiKey?: string;
+  secret?: string;
+  password?: string;
+};
+
 export type SupportedExchange = "binance" | "bybit" | "okx" | "kucoin" | "gateio" | "bitget" | "mexc";
 
 export type ExchangeCredentials = {
@@ -62,13 +70,13 @@ function toCcxtSymbol(symbol: string): string {
   return symbol;
 }
 
-function createCcxtPublic(exchangeId: string): ccxt.Exchange {
+function createCcxtPublic(exchangeId: string): CcxtExchange {
   const Ctor = (ccxt as any)[exchangeId];
   if (!Ctor) throw new Error(`Unsupported ccxt exchange: ${exchangeId}`);
   return new Ctor({ enableRateLimit: true });
 }
 
-function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): ccxt.Exchange {
+function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): CcxtExchange {
   const ex = createCcxtPublic(exchangeId);
   (ex as any).apiKey = creds.apiKey;
   (ex as any).secret = creds.apiSecret;

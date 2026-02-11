@@ -57,6 +57,8 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Fetch Ads
+    const orderDir = targetSide === "SELL" ? sql`ASC` : sql`DESC`;
+
     const ads = await sql`
       SELECT 
         ad.id,
@@ -82,7 +84,7 @@ export async function GET(req: NextRequest) {
         ${amount ? sql`AND ad.min_limit <= ${amount} AND ad.max_limit >= ${amount}` : sql``}
         AND ad.remaining_amount > 0
       ORDER BY 
-        CASE WHEN ad.price_type = 'fixed' THEN ad.fixed_price ELSE 0 END ASC,
+        CASE WHEN ad.price_type = 'fixed' THEN ad.fixed_price ELSE NULL END ${orderDir} NULLS LAST,
         ad.created_at DESC
       LIMIT 50
     `;

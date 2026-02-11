@@ -12,6 +12,8 @@ type ArbOpp = {
   sellBid: number;
   spreadPct: number;
   potentialProfit: number;
+  netSpreadPct: number;
+  netProfit: number;
   ts: string;
 };
 
@@ -78,9 +80,9 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
        });
        
        const data = await res.json();
-       
-         if (!res.ok) {
-           throw new Error(data.error || data.message || "Execution failed");
+
+       if (!res.ok) {
+         throw new Error(data.message || data.error || "Execution failed");
        }
        
        // Success Message
@@ -198,16 +200,22 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
         {/* Stats */}
         <div className="flex items-center gap-6">
             <div className="text-right">
-                <div className="text-[9px] uppercase text-[var(--muted)]">Spread</div>
+                <div className="text-[9px] uppercase text-[var(--muted)]">Net Spread</div>
                 <div className="font-mono text-sm font-bold text-[var(--up)]">
-                +{opp.spreadPct.toFixed(2)}%
+                +{(opp.netSpreadPct ?? 0).toFixed(3)}%
+                </div>
+                <div className="font-mono text-[10px] text-[var(--muted)]">
+                  gross {(opp.spreadPct ?? 0).toFixed(3)}%
                 </div>
             </div>
             
             <div className="text-right">
-                <div className="text-[9px] uppercase text-[var(--muted)]">Profit/1k</div>
+                <div className="text-[9px] uppercase text-[var(--muted)]">Net/1k</div>
                 <div className="font-mono text-sm font-medium">
-                ~${opp.potentialProfit.toFixed(1)}
+                ~${(opp.netProfit ?? 0).toFixed(2)}
+                </div>
+                <div className="font-mono text-[10px] text-[var(--muted)]">
+                  gross ~${(opp.potentialProfit ?? 0).toFixed(2)}
                 </div>
             </div>
         </div>

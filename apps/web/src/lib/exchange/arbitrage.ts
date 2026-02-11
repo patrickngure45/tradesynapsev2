@@ -6,7 +6,7 @@
  * cross-exchange price discrepancies.
  */
 import type { Sql } from "postgres";
-import { getExchangeTicker, type ExchangeTicker } from "./externalApis";
+import { getExchangeTicker, type SupportedExchange } from "./externalApis";
 
 export type ArbSnapshot = {
   symbol: string;
@@ -22,8 +22,14 @@ export type ArbOpportunity = {
   sellExchange: string;
   buyAsk: number;
   sellBid: number;
+  // Gross spread (price-only). Does not include fees/slippage/transfer.
   spreadPct: number;
-  potentialProfit: number; // per $1000
+  // Gross profit per $1000 (price-only).
+  potentialProfit: number;
+
+  // Net metrics (estimated). These are what users should consider actionable.
+  netSpreadPct: number;
+  netProfit: number; // per $1000
   ts: Date;
 };
 
@@ -39,10 +45,57 @@ export type ArbScanResult = {
 };
 
 // ── Pairs / exchanges to track ─────────────────────────────────────
-// Default to majors only (tight spreads, but most reliable liquidity).
-const TRACKED_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"];
+// Default to liquid USDT pairs. Keep the list short to reduce API load and
+// to avoid surfacing spreads that cannot be executed due to thin books.
+const DEFAULT_TRACKED_SYMBOLS = [
+  "BTCUSDT",
+  "ETHUSDT",
+  "BNBUSDT",
+  "SOLUSDT",
+  "XRPUSDT",
+  "ADAUSDT",
+  "DOGEUSDT",
+  "TRXUSDT",
+  "LINKUSDT",
+  "AVAXUSDT",
+  "TONUSDT",
+  "MATICUSDT",
+];
 
-function parseCsvEnv(name: string, fallback: string[]): string[] {
+const SUPPORTED_EXCHANGES: SupportedExchange[] = [
+  "binance",
+  "bybit",
+  "okx",
+  "kucoin",
+  "gateio",
+  "bitget",
+  "mexc",
+];
+
+function parseSupportedExchanges(name: string, fallback: SupportedExchange[]): SupportedExchange[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+
+  const allow = new Set(SUPPORTED_EXCHANGES);
+  const parts = raw
+    .split(/[\n,]/g)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .filter((s) => allow.has(s as SupportedExchange)) as SupportedExchange[];
+
+  // de-dupe while preserving order
+  const out: SupportedExchange[] = [];
+  const seen = new Set<SupportedExchange>();
+  for (const p of parts) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+
+  return out.length ? out : fallback;
+}
+
+function parseCsvEnvLower(name: string, fallback: string[]): string[] {
   const raw = process.env[name];
   if (!raw) return fallback;
   const parts = raw
@@ -52,8 +105,48 @@ function parseCsvEnv(name: string, fallback: string[]): string[] {
   return parts.length ? parts : fallback;
 }
 
-// Best coverage for Nigeria + East/Central Africa (practical picks)
-const EXCHANGES = parseCsvEnv("ARB_EXCHANGES", ["okx", "kucoin", "gateio", "bitget", "mexc", "binance", "bybit"]);
+function parseSymbolsEnv(name: string, fallback: string[]): string[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(/[\n,]/g)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    // Accept "BTCUSDT" or "BTC/USDT" and normalize.
+    const normalized = trimmed.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    if (!/^[A-Z0-9]{6,30}$/.test(normalized)) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out.length ? out : fallback;
+}
+
+const TRACKED_SYMBOLS = parseSymbolsEnv("ARB_SYMBOLS", DEFAULT_TRACKED_SYMBOLS);
+
+// Default to the exchanges we can most reliably support end-to-end.
+// (You can add more for scanner-only comparison via ARB_EXCHANGES.)
+const EXCHANGES = parseSupportedExchanges("ARB_EXCHANGES", ["binance", "bybit"]);
+
+// Only generate "opportunities" between these exchanges.
+// This keeps the UI honest if ARB_EXCHANGES includes scanner-only venues.
+const OPP_EXCHANGES = new Set(parseCsvEnvLower("ARB_OPP_EXCHANGES", EXCHANGES));
+
+const INCLUDE_INTERNAL_OPPS = process.env.ARB_INCLUDE_INTERNAL === "1";
+
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const v = raw ? Number(raw) : NaN;
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function bpsToPct(bps: number): number {
+  return bps / 100; // 100 bps = 1%
+}
 
 // ── Snapshot writer ─────────────────────────────────────────────────
 export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
@@ -65,13 +158,17 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
 
   for (const exchange of EXCHANGES) {
     for (const symbol of TRACKED_SYMBOLS) {
-      // TST is only on TradeSynapse, skip external exchanges
-      if (symbol === "TSTUSDT" && exchange !== "binance") continue;
+      // TST is only on TradeSynapse (local orderbook), skip external exchanges.
+      if (symbol === "TSTUSDT") continue;
 
       promises.push(
         (async () => {
           try {
             const ticker = await getExchangeTicker(exchange, symbol);
+            const bidN = Number.parseFloat(ticker.bid);
+            const askN = Number.parseFloat(ticker.ask);
+            // Skip clearly invalid tickers (prevents 0/0 rows which create misleading UI).
+            if (!Number.isFinite(bidN) || !Number.isFinite(askN) || bidN <= 0 || askN <= 0) return;
             snapshots.push({
               symbol,
               exchange,
@@ -113,17 +210,19 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
          for (const p of localPrices) {
             // Only convert normalized symbols like BTC/USDT -> BTCUSDT
             const normalized = p.symbol.replace('/', '');
-            
-            // Only add if we have valid bid/ask (or at least one side)
-            if (parseFloat(p.bid) > 0 || (p.ask !== null && parseFloat(p.ask) > 0)) {
-                snapshots.push({
-                    symbol: normalized,
-                    exchange: 'tradesynapse',
-                    bid: p.bid || "0",
-                    ask: p.ask || "0", // 0 means no sellers
-                    ts: new Date()
-                });
-            }
+
+            const bid = Number.parseFloat(p.bid ?? "0");
+            const ask = Number.parseFloat((p.ask as unknown as string) ?? "0");
+            // Only add if we have a real two-sided book.
+            if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) continue;
+
+            snapshots.push({
+              symbol: normalized,
+              exchange: 'tradesynapse',
+              bid: String(bid),
+              ask: String(ask),
+              ts: new Date(),
+            });
          }
        } catch (err) {
          console.error("Failed to fetch local prices", err);
@@ -163,6 +262,15 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
     return Number.isFinite(v) ? v : 0.001; // 0.001% default
   })();
 
+  // Cost model (estimates): two taker fees + two legs of slippage, plus optional
+  // transfer/settlement overhead (set to 0 if you keep inventory on both venues).
+  const takerFeeBpsPerLeg = Math.max(0, numEnv("ARB_TAKER_FEE_BPS", 10));
+  const slippageBpsPerLeg = Math.max(0, numEnv("ARB_SLIPPAGE_BPS", 2));
+  const transferBps = Math.max(0, numEnv("ARB_TRANSFER_BPS", 0));
+
+  const costPct = bpsToPct(takerFeeBpsPerLeg * 2 + slippageBpsPerLeg * 2 + transferBps);
+  const minNetSpreadPct = Math.max(0, numEnv("ARB_MIN_NET_SPREAD_PCT", 0));
+
   // Group by symbol
   const bySymbol = new Map<string, ArbSnapshot[]>();
   for (const s of snapshots) {
@@ -174,12 +282,23 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
   for (const [symbol, snaps] of bySymbol) {
     if (snaps.length < 2) continue;
 
+    // Keep the arbitrage page focused on liquid USDT pairs.
+    if (!symbol.toUpperCase().endsWith("USDT")) continue;
+
+    // Restrict to "opportunity exchanges" by default.
+    const filtered = snaps.filter((s) => {
+      const ex = String(s.exchange).toLowerCase();
+      if (ex === "tradesynapse") return INCLUDE_INTERNAL_OPPS;
+      return OPP_EXCHANGES.has(ex);
+    });
+    if (filtered.length < 2) continue;
+
     // For each pair of exchanges, check if buying on one and selling on another is profitable
-    for (let i = 0; i < snaps.length; i++) {
-      for (let j = 0; j < snaps.length; j++) {
+    for (let i = 0; i < filtered.length; i++) {
+      for (let j = 0; j < filtered.length; j++) {
         if (i === j) continue;
-        const buyer = snaps[i]!;
-        const seller = snaps[j]!;
+        const buyer = filtered[i]!;
+        const seller = filtered[j]!;
 
         // Filter out same-exchange opportunities (usually data artifacts or unreachable)
         if (buyer.exchange === seller.exchange) continue;
@@ -191,10 +310,16 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
 
         const spreadPct = ((sellBid - buyAsk) / buyAsk) * 100;
 
-        // Surface opportunities above a configurable floor
+        const netSpreadPct = spreadPct - costPct;
+
+        // Basic noise filter
         if (spreadPct < minSpreadPct) continue;
 
-        const potentialProfit = (spreadPct / 100) * 1000; // profit per $1000
+        // Only surface opportunities that are net-profitable under our cost model.
+        if (!Number.isFinite(netSpreadPct) || netSpreadPct < minNetSpreadPct) continue;
+
+        const potentialProfit = (spreadPct / 100) * 1000; // gross profit per $1000
+        const netProfit = (netSpreadPct / 100) * 1000; // net profit per $1000
 
         opportunities.push({
           symbol,
@@ -204,6 +329,8 @@ export function detectOpportunities(snapshots: ArbSnapshot[]): ArbOpportunity[] 
           sellBid,
           spreadPct: Math.round(spreadPct * 10000) / 10000,
           potentialProfit: Math.round(potentialProfit * 100) / 100,
+          netSpreadPct: Math.round(netSpreadPct * 10000) / 10000,
+          netProfit: Math.round(netProfit * 100) / 100,
           ts: new Date(),
         });
       }

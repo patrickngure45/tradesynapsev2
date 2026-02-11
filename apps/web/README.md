@@ -8,7 +8,8 @@ Next.js (App Router) UI + API for the TradeSynapse spot exchange on BNB Smart Ch
 - **Exchange wallet** — Deposits, withdrawals, and ledger with hold management
 - **Portfolio dashboard** — Balances, PnL tracking, fill history
 - **Copy trading** — Follow top traders, subscribe/pause/stop copying
-- **Arbitrage scanner** — Cross-exchange price comparison with auto-scan
+- **Express router** — Net-first quote for fiat↔USDT (P2P) and fiat↔asset via USDT + best external spot estimate
+- **Arbitrage scanner** — Cross-exchange price comparison with net-cost filtering
 - **Admin dashboard** — Withdrawal review, KYC management, reconciliation, audit log
 - **Session auth** — HMAC-SHA256 signed session cookie, TOTP 2FA, email verification
 - **Notifications** — In-app alerts for orders, withdrawals, KYC, and system events

@@ -15,7 +15,7 @@ export default function LoginPage() {
         <header className="mb-8 flex flex-col items-center gap-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Welcome to TradeSynapse</h1>
           <p className="text-sm text-[var(--muted)]">
-            Sign in to start trading on BSC
+            Create an account to start trading and using P2P.
           </p>
         </header>
 

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
 
 import { getSql } from "@/lib/db";
 import {
@@ -10,7 +12,38 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPECTED_MIGRATIONS = ["001_init.sql", "002_trade_fair_price.sql"] as const;
+const FALLBACK_EXPECTED_MIGRATIONS = ["001_init.sql", "002_trade_fair_price.sql"] as const;
+
+function findMigrationsDir(): string | null {
+  const cwd = process.cwd();
+  const candidates = [
+    path.resolve(cwd, "db/migrations"),
+    path.resolve(cwd, "../db/migrations"),
+    path.resolve(cwd, "../../db/migrations"),
+    path.resolve(cwd, "../../../db/migrations"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function loadExpectedMigrations(): string[] {
+  const dir = findMigrationsDir();
+  if (!dir) return [...FALLBACK_EXPECTED_MIGRATIONS];
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+  } catch {
+    return [...FALLBACK_EXPECTED_MIGRATIONS];
+  }
+}
 
 async function inferAppliedMigrations(sql: ReturnType<typeof getSql>): Promise<string[]> {
   const inferred: string[] = [];
@@ -41,6 +74,17 @@ async function inferAppliedMigrations(sql: ReturnType<typeof getSql>): Promise<s
   }
 
   return inferred;
+}
+
+async function readAppliedFromMigrationsTable(sql: ReturnType<typeof getSql>): Promise<string[]> {
+  const rows = await retryOnceOnTransientDbError(async () => {
+    return await sql<{ name: string }[]>`
+      select name
+      from _migrations
+      order by name asc
+    `;
+  });
+  return rows.map((r) => r.name);
 }
 
 export async function GET(req: Request) {
@@ -76,9 +120,10 @@ export async function GET(req: Request) {
       await sql`select 1 as ok`;
     });
 
-    // Migration status (best-effort; table may not exist yet).
+    // Migration status (best-effort; tables may not exist yet).
     let applied: string[] = [];
     let schemaMigrationsTablePresent = true;
+    let underscoreMigrationsTablePresent = true;
     try {
       const rows = await retryOnceOnTransientDbError(async () => {
         return await sql<{ filename: string }[]>`
@@ -92,10 +137,19 @@ export async function GET(req: Request) {
       if (isTransientDbError(e)) throw e;
       if (!isUndefinedTableError(e, "schema_migrations")) throw e;
       schemaMigrationsTablePresent = false;
-      applied = await inferAppliedMigrations(sql);
+
+      // Prefer our app's migration table if present.
+      try {
+        applied = await readAppliedFromMigrationsTable(sql);
+      } catch (e2) {
+        if (isTransientDbError(e2)) throw e2;
+        if (!isUndefinedTableError(e2, "_migrations")) throw e2;
+        underscoreMigrationsTablePresent = false;
+        applied = await inferAppliedMigrations(sql);
+      }
     }
 
-    const expected = [...EXPECTED_MIGRATIONS];
+    const expected = loadExpectedMigrations();
     const appliedSet = new Set(applied);
     const pending = expected.filter((f) => !appliedSet.has(f));
 
@@ -107,6 +161,7 @@ export async function GET(req: Request) {
         applied,
         pending,
         schema_migrations_table_present: schemaMigrationsTablePresent,
+        _migrations_table_present: underscoreMigrationsTablePresent,
         ok: pending.length === 0,
       },
     };

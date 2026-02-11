@@ -11,6 +11,7 @@ const products = [
   { href: "/markets", label: "Markets" },
   { href: "/exchange", label: "Spot" },
   { href: "/p2p", label: "P2P" },
+  { href: "/express", label: "Express" },
   { href: "/arbitrage", label: "Arbitrage" },
   { href: "/copy-trading", label: "Copy Trade" },
 ] as const;

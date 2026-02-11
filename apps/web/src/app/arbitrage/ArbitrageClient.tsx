@@ -16,6 +16,8 @@ type ArbOpp = {
   sellBid: number;
   spreadPct: number;
   potentialProfit: number;
+  netSpreadPct: number;
+  netProfit: number;
   ts: string;
 };
 
@@ -164,12 +166,12 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
   }, [autoScan, triggerScan]);
 
   /* Derived */
-  const maxSpread = opps.reduce((m, o) => Math.max(m, o.spreadPct), 0);
+  const maxSpread = opps.reduce((m, o) => Math.max(m, o.netSpreadPct ?? 0), 0);
   const avgSpread =
     opps.length > 0
-      ? opps.reduce((s, o) => s + o.spreadPct, 0) / opps.length
+      ? opps.reduce((s, o) => s + (o.netSpreadPct ?? 0), 0) / opps.length
       : 0;
-  const totalProfit = opps.reduce((s, o) => s + o.potentialProfit, 0);
+  const totalProfit = opps.reduce((s, o) => s + (o.netProfit ?? 0), 0);
 
   const filteredOpps = [...opps]
     .filter((o) => o.spreadPct >= minSpread)
@@ -186,6 +188,58 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Strategy Overview ───────────────────────────────────── */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Strategies</h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              We prioritize strategies that are executable and transparent.
+            </p>
+          </div>
+          <div className="text-xs text-[var(--muted)]">
+            Execution support: <span className="font-medium text-[var(--foreground)]">Binance, Bybit</span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-xs font-semibold">Cross‑Exchange Spot</div>
+            <div className="mt-1 text-[11px] text-[var(--muted)]">
+              Compare bid/ask across exchanges and surface gross spreads on liquid USDT pairs.
+            </div>
+            <div className="mt-2 inline-flex rounded-full bg-[var(--up)]/15 px-2 py-0.5 text-[10px] font-semibold text-[var(--up)]">
+              Enabled
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-xs font-semibold">Triangular (Single‑Exchange)</div>
+            <div className="mt-1 text-[11px] text-[var(--muted)]">
+              Requires orderbook depth + fee modeling to avoid false positives.
+            </div>
+            <div className="mt-2 inline-flex rounded-full bg-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+              Coming soon
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-xs font-semibold">Funding / Carry (Perps)</div>
+            <div className="mt-1 text-[11px] text-[var(--muted)]">
+              Advanced, market‑neutral setups with liquidation + basis risk.
+            </div>
+            <div className="mt-2 inline-flex rounded-full bg-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+              Coming soon
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px] text-[var(--muted)]">
+          Spreads shown are <span className="font-medium text-[var(--foreground)]">gross</span>.
+          Fees, slippage, withdrawal limits, and transfer time can erase profit.
+        </div>
+      </div>
+
       {/* ── Controls ──────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -284,21 +338,21 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
             icon: "🎯",
           },
           {
-            label: "Best Spread",
-            value: maxSpread > 0 ? `${maxSpread.toFixed(2)}%` : "—",
-            sub: maxSpread >= 1 ? "Hot" : maxSpread >= 0.5 ? "Warm" : "Cool",
+            label: "Best Net Spread",
+            value: maxSpread > 0 ? `${maxSpread.toFixed(3)}%` : "—",
+            sub: maxSpread >= 0.5 ? "Hot" : maxSpread >= 0.2 ? "Warm" : "Cool",
             icon: "🔥",
           },
           {
-            label: "Avg Spread",
-            value: avgSpread > 0 ? `${avgSpread.toFixed(3)}%` : "—",
-            sub: `across ${opps.length} pairs`,
+            label: "Avg Net Spread",
+            value: avgSpread > 0 ? `${avgSpread.toFixed(4)}%` : "—",
+            sub: `across ${opps.length} routes`,
             icon: "📊",
           },
           {
-            label: "Est. Profit",
-            value: totalProfit > 0 ? `$${totalProfit.toFixed(0)}` : "—",
-            sub: "per $1k capital",
+            label: "Net Profit",
+            value: totalProfit > 0 ? `$${totalProfit.toFixed(2)}` : "—",
+            sub: "per $1k (est.)",
             icon: "💰",
           },
         ].map((stat) => (

@@ -8,6 +8,7 @@ import { verifySessionToken, getSessionCookieName } from "@/lib/auth/session";
 
 import { ExchangeWalletClient } from "./ExchangeWalletClient";
 import { ExchangeTradingClient } from "./ExchangeTradingClient";
+import { NewUserGuide } from "./components/NewUserGuide";
 
 export const metadata: Metadata = { title: "Exchange" };
 
@@ -52,6 +53,8 @@ export default async function ExchangePage({
             Terminal-style spot trading UI backed by the deterministic exchange + ledger.
           </p>
         </header>
+
+        <NewUserGuide />
 
         <ExchangeTradingClient initialMarketId={initialMarketId} />
       </main>

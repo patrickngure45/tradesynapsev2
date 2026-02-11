@@ -14,6 +14,10 @@ const signupSchema = z.object({
   email: z.string().email().max(255),
   password: z.string().min(8).max(128),
   displayName: z.string().min(2).max(60).optional(),
+  // ISO-3166 alpha-2 preferred. Use 'ZZ' for unknown.
+  country: z.string().trim().min(2).max(2),
+  acceptTerms: z.literal(true),
+  acceptRisk: z.literal(true),
 });
 
 /**
@@ -43,10 +47,11 @@ export async function POST(request: Request) {
   }
 
   const passwordHash = await hashPassword(input.password);
+  const country = input.country.toUpperCase();
 
   const [user] = await sql`
-    INSERT INTO app_user (email, password_hash, display_name, status, kyc_level)
-    VALUES (${emailLower}, ${passwordHash}, ${input.displayName ?? null}, 'active', 'none')
+    INSERT INTO app_user (email, password_hash, display_name, status, kyc_level, country)
+    VALUES (${emailLower}, ${passwordHash}, ${input.displayName ?? null}, 'active', 'none', ${country})
     RETURNING id, email, display_name, status, created_at
   `;
 

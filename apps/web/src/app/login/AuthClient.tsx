@@ -12,9 +12,20 @@ export function AuthClient() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [country, setCountry] = useState("ZZ");
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [acceptRisk, setAcceptRisk] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [verifyPrompt, setVerifyPrompt] = useState<{ email: string; verifyUrl: string | null } | null>(null);
+
+  const setOnboardingMode = (mode: "beginner" | "advanced") => {
+    try {
+      localStorage.setItem("ts_onboarding_mode", mode);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,9 +34,22 @@ export function AuthClient() {
 
     try {
       const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-      const body: Record<string, string> = { email, password };
+      const body: Record<string, unknown> = { email, password };
       if (mode === "signup" && displayName.trim()) {
         body.displayName = displayName.trim();
+      }
+      if (mode === "signup") {
+        if (!acceptTerms) {
+          setError("Please accept the Terms to create an account");
+          return;
+        }
+        if (!acceptRisk) {
+          setError("Please confirm you understand trading risk");
+          return;
+        }
+        body.country = country;
+        body.acceptTerms = true;
+        body.acceptRisk = true;
       }
 
       const res = await fetch(endpoint, {
@@ -43,6 +67,8 @@ export function AuthClient() {
             ? "An account with this email already exists"
             : data.error === "invalid_credentials"
               ? "Invalid email or password"
+              : data.error?.includes?.("Invalid input")
+                ? "Please check your details and try again"
               : data.error ?? "Something went wrong";
         setError(msg);
         return;
@@ -92,10 +118,25 @@ export function AuthClient() {
             </Link>
           )}
           <button
-            onClick={() => { router.push(redirectTo); router.refresh(); }}
+            onClick={() => {
+              setOnboardingMode("beginner");
+              router.push(redirectTo);
+              router.refresh();
+            }}
             className="w-full rounded-lg bg-[var(--accent)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]/80"
           >
-            Continue to Exchange &rarr;
+            Continue (Beginner)
+          </button>
+
+          <button
+            onClick={() => {
+              setOnboardingMode("advanced");
+              router.push(redirectTo);
+              router.refresh();
+            }}
+            className="w-full rounded-lg border border-[var(--border)] bg-transparent py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--card)]"
+          >
+            Continue (Advanced)
           </button>
           <p className="text-xs text-[var(--muted)]">
             You can also verify later from <Link href="/account" className="text-cyan-400 underline">Account Settings</Link>.
@@ -133,16 +174,41 @@ export function AuthClient() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {mode === "signup" && (
-          <label className="block">
-            <span className="text-xs text-[var(--muted)]">Display Name</span>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 text-sm outline-none transition focus:border-[var(--accent)]"
-            />
-          </label>
+          <>
+            <label className="block">
+              <span className="text-xs text-[var(--muted)]">Display Name (optional)</span>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Your name"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 text-sm outline-none transition focus:border-[var(--accent)]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[var(--muted)]">Country / Region</span>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 text-sm outline-none transition focus:border-[var(--accent)]"
+              >
+                <option value="ZZ">International / Other</option>
+                <option value="NG">Nigeria</option>
+                <option value="KE">Kenya</option>
+                <option value="GH">Ghana</option>
+                <option value="UG">Uganda</option>
+                <option value="TZ">Tanzania</option>
+                <option value="RW">Rwanda</option>
+                <option value="ZA">South Africa</option>
+                <option value="GB">United Kingdom</option>
+                <option value="US">United States</option>
+              </select>
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                Used to default your currency and safety settings. You can change your trading preferences later.
+              </span>
+            </label>
+          </>
         )}
 
         <label className="block">
@@ -178,6 +244,42 @@ export function AuthClient() {
           </div>
         )}
 
+        {mode === "signup" && (
+          <label className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted)]">
+            <input
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={(e) => setAcceptTerms(e.target.checked)}
+              className="mt-0.5 rounded accent-[var(--accent)]"
+            />
+            <span>
+              I agree to the{" "}
+              <Link href="/terms" className="text-[var(--accent)] hover:underline">
+                Terms
+              </Link>
+              {" "}and{" "}
+              <Link href="/privacy" className="text-[var(--accent)] hover:underline">
+                Privacy Policy
+              </Link>
+              .
+            </span>
+          </label>
+        )}
+
+        {mode === "signup" && (
+          <label className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted)]">
+            <input
+              type="checkbox"
+              checked={acceptRisk}
+              onChange={(e) => setAcceptRisk(e.target.checked)}
+              className="mt-0.5 rounded accent-[var(--accent)]"
+            />
+            <span>
+              I understand crypto prices can move quickly, and I can lose money.
+            </span>
+          </label>
+        )}
+
         <button
           type="submit"
           disabled={loading}
@@ -188,7 +290,7 @@ export function AuthClient() {
       </form>
 
       <p className="mt-6 text-center text-xs text-[var(--muted)]">
-        By continuing, you agree to TradeSynapse terms of service.
+        Trading involves risk. Prices can move quickly.
       </p>
 
       {mode === "login" && (

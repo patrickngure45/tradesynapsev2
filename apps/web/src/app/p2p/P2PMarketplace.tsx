@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CreateAdModal } from "./CreateAdModal";
@@ -31,8 +31,25 @@ export function P2PMarketplace() {
   const params = useSearchParams();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [asset, setAsset] = useState("TST");
-  const [fiat, setFiat] = useState("KES"); // Default to KES for East Africa
+  const [fiat, setFiat] = useState("USD"); // Global default; user can switch
   const [amount, setAmount] = useState("");
+
+  // Allow deep-linking (used by onboarding): /p2p?side=BUY&asset=USDT&fiat=KES&amount=1000
+  const didInitFromQuery = useRef(false);
+  useEffect(() => {
+    if (didInitFromQuery.current) return;
+    didInitFromQuery.current = true;
+
+    const qSide = (params.get("side") ?? "").toUpperCase();
+    const qAsset = (params.get("asset") ?? "").toUpperCase();
+    const qFiat = (params.get("fiat") ?? "").toUpperCase();
+    const qAmount = params.get("amount") ?? "";
+
+    if (qSide === "BUY" || qSide === "SELL") setSide(qSide);
+    if (qAsset) setAsset(qAsset);
+    if (qFiat) setFiat(qFiat);
+    if (qAmount) setAmount(qAmount);
+  }, [params]);
   
   const [ads, setAds] = useState<Ad[]>([]);
   const [loading, setLoading] = useState(true);
