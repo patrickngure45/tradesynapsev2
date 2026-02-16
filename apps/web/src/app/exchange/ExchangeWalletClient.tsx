@@ -288,17 +288,22 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  [transferableAssets, transferAssetId]
  );
 
+ const convertAssets = useMemo(() => {
+  // Convert backend endpoints currently only support enabled BSC assets.
+  return assets.filter((a) => a.chain === "bsc");
+ }, [assets]);
+
  const selectedConvertFromAsset = useMemo(() => {
   const sym = convertFromSymbol.trim().toUpperCase();
   if (!sym) return null;
-  return assets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
- }, [assets, convertFromSymbol]);
+  return convertAssets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
+ }, [convertAssets, convertFromSymbol]);
 
  const selectedConvertToAsset = useMemo(() => {
   const sym = convertToSymbol.trim().toUpperCase();
   if (!sym) return null;
-  return assets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
- }, [assets, convertToSymbol]);
+  return convertAssets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
+ }, [convertAssets, convertToSymbol]);
 
  const selectedConvertAvailable = useMemo(() => {
   if (!selectedConvertFromAsset) return "0";
@@ -1398,7 +1403,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            onChange={(e) => setConvertFromSymbol(e.target.value)}
          >
            <option value="">(select)</option>
-           {assets
+          {convertAssets
              .slice()
              .sort((a, b) => a.symbol.localeCompare(b.symbol))
              .map((a) => {
@@ -1412,7 +1417,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
               }
                return (
                  <option key={a.id} value={a.symbol.toUpperCase()} disabled={!has}>
-                   {a.symbol.toUpperCase()} ({a.chain}){has ? "" : " — 0"}
+                  {a.symbol.toUpperCase()} (BSC){has ? "" : " — 0"}
                  </option>
                );
              })}
@@ -1434,12 +1439,12 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            value={convertToSymbol}
            onChange={(e) => setConvertToSymbol(e.target.value)}
          >
-          {assets
+          {convertAssets
             .slice()
             .sort((a, b) => a.symbol.localeCompare(b.symbol))
             .map((a) => (
               <option key={a.id} value={a.symbol.toUpperCase()}>
-                {a.symbol.toUpperCase()} ({a.chain})
+                {a.symbol.toUpperCase()} (BSC)
               </option>
             ))}
          </select>
