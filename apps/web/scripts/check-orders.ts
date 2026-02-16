@@ -1,8 +1,9 @@
 
 import { createSql } from "../src/lib/db";
 
-// Force Env for script (dev convenience)
-process.env.DATABASE_URL = "postgres://neondb_owner:npg_p0TuSbgYi3rv@ep-shiny-math-ahymkfdk-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require";
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set. Provide it via environment variables.");
+}
 
 async function main() {
   const sql = createSql();
