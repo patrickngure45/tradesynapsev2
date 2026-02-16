@@ -22,7 +22,6 @@ EXPOSE 3000
 
 # Set environment to production
 ENV NODE_ENV=production
-ENV PORT=3000
 
 # Make entrypoint executable
 RUN chmod +x scripts/entrypoint.sh
