@@ -18,6 +18,8 @@ type Market = {
   lot_size: string;
   maker_fee_bps: number;
   taker_fee_bps: number;
+  base_symbol: string;
+  quote_symbol: string;
 };
 
 type MarketStats = {
@@ -29,6 +31,56 @@ type MarketStats = {
   quote_volume: string | null;
   vwap: string | null;
   trade_count: number;
+};
+
+type MarketIndex = {
+  price_usdt: string | null;
+  sources_used: number | null;
+  dispersion_bps: number | null;
+  age_ms: number | null;
+  deviation_pct: number | null;
+  fiat: string;
+  price_fiat: string | null;
+};
+
+type SupportedAsset = {
+  id: string;
+  chain: string;
+  symbol: string;
+  name: string | null;
+  decimals: number;
+  contract_address: string | null;
+  has_market: boolean;
+  index_usdt: string | null;
+  index_fiat: string | null;
+};
+
+type MarketsOverviewResponse = {
+  fiat: string;
+  markets: Array<{
+    id: string;
+    chain: string;
+    symbol: string;
+    status: string;
+    tick_size: string;
+    lot_size: string;
+    maker_fee_bps: number;
+    taker_fee_bps: number;
+    base_symbol: string;
+    quote_symbol: string;
+    stats: {
+      open: string;
+      last: string;
+      high: string;
+      low: string;
+      volume: string;
+      quote_volume: string | null;
+      trade_count: number;
+    } | null;
+    index: MarketIndex;
+    last_fiat: { fiat: string; value: string | null };
+  }>;
+  assets: SupportedAsset[];
 };
 
 type MarketStatsResponse = {
@@ -80,46 +132,15 @@ function getChangeDisplay(stats: MarketStats): { text: string; arrow: string; cl
   }
 }
 
-type Ticker = {
-  market_id: string;
-  symbol: string;
-  open: string | null;
-  last: string | null;
-  high: string | null;
-  low: string | null;
-  volume: string | null;
-  quote_volume: string | null;
-  trade_count: number;
-};
-
-async function fetchAllTickers(): Promise<Record<string, MarketStats>> {
-  const url = "/api/exchange/tickers";
-  const resp = await fetchJsonOrThrow<{ tickers: Ticker[] }>(url, { cache: "no-store" });
-  const out: Record<string, MarketStats> = {};
-  for (const t of resp.tickers) {
-    let vwap: string | null = null;
-    try {
-      const v = toBigInt3818(t.volume ?? "0");
-      const q = toBigInt3818(t.quote_volume ?? "0");
-      if (v > 0n) {
-        // vwap = total_quote / total_base
-        // result needs to be scaled by 1e18 for fromBigInt3818
-        vwap = fromBigInt3818((q * (10n ** 18n)) / v);
-      }
-    } catch { }
-
-    out[t.market_id] = {
-      open: t.open ?? "0",
-      last: t.last ?? "0",
-      high: t.high ?? "0",
-      low: t.low ?? "0",
-      volume: t.volume ?? "0",
-      quote_volume: t.quote_volume ?? "0",
-      vwap,
-      trade_count: t.trade_count
-    };
+function computeVwap(stats: { volume: string | null; quote_volume: string | null }): string | null {
+  try {
+    const v = toBigInt3818(stats.volume ?? "0");
+    const q = toBigInt3818(stats.quote_volume ?? "0");
+    if (v <= 0n) return null;
+    return fromBigInt3818((q * (10n ** 18n)) / v);
+  } catch {
+    return null;
   }
-  return out;
 }
 
 export function MarketsClient() {
@@ -130,6 +151,13 @@ export function MarketsClient() {
   const [error, setError] = useState<ClientApiError | null>(null);
   const [markets, setMarkets] = useState<Market[]>([]);
   const [statsByMarketId, setStatsByMarketId] = useState<Record<string, MarketStats | null>>({});
+  const [indexByMarketId, setIndexByMarketId] = useState<Record<string, MarketIndex | null>>({});
+  const [lastFiatByMarketId, setLastFiatByMarketId] = useState<Record<string, string | null>>({});
+  const [assets, setAssets] = useState<SupportedAsset[]>([]);
+
+  const [fiat, setFiat] = useState<string>("KES");
+
+  const isBackendUnavailable = error?.code === "upstream_unavailable" || error?.code === "internal_error";
 
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<
@@ -170,12 +198,53 @@ export function MarketsClient() {
     setStatsLoading(true);
     setError(null);
     try {
-      const [m, t] = await Promise.all([
-        fetchJsonOrThrow<{ markets: Market[] }>("/api/exchange/markets", { cache: "no-store" }),
-        fetchAllTickers()
-      ]);
-      setMarkets(m.markets ?? []);
-      setStatsByMarketId(t);
+      const url = `/api/exchange/markets/overview?fiat=${encodeURIComponent(fiat)}`;
+      const resp = await fetchJsonOrThrow<MarketsOverviewResponse>(url, { cache: "no-store" });
+
+      const nextMarkets: Market[] = (resp.markets ?? []).map((m) => ({
+        id: m.id,
+        chain: m.chain,
+        symbol: m.symbol,
+        status: m.status,
+        tick_size: m.tick_size,
+        lot_size: m.lot_size,
+        maker_fee_bps: m.maker_fee_bps,
+        taker_fee_bps: m.taker_fee_bps,
+        base_symbol: m.base_symbol,
+        quote_symbol: m.quote_symbol,
+      }));
+
+      const nextStats: Record<string, MarketStats | null> = {};
+      const nextIndex: Record<string, MarketIndex | null> = {};
+      const nextLastFiat: Record<string, string | null> = {};
+
+      for (const m of resp.markets ?? []) {
+        nextIndex[m.id] = m.index ?? null;
+        nextLastFiat[m.id] = m.last_fiat?.value ?? null;
+
+        if (!m.stats) {
+          nextStats[m.id] = null;
+          continue;
+        }
+
+        const vwap = computeVwap({ volume: m.stats.volume, quote_volume: m.stats.quote_volume });
+        nextStats[m.id] = {
+          open: m.stats.open ?? "0",
+          last: m.stats.last ?? "0",
+          high: m.stats.high ?? "0",
+          low: m.stats.low ?? "0",
+          volume: m.stats.volume ?? "0",
+          quote_volume: m.stats.quote_volume ?? "0",
+          vwap,
+          trade_count: m.stats.trade_count ?? 0,
+        };
+      }
+
+      setMarkets(nextMarkets);
+      setStatsByMarketId(nextStats);
+      setIndexByMarketId(nextIndex);
+      setLastFiatByMarketId(nextLastFiat);
+      setAssets(resp.assets ?? []);
     } catch (e) {
       if (e instanceof ApiError) setError({ code: e.code, details: e.details });
       else setError({ code: e instanceof Error ? e.message : String(e) });
@@ -189,7 +258,8 @@ export function MarketsClient() {
     void refresh();
     const interval = setInterval(() => void refresh(), 30_000);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fiat]);
 
   function toggleFavorite(marketId: string) {
     setFavoriteIds((prev) => {
@@ -352,10 +422,30 @@ export function MarketsClient() {
 
   return (
     <div className="flex flex-col gap-6">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Markets</h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Spot-only for now. Derivatives, margin, and advanced order types are planned.
+            </p>
+          </div>
+          <div className="text-xs text-[var(--muted)]">
+            Internal prices come from TradeSynapse order flow. Index is a multi-exchange reference.
+          </div>
+        </div>
+
+        {isBackendUnavailable ? (
+          <div className="mt-3 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_70%,transparent)] p-3 text-xs text-[var(--muted)]">
+            Exchange data is currently unavailable. If you’re running locally, ensure `DATABASE_URL` is set and run `npm run db:migrate`.
+          </div>
+        ) : null}
+      </div>
+
       {/* 1. Intelligence Dashboard */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-         <MarketRegimeWidget symbol="BTC/USDT" />
-         <MarketRegimeWidget symbol="ETH/USDT" />
+        <MarketRegimeWidget exchange="internal" symbol="BTC/USDT" />
+        <MarketRegimeWidget exchange="internal" symbol="ETH/USDT" />
          
          {/* Top Gainers */}
          <div className="flex flex-col h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm hover:border-[var(--accent)]/30 transition">
@@ -405,6 +495,21 @@ export function MarketsClient() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_80%,transparent)] px-3 py-2 text-xs">
+            <span className="text-[var(--muted)]">Fiat</span>
+            <select
+              className="bg-transparent text-xs text-[var(--foreground)] focus:outline-none"
+              value={fiat}
+              onChange={(e) => setFiat(e.target.value)}
+              title="Fiat used for ≈ conversions"
+            >
+              <option value="KES">KES</option>
+              <option value="UGX">UGX</option>
+              <option value="TZS">TZS</option>
+              <option value="RWF">RWF</option>
+            </select>
+          </label>
+
           <label className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_80%,transparent)] px-3 py-2 text-xs">
             <span className="text-[var(--muted)]">Search</span>
             <input
@@ -504,6 +609,9 @@ export function MarketsClient() {
                   24h vol{sortKey === "volume" ? " ▼" : ""}
                 </button>
               </th>
+              <th className="py-2">Index</th>
+              <th className="py-2">Dev</th>
+              <th className="py-2">≈ {fiat}</th>
               <th className="py-2">VWAP</th>
               <th className="py-2">
                 <button
@@ -526,6 +634,8 @@ export function MarketsClient() {
           <tbody className="align-top">
             {filteredSorted.map((m) => {
               const stats = statsByMarketId[m.id] ?? null;
+              const idx = indexByMarketId[m.id] ?? null;
+              const lastFiat = lastFiatByMarketId[m.id] ?? null;
               const priceDigits = digitsFromStep(m.tick_size, 6, 10);
               const qtyDigits = digitsFromStep(m.lot_size, 6, 10);
               const change = stats ? getChangeDisplay(stats) : { text: statsLoading ? "…" : "—", arrow: "", className: "" };
@@ -535,8 +645,24 @@ export function MarketsClient() {
               const vwapText = stats?.vwap ? formatDecimal(stats.vwap, priceDigits) : statsLoading ? "…" : "—";
               const tradesText = stats ? String(stats.trade_count ?? 0) : statsLoading ? "…" : "—";
 
+              const indexText = idx?.price_usdt ? formatDecimal(idx.price_usdt, priceDigits) : statsLoading ? "…" : "—";
+
+              const dev = typeof idx?.deviation_pct === "number" && Number.isFinite(idx.deviation_pct) ? idx.deviation_pct : null;
+              const devText = dev == null ? (statsLoading ? "…" : "—") : `${dev >= 0 ? "+" : ""}${dev.toFixed(2)}%`;
+              const devTone =
+                dev == null
+                  ? ""
+                  : dev >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-rose-600 dark:text-rose-400";
+
+              const idxFiatText = idx?.price_fiat ? idx.price_fiat : null;
+              const fiatTitle = idx
+                ? `sources=${idx.sources_used ?? "?"} · dispersion_bps=${idx.dispersion_bps ?? "?"} · age_ms=${idx.age_ms ?? "?"}`
+                : undefined;
+
               const statusTone =
-                m.status === "active"
+                m.status === "active" || m.status === "enabled"
                   ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                   : "bg-[color-mix(in_srgb,var(--muted)_18%,transparent)] text-[var(--muted)]";
 
@@ -587,6 +713,14 @@ export function MarketsClient() {
                     {change.text}
                   </td>
                   <td className="py-2 font-mono">{volText}</td>
+                  <td className="py-2 font-mono" title={fiatTitle}>{indexText}</td>
+                  <td className={`py-2 font-mono ${devTone}`} title={fiatTitle}>{devText}</td>
+                  <td className="py-2 font-mono" title={fiatTitle}>
+                    <div className="leading-tight">
+                      <div>{lastFiat ?? "—"}</div>
+                      <div className="text-[11px] text-[var(--muted)]">{idxFiatText ?? "—"}</div>
+                    </div>
+                  </td>
                   <td className="py-2 font-mono">{vwapText}</td>
                   <td className="py-2 font-mono">{tradesText}</td>
                   <td className="py-2">
@@ -614,13 +748,61 @@ export function MarketsClient() {
 
             {filteredSorted.length === 0 && !loading ? (
               <tr>
-                <td colSpan={12} className="py-6 text-center text-sm text-[var(--muted)]">
+                <td colSpan={15} className="py-6 text-center text-sm text-[var(--muted)]">
                   No markets{query.trim() || favoritesOnly ? " match your filters" : ""}.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-medium">Supported currencies</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Based on enabled assets (master wallet capabilities).
+          </p>
+        </div>
+        <div className="text-xs text-[var(--muted)]">
+          ≈ values use USDT reference.
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {assets.map((a) => {
+          const sub = a.index_fiat ? `${a.index_fiat} ${fiat}` : a.has_market ? "—" : "";
+          return (
+            <div
+              key={a.id}
+              className="rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_80%,transparent)] px-3 py-2"
+              title={a.name ?? undefined}
+            >
+              <div className="flex items-center gap-2">
+                <div className="font-mono text-xs font-semibold">{a.symbol}</div>
+                <div className="text-[11px] text-[var(--muted)]">{a.chain}</div>
+                {a.has_market ? (
+                  <span className="ml-1 inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
+                    market
+                  </span>
+                ) : (
+                  <span className="ml-1 inline-flex items-center rounded-full bg-[color-mix(in_srgb,var(--muted)_18%,transparent)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
+                    asset
+                  </span>
+                )}
+              </div>
+              {sub ? <div className="mt-0.5 text-[11px] text-[var(--muted)] font-mono">≈ {sub}</div> : null}
+            </div>
+          );
+        })}
+
+        {assets.length === 0 ? (
+          <div className="text-xs text-[var(--muted)]">
+            {isBackendUnavailable ? "Assets unavailable while backend is offline." : "No enabled assets."}
+          </div>
+        ) : null}
       </div>
     </section>
     </div>

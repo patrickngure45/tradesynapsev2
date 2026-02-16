@@ -52,6 +52,11 @@ function iconForType(type: string) {
       return "!";
     case "p2p_order_created":
         return "★";
+    case "p2p_dispute_opened":
+    case "p2p_dispute_resolved":
+      return "!";
+    case "p2p_feedback_received":
+      return "✓";
     default:
       return "◆";
   }
@@ -69,6 +74,11 @@ function colorForType(type: string) {
     case "p2p_payment_confirmed":
     case "p2p_order_created":
       return "text-blue-500";
+    case "p2p_feedback_received":
+      return "text-emerald-500";
+    case "p2p_dispute_opened":
+    case "p2p_dispute_resolved":
+      return "text-rose-500";
     case "order_canceled":
     case "withdrawal_rejected":
     case "p2p_order_cancelled":

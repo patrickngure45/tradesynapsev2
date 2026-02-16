@@ -4,7 +4,7 @@ Next.js (App Router) UI + API for the TradeSynapse spot exchange on BNB Smart Ch
 
 ## Features
 
-- **Real-time order book** — TST/USDT market with limit orders, partial fills, and maker/taker fees
+- **Real-time order book** — USDT-quoted markets with limit orders, partial fills, and maker/taker fees
 - **Exchange wallet** — Deposits, withdrawals, and ledger with hold management
 - **Portfolio dashboard** — Balances, PnL tracking, fill history
 - **Copy trading** — Follow top traders, subscribe/pause/stop copying
@@ -40,6 +40,9 @@ Key variables:
 - `PROOFPACK_SESSION_SECRET` — 32+ char secret for session signing
 - `NEXT_PUBLIC_BASE_URL` — Public URL (default `http://localhost:3000`)
 
+Gas (BSC):
+- Gas fees are modeled and paid in `BNB`.
+
 Optional (production):
 - `EXCHANGE_RELAY_URL` — Base URL of the exchange relay service (e.g. `https://your-relay.up.railway.app`)
 - `EXCHANGE_RELAY_KEY` — Shared secret sent as `x-relay-key` to protect the relay
@@ -57,6 +60,51 @@ npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+## P2P market seeding
+
+Seed realistic USDT P2P depth (both SELL and BUY ads):
+
+```bash
+npm run p2p:seed
+```
+
+Light or dense one-shot presets:
+
+```bash
+npm run p2p:seed:light
+npm run p2p:seed:dense
+```
+
+Run continuous bot refresh loop:
+
+```bash
+npm run p2p:mm
+```
+
+Run fast refresh mode (useful for local demos):
+
+```bash
+npm run p2p:mm:fast
+```
+
+Run ultra-fast mode (stress/demo):
+
+```bash
+npm run p2p:mm:ultra
+```
+
+Run stable low-churn mode (production-like):
+
+```bash
+npm run p2p:mm:stable
+```
+
+Optional tuning:
+- `P2P_MM_INTERVAL_MS` (default `45000`)
+- `P2P_MM_ADS_PER_SIDE` (default `2`)
+- `P2P_SEED_ADS_PER_SIDE` (default `2`)
+- `P2P_SEED_CLOSE_EXISTING` (`1` to replace old bot ads, `0` to append)
 
 ## Demo
 

@@ -1,7 +1,11 @@
-
+import "dotenv/config";
 import postgres from "postgres";
 
-const DATABASE_URL = "postgres://neondb_owner:npg_p0TuSbgYi3rv@ep-shiny-math-ahymkfdk-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require";
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error("❌ DATABASE_URL is not set. Add it to your .env file.");
+  process.exit(1);
+}
 
 async function main() {
   const sql = postgres(DATABASE_URL, { ssl: "require" });

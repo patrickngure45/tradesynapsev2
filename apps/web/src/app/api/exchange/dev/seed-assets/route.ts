@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 
 const inputSchema = z
   .object({
-    chain: z.literal("bsc").optional().default("bsc"),
-    tst_contract: z.string().min(1).optional(),
+    chain: z.enum(["bsc", "eth"]).optional().default("bsc"),
     usdt_contract: z.string().min(1).optional(),
+    usdc_contract: z.string().min(1).optional(),
   })
   .optional();
 
@@ -31,8 +31,8 @@ export async function POST(request: Request) {
 
   try {
     const chain = input?.chain ?? "bsc";
-    const tst = input?.tst_contract ?? null;
     const usdt = input?.usdt_contract ?? null;
+    const usdc = input?.usdc_contract ?? null;
 
     // Insert BNB (native)
     await sql`
@@ -55,16 +55,16 @@ export async function POST(request: Request) {
       `;
     }
 
-    if (tst) {
+    if (usdc) {
       await sql`
         INSERT INTO ex_asset (chain, symbol, name, contract_address, decimals, is_enabled)
-        VALUES (${chain}, 'TST', 'TradeSynapse Token', ${tst}, 18, true)
+        VALUES (${chain}, 'USDC', 'USD Coin', ${usdc}, 18, true)
         ON CONFLICT (chain, symbol) DO UPDATE SET contract_address = EXCLUDED.contract_address
       `;
     } else {
       await sql`
         INSERT INTO ex_asset (chain, symbol, name, contract_address, decimals, is_enabled)
-        VALUES (${chain}, 'TST', 'TradeSynapse Token', NULL, 18, true)
+        VALUES (${chain}, 'USDC', 'USD Coin', NULL, 18, true)
         ON CONFLICT (chain, symbol) DO NOTHING
       `;
     }

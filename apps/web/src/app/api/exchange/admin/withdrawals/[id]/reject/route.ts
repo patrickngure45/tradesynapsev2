@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { enqueueOutbox } from "@/lib/outbox";
 import { responseForDbError } from "@/lib/dbTransient";
-import { requireAdmin } from "@/lib/auth/admin";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createNotification } from "@/lib/notifications";
@@ -24,8 +24,8 @@ const postSchema = z
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const startMs = Date.now();
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
   const { id } = await params;
 
   try {

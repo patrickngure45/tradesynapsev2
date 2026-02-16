@@ -44,6 +44,13 @@ export type ArbScanResult = {
   errors: ArbScanError[];
 };
 
+export type ArbCaptureOptions = {
+  exchanges?: SupportedExchange[];
+  symbols?: string[];
+  includeInternalPrices?: boolean;
+  storeSnapshots?: boolean;
+};
+
 // ── Pairs / exchanges to track ─────────────────────────────────────
 // Default to liquid USDT pairs. Keep the list short to reduce API load and
 // to avoid surfacing spreads that cannot be executed due to thin books.
@@ -128,15 +135,30 @@ function parseSymbolsEnv(name: string, fallback: string[]): string[] {
 
 const TRACKED_SYMBOLS = parseSymbolsEnv("ARB_SYMBOLS", DEFAULT_TRACKED_SYMBOLS);
 
-// Default to the exchanges we can most reliably support end-to-end.
-// (You can add more for scanner-only comparison via ARB_EXCHANGES.)
-const EXCHANGES = parseSupportedExchanges("ARB_EXCHANGES", ["binance", "bybit"]);
+// By default, scan all supported exchanges so users get wide coverage.
+// Use ARB_EXCHANGES to narrow the scan surface if needed.
+const EXCHANGES = parseSupportedExchanges("ARB_EXCHANGES", SUPPORTED_EXCHANGES);
 
 // Only generate "opportunities" between these exchanges.
 // This keeps the UI honest if ARB_EXCHANGES includes scanner-only venues.
-const OPP_EXCHANGES = new Set(parseCsvEnvLower("ARB_OPP_EXCHANGES", EXCHANGES));
+// Default to Binance/Bybit as "actionable" unless overridden.
+const OPP_EXCHANGES = new Set(parseCsvEnvLower("ARB_OPP_EXCHANGES", ["binance", "bybit"]));
 
 const INCLUDE_INTERNAL_OPPS = process.env.ARB_INCLUDE_INTERNAL === "1";
+
+export function getArbScannerConfig(): {
+  exchanges: SupportedExchange[];
+  oppExchanges: string[];
+  includeInternal: boolean;
+  symbols: string[];
+} {
+  return {
+    exchanges: [...EXCHANGES],
+    oppExchanges: Array.from(OPP_EXCHANGES),
+    includeInternal: INCLUDE_INTERNAL_OPPS,
+    symbols: [...TRACKED_SYMBOLS],
+  };
+}
 
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -168,15 +190,20 @@ async function runWithConcurrency<T>(
 }
 
 // ── Snapshot writer ─────────────────────────────────────────────────
-export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
+export async function captureArbSnapshots(sql: Sql, opts?: ArbCaptureOptions): Promise<ArbScanResult> {
   const snapshots: ArbSnapshot[] = [];
   const errors: ArbScanError[] = [];
+
+  const exchanges = ((opts && "exchanges" in opts ? opts.exchanges : undefined) ?? EXCHANGES) as SupportedExchange[];
+  const symbolsAll = (opts && "symbols" in opts ? opts.symbols : undefined) ?? TRACKED_SYMBOLS;
+  const includeInternalPrices = opts?.includeInternalPrices ?? true;
+  const storeSnapshots = opts?.storeSnapshots ?? true;
 
   // Fetch all tickers in parallel (grouped by exchange)
   const promises: Promise<void>[] = [];
 
-  for (const exchange of EXCHANGES) {
-    const symbols = TRACKED_SYMBOLS.filter((s) => s !== "TSTUSDT");
+  for (const exchange of exchanges) {
+    const symbols = symbolsAll;
 
     const defaultConcurrency = Math.max(1, Math.floor(numEnv("ARB_CONCURRENCY", 4)));
     const bybitConcurrency = Math.max(1, Math.floor(numEnv("ARB_BYBIT_CONCURRENCY", 6)));
@@ -210,27 +237,28 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
 
   }
 
-  // Also fetch our own prices from the TradeSynapse orderbook
-  promises.push(
-    (async () => {
-       try {
-         const localPrices = await sql`
-           WITH stats AS (
-             SELECT 
-               m.symbol,
-               MAX(CASE WHEN o.side = 'buy' THEN o.price ELSE 0 END) as bid,
-               MIN(CASE WHEN o.side = 'sell' THEN o.price ELSE NULL END) as ask
-             FROM ex_order o
-             JOIN ex_market m ON m.id = o.market_id
-             WHERE o.status IN ('open', 'partially_filled')
-             GROUP BY m.symbol
-           )
-           SELECT symbol, bid::text, ask::text FROM stats
-         `;
-         
-         for (const p of localPrices) {
+  // Also fetch our own prices from the TradeSynapse orderbook (best-effort)
+  if (includeInternalPrices) {
+    promises.push(
+      (async () => {
+        try {
+          const localPrices = await sql`
+            WITH stats AS (
+              SELECT
+                m.symbol,
+                MAX(CASE WHEN o.side = 'buy' THEN o.price ELSE 0 END) as bid,
+                MIN(CASE WHEN o.side = 'sell' THEN o.price ELSE NULL END) as ask
+              FROM ex_order o
+              JOIN ex_market m ON m.id = o.market_id
+              WHERE o.status IN ('open', 'partially_filled')
+              GROUP BY m.symbol
+            )
+            SELECT symbol, bid::text, ask::text FROM stats
+          `;
+
+          for (const p of localPrices) {
             // Only convert normalized symbols like BTC/USDT -> BTCUSDT
-            const normalized = p.symbol.replace('/', '');
+            const normalized = String(p.symbol).replace('/', '');
 
             const bid = Number.parseFloat(p.bid ?? "0");
             const ask = Number.parseFloat((p.ask as unknown as string) ?? "0");
@@ -239,22 +267,23 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
 
             snapshots.push({
               symbol: normalized,
-              exchange: 'tradesynapse',
+              exchange: "tradesynapse",
               bid: String(bid),
               ask: String(ask),
               ts: new Date(),
             });
-         }
-       } catch (err) {
-         console.error("Failed to fetch local prices", err);
-       }
-    })()
-  );
+          }
+        } catch (err) {
+          console.error("Failed to fetch local prices", err);
+        }
+      })(),
+    );
+  }
 
   await Promise.allSettled(promises);
 
   // Batch insert all snapshots
-  if (snapshots.length > 0) {
+  if (storeSnapshots && snapshots.length > 0) {
     await sql`
       INSERT INTO arb_price_snapshot ${sql(
         snapshots.map((s) => ({
@@ -274,7 +303,12 @@ export async function captureArbSnapshots(sql: Sql): Promise<ArbScanResult> {
 // ── Opportunity detection ───────────────────────────────────────────
 export function detectOpportunities(
   snapshots: ArbSnapshot[], 
-  options: { minNetSpread?: number } = {}
+  options: {
+    minNetSpread?: number;
+    oppExchanges?: string[];
+    includeInternal?: boolean;
+    quoteSuffix?: string;
+  } = {}
 ): ArbOpportunity[] {
   const opportunities: ArbOpportunity[] = [];
 
@@ -291,12 +325,23 @@ export function detectOpportunities(
   const takerFeeBpsPerLeg = Math.max(0, numEnv("ARB_TAKER_FEE_BPS", 10));
   const slippageBpsPerLeg = Math.max(0, numEnv("ARB_SLIPPAGE_BPS", 2));
   const transferBps = Math.max(0, numEnv("ARB_TRANSFER_BPS", 0));
+  const latencyBps = Math.max(0, numEnv("ARB_LATENCY_BPS", 2));
 
-  const costPct = bpsToPct(takerFeeBpsPerLeg * 2 + slippageBpsPerLeg * 2 + transferBps);
+  const costPct = bpsToPct(takerFeeBpsPerLeg * 2 + slippageBpsPerLeg * 2 + transferBps + latencyBps);
   
   // Use provided option or env var (default to 0 for strict profitability)
   // If user wants to see "near misses", we can pass a negative number.
   const minNetSpreadPct = options.minNetSpread ?? Math.max(0, numEnv("ARB_MIN_NET_SPREAD_PCT", 0));
+
+  const includeInternal = options.includeInternal ?? INCLUDE_INTERNAL_OPPS;
+  const oppSet = (() => {
+    if (Array.isArray(options.oppExchanges) && options.oppExchanges.length) {
+      return new Set(options.oppExchanges.map((s) => String(s).toLowerCase()));
+    }
+    return new Set(Array.from(OPP_EXCHANGES));
+  })();
+
+  const quoteSuffix = (options.quoteSuffix ?? "USDT").toUpperCase();
 
   // Group by symbol
   const bySymbol = new Map<string, ArbSnapshot[]>();
@@ -310,13 +355,13 @@ export function detectOpportunities(
     if (snaps.length < 2) continue;
 
     // Keep the arbitrage page focused on liquid USDT pairs.
-    if (!symbol.toUpperCase().endsWith("USDT")) continue;
+    if (!symbol.toUpperCase().endsWith(quoteSuffix)) continue;
 
     // Restrict to "opportunity exchanges" by default.
     const filtered = snaps.filter((s) => {
       const ex = String(s.exchange).toLowerCase();
-      if (ex === "tradesynapse") return INCLUDE_INTERNAL_OPPS;
-      return OPP_EXCHANGES.has(ex);
+      if (ex === "tradesynapse") return includeInternal;
+      return oppSet.has(ex);
     });
     if (filtered.length < 2) continue;
 

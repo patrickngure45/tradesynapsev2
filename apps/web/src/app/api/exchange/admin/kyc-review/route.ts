@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
-import { requireAdmin } from "@/lib/auth/admin";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { responseForDbError } from "@/lib/dbTransient";
 import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
@@ -29,8 +29,8 @@ const reviewSchema = z.object({
  */
 export async function GET(request: Request) {
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "pending_review";
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? "50")));
@@ -74,8 +74,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
   const body = await request.json().catch(() => ({}));
 
   let input: z.infer<typeof reviewSchema>;
@@ -122,10 +122,10 @@ export async function POST(request: Request) {
       `;
 
       if (input.decision === "approved") {
-        // Upgrade user to verified
+        // Upgrade user to highest KYC tier (DB uses 'full')
         await txSql`
-          UPDATE app_user SET kyc_level = 'verified', updated_at = now()
-          WHERE id = ${sub.user_id}::uuid AND kyc_level != 'verified'
+          UPDATE app_user SET kyc_level = 'full'
+          WHERE id = ${sub.user_id}::uuid AND kyc_level != 'full'
         `;
 
         await createNotification(txSql, {

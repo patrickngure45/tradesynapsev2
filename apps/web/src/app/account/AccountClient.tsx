@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -16,7 +17,6 @@ type UserProfile = {
   email_verified: boolean;
   country: string | null;
   created_at: string;
-  pay_fees_with_tst: boolean;
 };
 
 /* ------------------------------------------------------------------ */
@@ -38,6 +38,13 @@ const KYC_LABELS: Record<string, { label: string; color: string; desc: string }>
   verified: { label: "Verified",     color: "bg-emerald-600", desc: "Full access to all features" },
 };
 
+function normalizedKycLevel(raw: string | null | undefined): "none" | "basic" | "verified" {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "verified" || value === "full") return "verified";
+  if (value === "basic") return "basic";
+  return "none";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -46,6 +53,10 @@ export function AccountClient() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [loadMsg, setLoadMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [copiedUserId, setCopiedUserId] = useState(false);
 
   /* Password change */
   const [currentPw, setCurrentPw] = useState("");
@@ -68,28 +79,6 @@ export function AccountClient() {
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<{ text: string; ok: boolean; url?: string } | null>(null);
 
-  /* Fee Preference */
-  const handleToggleFeePreference = async () => {
-    if (!profile) return;
-    const newState = !profile.pay_fees_with_tst;
-    
-    // Optimistic update
-    setProfile(p => p ? { ...p, pay_fees_with_tst: newState } : null);
-
-    try {
-      const res = await fetch("/api/account/profile", fetchOpts({
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pay_fees_with_tst: newState }),
-      }));
-      if (!res.ok) throw new Error();
-    } catch {
-      // Revert on failure
-      setProfile(p => p ? { ...p, pay_fees_with_tst: !newState } : null);
-      alert("Failed to update preference");
-    }
-  };
-
   /* 2FA / TOTP */
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [totpStep, setTotpStep] = useState<"idle" | "setup" | "backup">("idle");
@@ -102,21 +91,28 @@ export function AccountClient() {
   const [totpDisableCode, setTotpDisableCode] = useState("");
   const [totpDisableLoading, setTotpDisableLoading] = useState(false);
   const [totpDisableMsg, setTotpDisableMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [copiedTotpSecret, setCopiedTotpSecret] = useState(false);
 
   const load = useCallback(async () => {
     try {
+      setLoadMsg(null);
       const res = await fetch("/api/account/profile", fetchOpts({ cache: "no-store" }));
       if (res.status === 401) {
         router.push("/login");
         return;
       }
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadMsg({ text: "Failed to load account data", ok: false });
+        return;
+      }
       const data = await res.json();
       setProfile(data.user ?? null);
       setTotpEnabled(!!data.user?.totp_enabled);
+      setLastLoadedAt(new Date());
+      setLoadMsg(null);
 
       // Check for pending KYC submission
-      if (data.user?.kyc_level === "basic") {
+      if (normalizedKycLevel(data.user?.kyc_level) === "basic") {
         try {
           const kycRes = await fetch("/api/account/kyc", fetchOpts({ cache: "no-store" }));
           if (kycRes.ok) {
@@ -126,7 +122,9 @@ export function AccountClient() {
           }
         } catch { /* silent */ }
       }
-    } catch { /* silent */ } finally {
+    } catch {
+      setLoadMsg({ text: "Network error while loading account", ok: false });
+    } finally {
       setLoading(false);
     }
   }, [router]);
@@ -139,6 +137,24 @@ export function AccountClient() {
     localStorage.removeItem("ts_user_id");
     router.push("/login");
     router.refresh();
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setLoadMsg((prev) => prev ?? { text: "Account refreshed", ok: true });
+    setRefreshing(false);
+  };
+
+  const handleCopyUserId = async () => {
+    if (!profile?.id) return;
+    try {
+      await navigator.clipboard.writeText(profile.id);
+      setCopiedUserId(true);
+      setTimeout(() => setCopiedUserId(false), 1200);
+    } catch {
+      setLoadMsg({ text: "Could not copy User ID", ok: false });
+    }
   };
 
   /* ── Password Change ─────────────────────────────────────────── */
@@ -342,6 +358,17 @@ export function AccountClient() {
     }
   };
 
+  const handleCopyTotpSecret = async () => {
+    if (!totpSecret) return;
+    try {
+      await navigator.clipboard.writeText(totpSecret);
+      setCopiedTotpSecret(true);
+      setTimeout(() => setCopiedTotpSecret(false), 1200);
+    } catch {
+      setTotpMsg({ text: "Could not copy secret key", ok: false });
+    }
+  };
+
   /* ── Render ──────────────────────────────────────────────────── */
 
   if (loading) {
@@ -362,7 +389,14 @@ export function AccountClient() {
     );
   }
 
-  const kyc = KYC_LABELS[profile.kyc_level] ?? KYC_LABELS.none!;
+  const currentKyc = normalizedKycLevel(profile.kyc_level);
+  const kyc = KYC_LABELS[currentKyc] ?? KYC_LABELS.none!;
+  const securityChecks = {
+    emailVerified: profile.email_verified,
+    totpEnabled,
+    kycVerified: currentKyc === "verified",
+  };
+  const securityScore = Object.values(securityChecks).filter(Boolean).length;
 
   return (
     <div className="space-y-8">
@@ -373,47 +407,56 @@ export function AccountClient() {
           <p className="mt-0.5 text-sm text-[var(--muted)]">
             Manage your profile, security, and verification
           </p>
+          {lastLoadedAt && (
+            <p className="mt-1 text-[11px] text-[var(--muted)]">Updated {lastLoadedAt.toLocaleTimeString()}</p>
+          )}
         </div>
-        <button
-          onClick={handleLogout}
-          className="rounded-lg border border-rose-500/40 px-4 py-1.5 text-xs font-medium text-rose-500 transition hover:bg-rose-500/10"
-        >
-          Sign Out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="rounded-lg border border-[var(--border)] px-4 py-1.5 text-xs font-medium text-[var(--foreground)] transition hover:bg-[var(--card-2)] disabled:opacity-60"
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <button
+            onClick={handleLogout}
+            className="rounded-lg border border-rose-500/40 px-4 py-1.5 text-xs font-medium text-rose-500 transition hover:bg-rose-500/10"
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
+
+      {loadMsg && (
+        <div className={`rounded-lg border px-4 py-2 text-xs ${loadMsg.ok ? "border-emerald-500/30 text-emerald-500" : "border-rose-500/30 text-rose-500"}`}>
+          {loadMsg.text}
+        </div>
+      )}
 
       {/* ────── Profile Card ────── */}
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
         <h2 className="mb-4 text-sm font-semibold tracking-tight">Profile</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="User ID" value={profile.id} mono />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-[var(--muted)]">User ID</span>
+              <button
+                type="button"
+                onClick={handleCopyUserId}
+                className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)]"
+              >
+                {copiedUserId ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <p className="mt-0.5 break-all font-mono text-xs">{profile.id}</p>
+          </div>
           <Field label="Email" value={profile.email} />
           <Field label="Display Name" value={profile.display_name ?? "—"} />
           <Field label="Status" value={profile.status} badge badgeColor={profile.status === "active" ? "bg-emerald-600" : "bg-rose-600"} />
           <Field label="Email Verified" value={profile.email_verified ? "Yes" : "No"} badge badgeColor={profile.email_verified ? "bg-emerald-600" : "bg-amber-600"} />
           <Field label="Member Since" value={new Date(profile.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} />
           <Field label="Country" value={profile.country ?? "Not set"} />
-        </div>
-      </section>
-
-      {/* ────── TST Utility / Fees ────── */}
-      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight">Fee Discounts</h2>
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Use TST to pay for trading fees and get a 25% discount.
-            </p>
-          </div>
-          <label className="relative inline-flex cursor-pointer items-center">
-            <input 
-              type="checkbox" 
-              checked={profile.pay_fees_with_tst} 
-              onChange={handleToggleFeePreference} 
-              className="peer sr-only" 
-            />
-            <div className="peer h-6 w-11 rounded-full bg-zinc-700 after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-[var(--accent)] peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--accent)]/50"></div>
-          </label>
         </div>
       </section>
 
@@ -468,15 +511,15 @@ export function AccountClient() {
               </tr>
             </thead>
             <tbody>
-              <TierRow tier="none" label="Unverified" limit="$0" req="—" current={profile.kyc_level} />
-              <TierRow tier="basic" label="Basic" limit="$2,000" req="Email verified" current={profile.kyc_level} />
-              <TierRow tier="verified" label="Verified" limit="$50,000" req="ID document + selfie" current={profile.kyc_level} />
+              <TierRow tier="none" label="Unverified" limit="$0" req="—" current={currentKyc} />
+              <TierRow tier="basic" label="Basic" limit="$2,000" req="Email verified" current={currentKyc} />
+              <TierRow tier="verified" label="Verified" limit="$50,000" req="ID document + selfie" current={currentKyc} />
             </tbody>
           </table>
         </div>
 
         {/* ── KYC Action Area ── */}
-        {profile.kyc_level === "none" && (
+        {currentKyc === "none" && (
           <div className="mt-4 flex items-center gap-3">
             <button
               onClick={handleKycUpgrade}
@@ -491,7 +534,7 @@ export function AccountClient() {
           </div>
         )}
 
-        {profile.kyc_level === "basic" && !kycPendingSubmission && (
+        {currentKyc === "basic" && !kycPendingSubmission && (
           <div className="mt-4">
             {!kycShowDocForm ? (
               <button
@@ -560,7 +603,7 @@ export function AccountClient() {
                   </button>
                   <button
                     onClick={() => { setKycShowDocForm(false); setKycDocFront(null); setKycDocBack(null); }}
-                    className="text-xs text-[var(--muted)] transition hover:text-[var(--fg)]"
+                    className="text-xs text-[var(--muted)] transition hover:text-[var(--foreground)]"
                   >
                     Cancel
                   </button>
@@ -573,7 +616,7 @@ export function AccountClient() {
           </div>
         )}
 
-        {(kycPendingSubmission || profile.kyc_level === "basic") && kycPendingSubmission && (
+        {(kycPendingSubmission || currentKyc === "basic") && kycPendingSubmission && (
           <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-[color-mix(in_srgb,var(--card)_95%,#f59e0b_5%)] px-4 py-3">
             <span className="text-amber-500">⏳</span>
             <span className="text-xs text-[var(--muted)]">Your documents are under review. This usually takes 1-2 business days.</span>
@@ -685,19 +728,29 @@ export function AccountClient() {
             <div className="rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_90%,transparent)] p-4">
               <p className="mb-3 text-xs font-medium">1. Scan this code with your authenticator app:</p>
               <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-                {/* QR code using a data URL from Google Charts API (works offline in dev) */}
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(totpUri)}`}
-                  alt="TOTP QR Code"
-                  width={160}
-                  height={160}
-                  className="rounded-lg border border-[var(--border)]"
-                />
+                <div className="rounded-lg border border-[var(--border)] bg-white p-2">
+                  <QRCodeSVG
+                    value={totpUri}
+                    size={160}
+                    level="M"
+                    includeMargin
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    title="TOTP QR Code"
+                  />
+                </div>
                 <div className="space-y-2">
                   <p className="text-[11px] text-[var(--muted)]">Or enter this key manually:</p>
                   <code className="block break-all rounded bg-zinc-900 px-3 py-2 font-mono text-xs tracking-wider text-emerald-400">
                     {totpSecret}
                   </code>
+                  <button
+                    type="button"
+                    onClick={handleCopyTotpSecret}
+                    className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted)] transition hover:text-[var(--foreground)]"
+                  >
+                    {copiedTotpSecret ? "Copied" : "Copy setup key"}
+                  </button>
                 </div>
               </div>
             </div>
@@ -771,9 +824,16 @@ export function AccountClient() {
       {/* ────── Security Info ────── */}
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
         <h2 className="mb-2 text-sm font-semibold tracking-tight">Security Status</h2>
-        <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-500"></div>
-            <p className="text-xs text-[var(--muted)]">Your session is active and secure.</p>
+        <div className="mb-3 flex items-center gap-2">
+          <div className={`h-2 w-2 rounded-full ${securityScore >= 2 ? "bg-emerald-500" : "bg-amber-500"}`}></div>
+          <p className="text-xs text-[var(--muted)]">
+            {securityScore === 3 ? "Strong account posture." : `Security checks complete: ${securityScore}/3`}
+          </p>
+        </div>
+        <div className="grid gap-2 text-xs">
+          <StatusRow label="Email verified" ok={securityChecks.emailVerified} />
+          <StatusRow label="2FA enabled" ok={securityChecks.totpEnabled} />
+          <StatusRow label="KYC verified" ok={securityChecks.kycVerified} />
         </div>
       </section>
     </div>
@@ -825,5 +885,16 @@ function PwInput({ label, value, onChange }: { label: string; value: string; onC
         autoComplete="off"
       />
     </label>
+  );
+}
+
+function StatusRow({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2">
+      <span className="text-[var(--muted)]">{label}</span>
+      <span className={`rounded-full px-2 py-0.5 font-semibold ${ok ? "bg-emerald-500/15 text-emerald-500" : "bg-amber-500/15 text-amber-500"}`}>
+        {ok ? "Complete" : "Pending"}
+      </span>
+    </div>
   );
 }

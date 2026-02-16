@@ -1,9 +1,15 @@
 import type { Sql } from "postgres";
 import { getActingUserId } from "@/lib/auth/party";
+import { apiError } from "@/lib/api/errors";
+import { getSessionTokenFromRequest, serializeClearSessionCookie } from "@/lib/auth/session";
 
 export type AdminCheckResult =
   | { ok: true; userId: string }
   | { ok: false; error: string };
+
+export type AdminApiCheckResult =
+  | { ok: true; userId: string }
+  | { ok: false; response: Response };
 
 /**
  * Require the request to come from a signed-in user with `role = 'admin'`.
@@ -27,4 +33,31 @@ export async function requireAdmin(
   if (rows[0]!.role !== "admin") return { ok: false, error: "admin_required" };
 
   return { ok: true, userId };
+}
+
+/**
+ * Wrapper for API route handlers.
+ *
+ * If the request has a session cookie that verifies but its uid no longer exists
+ * (common after user cleanup), we clear the cookie and return `auth_required`
+ * so the UI can re-login cleanly.
+ */
+export async function requireAdminForApi(
+  sql: Sql,
+  request: Request,
+): Promise<AdminApiCheckResult> {
+  const sessionToken = getSessionTokenFromRequest(request);
+  const secure = process.env.NODE_ENV === "production";
+
+  const admin = await requireAdmin(sql, request);
+  if (admin.ok) return admin;
+
+  if (admin.error === "user_not_found" || admin.error === "auth_required") {
+    const headers: HeadersInit | undefined = sessionToken
+      ? { "set-cookie": serializeClearSessionCookie({ secure }) }
+      : undefined;
+    return { ok: false, response: apiError("auth_required", { headers }) };
+  }
+
+  return { ok: false, response: apiError(admin.error) };
 }

@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { generateTOTPSecret, buildTOTPUri } from "@/lib/auth/totp";
+import { apiError } from "@/lib/api/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   const actingUserId = getActingUserId(request);
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr || !actingUserId) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
+    return apiError(authErr ?? "unauthorized", { status: 401 });
   }
 
   // Check if already enabled
@@ -23,10 +24,10 @@ export async function POST(request: Request) {
     SELECT email, totp_enabled FROM app_user WHERE id = ${actingUserId}
   `;
   if (rows.length === 0) {
-    return Response.json({ error: "user_not_found" }, { status: 404 });
+    return apiError("user_not_found", { status: 404 });
   }
   if (rows[0]!.totp_enabled) {
-    return Response.json({ error: "totp_already_enabled" }, { status: 409 });
+    return apiError("totp_already_enabled", { status: 409 });
   }
 
   const secret = generateTOTPSecret();

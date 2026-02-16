@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActingUserId } from "@/lib/auth/party";
 import { getSql } from "@/lib/db";
+import { hasUsablePaymentDetails, normalizePaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function GET(
     const params = await props.params;
     const userId = getActingUserId(req);
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const sql = getSql();
     const orderId = params.id;
@@ -48,10 +49,13 @@ export async function GET(
     `;
 
     if (orders.length === 0) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      // Return 404 for both not-found and access denied (prevents existence leaks).
+      return NextResponse.json({ error: "order_not_found" }, { status: 404 });
     }
 
     const order = orders[0];
+    const normalizedSnapshot = normalizePaymentMethodSnapshot(order.payment_method_snapshot);
+    const paymentDetailsReady = hasUsablePaymentDetails(normalizedSnapshot);
 
     // 2. Fetch Chat Messages
     const messages = await sql`
@@ -69,9 +73,16 @@ export async function GET(
       ORDER BY m.created_at ASC
     `;
 
-    return NextResponse.json({ order, messages });
+    return NextResponse.json({
+      order: {
+        ...order,
+        payment_method_snapshot: normalizedSnapshot,
+        payment_details_ready: paymentDetailsReady,
+      },
+      messages,
+    });
   } catch (error) {
     console.error("Error fetching P2P order:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

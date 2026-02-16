@@ -334,10 +334,18 @@ export default async function proxy(request: NextRequest) {
   }
 
   // ── Auto-login for Development (if no session exists) ────────────────
-  // In dev, we can inject a user ID to bypass auth if no cookie is present.
+  // In dev, we *optionally* inject a user ID to bypass auth if no cookie is present.
+  // This is opt-in to avoid surprising identity overrides in API testing.
   let devHeaders: Headers | undefined;
-  if (!isProd && !request.cookies.get(getSessionCookieName())) {
-     const DEV_USER_ID = "4760aacb-013c-492f-aaae-e115786ab271"; // Seeded user
+  if (
+    process.env.NODE_ENV === "development" &&
+    !request.cookies.get(getSessionCookieName()) &&
+    !request.headers.get("x-user-id") &&
+    process.env.PROXY_DEV_AUTOLOGIN === "1" &&
+    typeof process.env.PROXY_DEV_USER_ID === "string" &&
+    process.env.PROXY_DEV_USER_ID.trim().length > 0
+  ) {
+     const DEV_USER_ID = process.env.PROXY_DEV_USER_ID.trim();
      devHeaders = new Headers(request.headers);
      devHeaders.set("x-user-id", DEV_USER_ID);
   }

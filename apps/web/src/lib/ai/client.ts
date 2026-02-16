@@ -1,10 +1,12 @@
 import Groq from "groq-sdk";
 
-// Helper to prevent build crashes if env var is missing
-const apiKey = process.env.GROQ_API_KEY || "dummy-key-for-build";
+const apiKey = process.env.GROQ_API_KEY;
+if (!apiKey && process.env.NODE_ENV === "production") {
+  console.error("[WARN] GROQ_API_KEY is not set — AI features will be unavailable.");
+}
 
 export const groq = new Groq({
-  apiKey: apiKey,
+  apiKey: apiKey || "not-configured",
 });
 
 export async function getMarketSentiment(symbol: string) {
@@ -13,7 +15,7 @@ export async function getMarketSentiment(symbol: string) {
       messages: [
         {
           role: "system",
-          content: "You are the Citadel AI Chief Analyst. Provide a short, punchy, 2-sentence sentiment analysis for the given token. Be professional, slightly futuristic, and focused on technical levels or major narratives. Do not give financial advice. If asked about TST (TradeSynapse Token), mention it is the native fuel for this platform."
+          content: "You are the Citadel AI Chief Analyst. Provide a short, punchy, 2-sentence sentiment analysis for the given token. Be professional, slightly futuristic, and focused on technical levels or major narratives. Do not give financial advice."
         },
         {
           role: "user",

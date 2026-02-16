@@ -1,0 +1,221 @@
+import { z } from "zod";
+
+import { getSql } from "@/lib/db";
+import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireActiveUser } from "@/lib/auth/activeUser";
+import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
+import { apiError, apiZodError } from "@/lib/api/errors";
+import { amount3818PositiveSchema } from "@/lib/exchange/amount";
+import { responseForDbError } from "@/lib/dbTransient";
+import { buildConvertJournalLines, convertFeeBps, quoteConvert } from "@/lib/exchange/convert";
+import { toBigInt3818 } from "@/lib/exchange/fixed3818";
+import { recordInternalChainTx } from "@/lib/exchange/internalChain";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const SYSTEM_TREASURY_USER_ID = "00000000-0000-0000-0000-000000000001";
+
+const requestSchema = z.object({
+  from: z.string().min(1).max(12),
+  to: z.string().min(1).max(12),
+  amount_in: amount3818PositiveSchema,
+  reference: z.string().min(1).max(200).optional(),
+  totp_code: z.string().length(6).regex(/^\d{6}$/).optional(),
+});
+
+async function ensureLedgerAccount(sql: ReturnType<typeof getSql>, userId: string, assetId: string): Promise<string> {
+  const rows = await sql<{ id: string }[]>`
+    INSERT INTO ex_ledger_account (user_id, asset_id)
+    VALUES (${userId}::uuid, ${assetId}::uuid)
+    ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
+    RETURNING id::text AS id
+  `;
+  return rows[0]!.id;
+}
+
+async function ensureSystemUser(sql: ReturnType<typeof getSql>, userId: string): Promise<void> {
+  await sql`
+    INSERT INTO app_user (id, status, kyc_level, country)
+    VALUES (${userId}::uuid, 'active', 'none', NULL)
+    ON CONFLICT (id) DO NOTHING
+  `;
+}
+
+export async function POST(request: Request) {
+  const sql = getSql();
+
+  const actingUserId = getActingUserId(request);
+  const authErr = requireActingUserIdInProd(actingUserId);
+  if (authErr) return apiError(authErr);
+  if (!actingUserId) return apiError("missing_x_user_id");
+
+  try {
+    const activeErr = await requireActiveUser(sql, actingUserId);
+    if (activeErr) return apiError(activeErr);
+
+    const body = await request.json().catch(() => ({}));
+    let input: z.infer<typeof requestSchema>;
+    try {
+      input = requestSchema.parse(body);
+    } catch (e) {
+      return apiZodError(e) ?? apiError("invalid_input");
+    }
+
+    const totpResp = await enforceTotpIfEnabled(sql, actingUserId, input.totp_code);
+    if (totpResp) return totpResp;
+
+    const result = await sql.begin(async (tx) => {
+      const txSql = tx as unknown as typeof sql;
+
+      const fromSym = input.from.trim().toUpperCase();
+      const toSym = input.to.trim().toUpperCase();
+      if (fromSym === toSym) {
+        return { status: 409 as const, body: { error: "same_asset" } };
+      }
+
+      const assets = await txSql<{ id: string; symbol: string }[]>`
+        SELECT id::text AS id, symbol
+        FROM ex_asset
+        WHERE chain = 'bsc'
+          AND is_enabled = true
+          AND symbol = ANY(${[fromSym, toSym]})
+      `;
+
+      const fromAsset = assets.find((a) => a.symbol.toUpperCase() === fromSym) ?? null;
+      const toAsset = assets.find((a) => a.symbol.toUpperCase() === toSym) ?? null;
+      if (!fromAsset || !toAsset) {
+        return { status: 404 as const, body: { error: "asset_not_found" } };
+      }
+
+      const quote = await quoteConvert(txSql as any, {
+        fromSymbol: fromSym,
+        toSymbol: toSym,
+        amountIn: input.amount_in,
+      });
+      if (!quote) {
+        return { status: 409 as const, body: { error: "quote_unavailable" } };
+      }
+
+      // Available check in FROM asset.
+      const userFromAcct = await ensureLedgerAccount(txSql, actingUserId, fromAsset.id);
+
+      const balRows = await txSql<{ available: string }[]>`
+        WITH posted AS (
+          SELECT coalesce(sum(amount), 0)::numeric AS posted
+          FROM ex_journal_line
+          WHERE account_id = ${userFromAcct}::uuid
+        ),
+        held AS (
+          SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
+          FROM ex_hold
+          WHERE account_id = ${userFromAcct}::uuid AND status = 'active'
+        )
+        SELECT (posted.posted - held.held)::text AS available
+        FROM posted, held
+      `;
+      const available = balRows[0]?.available ?? "0";
+      if (toBigInt3818(available) < toBigInt3818(quote.amountIn)) {
+        return {
+          status: 409 as const,
+          body: {
+            error: "insufficient_balance",
+            details: { available, required: quote.amountIn },
+          },
+        };
+      }
+
+      await ensureSystemUser(txSql, SYSTEM_TREASURY_USER_ID);
+
+      const [userToAcct, systemFromAcct, systemToAcct, treasuryFromAcct] = await Promise.all([
+        ensureLedgerAccount(txSql, actingUserId, toAsset.id),
+        ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, fromAsset.id),
+        ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, toAsset.id),
+        ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, fromAsset.id),
+      ]);
+
+      const entryRows = await txSql<{ id: string; created_at: string }[]>`
+        INSERT INTO ex_journal_entry (type, reference, metadata_json)
+        VALUES (
+          'convert',
+          ${input.reference ?? `convert:${fromSym}->${toSym}:${Date.now()}`},
+          ${txSql.json({
+            user_id: actingUserId,
+            from: fromSym,
+            to: toSym,
+            amount_in: quote.amountIn,
+            fee_in: quote.feeIn,
+            net_in: quote.netIn,
+            amount_out: quote.amountOut,
+            rate_to_per_from: quote.rateToPerFrom,
+            fee_bps: convertFeeBps(),
+            price_source: quote.priceSource,
+          })}::jsonb
+        )
+        RETURNING id::text AS id, created_at::text AS created_at
+      `;
+      const entryId = entryRows[0]!.id;
+
+      const lines = buildConvertJournalLines({
+        userFromAcct,
+        userToAcct,
+        systemFromAcct,
+        systemToAcct,
+        treasuryFromAcct,
+        fromAssetId: fromAsset.id,
+        toAssetId: toAsset.id,
+        quote,
+      });
+
+      // Insert lines one-by-one (small N) to avoid dynamic VALUES hazards.
+      for (const l of lines) {
+        await txSql`
+          INSERT INTO ex_journal_line (entry_id, account_id, asset_id, amount)
+          VALUES (${entryId}::uuid, ${l.accountId}::uuid, ${l.assetId}::uuid, (${l.amount}::numeric))
+        `;
+      }
+
+      const receipt = await recordInternalChainTx(txSql as any, {
+        entryId,
+        type: "convert",
+        userId: actingUserId,
+        metadata: {
+          from: fromSym,
+          to: toSym,
+          amount_in: quote.amountIn,
+          amount_out: quote.amountOut,
+          fee_bps: convertFeeBps(),
+          price_source: quote.priceSource,
+        },
+      });
+
+      return {
+        status: 201 as const,
+        body: {
+          ok: true,
+          convert: {
+            id: entryId,
+            created_at: entryRows[0]!.created_at,
+            quote,
+            tx_hash: receipt.txHash,
+            block_height: receipt.blockHeight,
+          },
+        },
+      };
+    });
+
+    const err = result.body as { error?: string; details?: unknown };
+    if (typeof err.error === "string") {
+      return apiError(err.error, { status: result.status, details: err.details });
+    }
+
+    return Response.json(result.body, { status: result.status });
+  } catch (e) {
+    const resp = responseForDbError("exchange.convert.execute", e);
+    if (resp) return resp;
+    console.error("exchange.convert.execute failed:", e);
+    return apiError("internal_error", {
+      details: { message: e instanceof Error ? e.message : String(e) },
+    });
+  }
+}

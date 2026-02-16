@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { SiteChrome } from "@/components/SiteChrome";
 import { P2PMarketplace } from "./P2PMarketplace";
+import { SUPPORTED_P2P_COUNTRIES } from "@/lib/p2p/supportedCountries";
 
 export const metadata: Metadata = {
   title: "P2P Trading | TradeSynapse",
@@ -45,6 +46,23 @@ export default function P2PPage() {
                    <p className="text-[var(--muted)] mt-1">Once the seller releases the crypto, it is instantly added to your wallet.</p>
                 </div>
              </div>
+          </div>
+        </div>
+
+        {/* Supported countries */}
+        <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-6 mb-8 shadow-sm">
+          <h2 className="text-lg font-bold mb-4 text-[var(--foreground)]">Supported Countries</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+            {Object.entries(SUPPORTED_P2P_COUNTRIES).map(([region, countries]) => (
+              <div key={region}>
+                <h3 className="font-bold text-[var(--foreground)]">{region}</h3>
+                <ul className="mt-2 space-y-1 text-[var(--muted)]">
+                  {countries.map((c) => (
+                    <li key={c}>- {c}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </div>
 

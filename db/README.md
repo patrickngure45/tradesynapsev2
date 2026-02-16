@@ -11,6 +11,7 @@ This folder contains **stack-agnostic** Postgres migrations for the ProofPack MV
 - `db/migrations/006_exchange_orders.sql`: markets, limit orders, executions
 - `db/migrations/007_exchange_fees.sql`: maker/taker fees (market bps + execution fee amounts)
 - `db/migrations/012_outbox_and_signals.sql`: durable outbox events + generic AI-ready signals
+- `db/migrations/039_p2p_disputes.sql`: P2P dispute tables + status tracking (required for disputes UI/API)
 
 ## How to run locally
 1) Create a Postgres database.
@@ -18,6 +19,10 @@ This folder contains **stack-agnostic** Postgres migrations for the ProofPack MV
 
 Option A — from the web app (recommended for this repo):
 - From `apps/web`, run `npm run db:migrate` (uses `DATABASE_URL` from `apps/web/.env(.local)` or repo root `.env(.local)`).
+
+Notes:
+- `npm run db:migrate` applies all `db/migrations/*.sql` files in alphanumeric order.
+- Applied migrations are recorded in the `_migrations` table.
 
 Option B — using `psql` directly:
 

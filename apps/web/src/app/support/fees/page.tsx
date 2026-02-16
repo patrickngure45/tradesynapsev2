@@ -24,19 +24,19 @@ export default function FeesPage() {
                 <tbody className="divide-y divide-[var(--border)]">
                   <tr>
                     <td className="p-3">VIP 0</td>
-                    <td className="p-3">&lt; 50k TST</td>
+                    <td className="p-3">&lt; $50k</td>
                     <td className="p-3">0.1000%</td>
                     <td className="p-3">0.1000%</td>
                   </tr>
                   <tr>
                     <td className="p-3">VIP 1</td>
-                    <td className="p-3">≥ 50k TST</td>
+                    <td className="p-3">≥ $50k</td>
                     <td className="p-3">0.0900%</td>
                     <td className="p-3">0.1000%</td>
                   </tr>
                   <tr>
                     <td className="p-3">VIP 2</td>
-                    <td className="p-3">≥ 500k TST</td>
+                    <td className="p-3">≥ $500k</td>
                     <td className="p-3">0.0800%</td>
                     <td className="p-3">0.1000%</td>
                   </tr>
@@ -44,7 +44,7 @@ export default function FeesPage() {
               </table>
             </div>
             <p className="text-xs text-[var(--muted)]">
-              Fees are deducted from the received asset. Use TST to pay fees for a 25% discount (Coming Soon).
+              Fees are deducted from the received asset.
             </p>
           </section>
 
@@ -73,7 +73,6 @@ export default function FeesPage() {
               <li><strong>BTC:</strong> ~0.0002 BTC</li>
               <li><strong>ETH:</strong> ~0.002 ETH</li>
               <li><strong>USDT (BSC):</strong> 0.29 USDT</li>
-              <li><strong>TST:</strong> Free (Internal transfers)</li>
             </ul>
           </section>
         </div>

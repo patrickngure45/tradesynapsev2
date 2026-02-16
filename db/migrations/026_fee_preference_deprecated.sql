@@ -1,4 +1,4 @@
--- TST Utility: Fee Discount Preference
+-- Fee Discount Preference (deprecated)
 ALTER TABLE app_user
 ADD COLUMN pay_fees_with_tst BOOLEAN DEFAULT FALSE;
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { ArbitrageOpportunityRow } from "./ArbitrageOpportunityRow";
 
@@ -18,10 +19,78 @@ type ArbOpp = {
   potentialProfit: number;
   netSpreadPct: number;
   netProfit: number;
+  notionalUsd?: number;
+  execNotionalUsd?: number;
+  grossProfitUsd?: number;
+  netProfitUsd?: number;
+  grossProfitExecUsd?: number;
+  netProfitExecUsd?: number;
+  readiness?: {
+    state: "discoverable" | "action_required" | "executable";
+    canExecute: boolean;
+    reasons: string[];
+  };
+  ts: string;
+};
+
+type IndexSource = { exchange: string; mid: number | null; ts: number; error?: string };
+type IndexOpp = {
+  base: string;
+  internalSymbol: string;
+  internalBidUsdt: number;
+  internalAskUsdt: number;
+  internalMidUsdt: number;
+  externalIndexUsdt: number;
+  indexSourcesUsed: number;
+  indexSources: IndexSource[];
+  dispersionBps: number | null;
+  deviationPct: number;
+  direction: "buy_internal_sell_external" | "sell_internal_buy_external" | "none";
   ts: string;
 };
 
 type SortField = "spread" | "profit" | "symbol";
+
+type ArbScannerMeta = {
+  scannedExchanges: string[];
+  trackedSymbols: string[];
+  enabledAssetCount?: number;
+  maxSymbols?: number;
+  notionalUsd?: number;
+};
+
+type ArbOverview = {
+  ts: string;
+  symbols: { enabledCount: number; scanned: string[]; scannedCount: number; maxSymbols: number };
+  venues: { connected: string[]; scanned?: string[]; mode?: "connected" | "public" };
+  gates?: {
+    api?: { ok: boolean; connectedCount: number };
+  };
+  sizing: {
+    minUsd: number;
+    capUsd: number;
+    notionalUsd: number;
+  };
+  external: {
+    banner?: { tone: "error" | "warning"; code: string; message: string } | null;
+    opportunities: ArbOpp[];
+    prices: PriceMap;
+    errors?: any[];
+  };
+  index: { minDevPct: number; opportunities: IndexOpp[] };
+};
+
+type BannerTone = "error" | "warning";
+type ApiErrorPayload = {
+  error?: string;
+  message?: string;
+  external?: {
+    banner?: {
+      tone?: BannerTone;
+      message?: string;
+    } | null;
+  };
+};
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -62,6 +131,31 @@ function deduplicateOpps(list: ArbOpp[]): ArbOpp[] {
   return Array.from(unique.values());
 }
 
+function resolveApiErrorMessage(data: ApiErrorPayload | null, fallback: string) {
+  const bannerMsg = data?.external?.banner?.message;
+  if (typeof bannerMsg === "string" && bannerMsg.trim()) return bannerMsg.trim();
+
+  if (typeof data?.message === "string" && data.message.trim()) return data.message.trim();
+  if (typeof data?.error === "string" && data.error.trim()) {
+    const code = data.error.trim();
+    if (code === "user_not_found" || code === "missing_x_user_id") {
+      return "Sign in to run the scanner.";
+    }
+    if (code === "inactive_user") {
+      return "Your account is not active for scanning yet.";
+    }
+    return code;
+  }
+
+  return fallback;
+}
+
+function resolveApiErrorTone(status: number, data: ApiErrorPayload | null): BannerTone {
+  const tone = data?.external?.banner?.tone;
+  if (tone === "warning" || tone === "error") return tone;
+  return status >= 500 ? "error" : "warning";
+}
+
 /* ── Mini bar visualization ─────────────────────────────────────────── */
 
 function SpreadBar({ pct, max }: { pct: number; max: number }) {
@@ -90,15 +184,24 @@ function PulseDot() {
 /* ── Component ──────────────────────────────────────────────────────── */
 
 export function ArbitrageClient({ userId }: { userId: string | null }) {
+  const searchParams = useSearchParams();
+  const debug = searchParams.get("debug") === "1";
+
   const [prices, setPrices] = useState<PriceMap>({});
   const [opps, setOpps] = useState<ArbOpp[]>([]);
   const [symbols, setSymbols] = useState<string[]>([]);
   const [connections, setConnections] = useState<string[]>([]); // list of connected exchange IDs (binance, bybit)
+  const [indexOpps, setIndexOpps] = useState<IndexOpp[]>([]);
   const [scanning, setScanning] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [autoScan, setAutoScan] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTone, setErrorTone] = useState<BannerTone>("error");
   const [scanCount, setScanCount] = useState(0);
+  const [scannerMeta, setScannerMeta] = useState<ArbScannerMeta | null>(null);
+  const [gates, setGates] = useState<ArbOverview["gates"] | null>(null);
+
+  const oppExchanges = Array.from(new Set(opps.flatMap((o) => [o.buyExchange, o.sellExchange])));
 
   // Filters & sort
   const [minSpread, setMinSpread] = useState(0);
@@ -124,36 +227,87 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
 
   const fetchLatest = useCallback(async () => {
     try {
-      const res = await fetch("/api/exchange/arbitrage?action=latest", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      setPrices(data.prices ?? {});
-      setOpps(deduplicateOpps(data.opportunities ?? []));
-      setSymbols(data.symbols ?? []);
+      const url = debug
+        ? "/api/exchange/arbitrage/overview?action=latest&debug=1"
+        : "/api/exchange/arbitrage/overview?action=latest";
+      const res = await fetch(url, { credentials: "include" });
+      const data = (await res.json().catch(() => null)) as (ArbOverview & ApiErrorPayload) | null;
+      if (!res.ok || !data) {
+        const msg = resolveApiErrorMessage(data, "Failed to load arbitrage data");
+        const tone = resolveApiErrorTone(res.status, data);
+        setError(msg);
+        setErrorTone(tone);
+        setGates(null);
+        return;
+      }
+      setPrices(data.external?.prices ?? {});
+      setOpps(deduplicateOpps(data.external?.opportunities ?? []));
+      setIndexOpps(Array.isArray(data.index?.opportunities) ? data.index.opportunities : []);
+      setSymbols(Object.keys(data.external?.prices ?? {}));
+
+      const scanned = Array.isArray(data.venues?.scanned) ? data.venues.scanned : (Array.isArray(data.venues?.connected) ? data.venues.connected : []);
+      setScannerMeta({
+        scannedExchanges: scanned,
+        trackedSymbols: Array.isArray(data.symbols?.scanned) ? data.symbols.scanned : [],
+        enabledAssetCount: data.symbols?.enabledCount,
+        maxSymbols: data.symbols?.maxSymbols,
+        notionalUsd: data.sizing?.notionalUsd,
+      });
       setLastUpdate(data.ts);
-      setError(null);
+      setGates(data.gates ?? null);
+      const banner = data.external?.banner ?? null;
+      setError(banner?.message ?? null);
+      setErrorTone((banner?.tone as BannerTone) ?? "error");
     } catch {
       setError("Failed to load arbitrage data");
+      setErrorTone("error");
+      setGates(null);
     }
-  }, []);
+  }, [debug]);
 
   const triggerScan = useCallback(async () => {
     setScanning(true);
     try {
-      const res = await fetch("/api/exchange/arbitrage?action=scan", { credentials: "include" });
-      if (!res.ok) throw new Error("Scan failed");
-      const data = await res.json();
-      setOpps(deduplicateOpps(data.opportunities ?? []));
+      const url = debug
+        ? "/api/exchange/arbitrage/overview?action=scan&debug=1"
+        : "/api/exchange/arbitrage/overview?action=scan";
+      const res = await fetch(url, { credentials: "include" });
+      const data = (await res.json().catch(() => null)) as (ArbOverview & ApiErrorPayload) | null;
+      if (!res.ok || !data) {
+        const msg = resolveApiErrorMessage(data, "Scan failed");
+        const tone = resolveApiErrorTone(res.status, data);
+        setError(msg);
+        setErrorTone(tone);
+        setGates(null);
+        return;
+      }
+      setPrices(data.external?.prices ?? {});
+      setOpps(deduplicateOpps(data.external?.opportunities ?? []));
+      setIndexOpps(Array.isArray(data.index?.opportunities) ? data.index.opportunities : []);
+      setSymbols(Object.keys(data.external?.prices ?? {}));
+
+      const scanned = Array.isArray(data.venues?.scanned) ? data.venues.scanned : (Array.isArray(data.venues?.connected) ? data.venues.connected : []);
+      setScannerMeta({
+        scannedExchanges: scanned,
+        trackedSymbols: Array.isArray(data.symbols?.scanned) ? data.symbols.scanned : [],
+        enabledAssetCount: data.symbols?.enabledCount,
+        maxSymbols: data.symbols?.maxSymbols,
+        notionalUsd: data.sizing?.notionalUsd,
+      });
       setLastUpdate(data.ts);
       setScanCount((c) => c + 1);
-      setError(null);
-      await fetchLatest();
+      setGates(data.gates ?? null);
+      const banner = data.external?.banner ?? null;
+      setError(banner?.message ?? null);
+      setErrorTone((banner?.tone as BannerTone) ?? "error");
     } catch {
-      setError("Scan failed — check exchange API connectivity");
+      setError("Scan failed");
+      setErrorTone("error");
+      setGates(null);
     } finally {
       setScanning(false);
     }
-  }, [fetchLatest]);
+  }, [debug]);
 
   useEffect(() => {
     fetchLatest();
@@ -171,8 +325,8 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
     opps.length > 0
       ? opps.reduce((s, o) => s + (o.netSpreadPct ?? 0), 0) / opps.length
       : 0;
-  // Only sum up profitable opportunities for "Total Potential"
-  const totalProfit = opps.reduce((s, o) => s + Math.max(0, o.netProfit ?? 0), 0);
+  // Only sum up profitable opps for the user's notional (still a heuristic)
+  const totalNetProfitUsd = opps.reduce((s, o) => s + Math.max(0, o.netProfitExecUsd ?? o.netProfitUsd ?? 0), 0);
 
   const filteredOpps = [...opps]
     .filter((o) => o.spreadPct >= minSpread)
@@ -181,7 +335,7 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
         case "spread":
           return b.spreadPct - a.spreadPct;
         case "profit":
-          return b.potentialProfit - a.potentialProfit;
+          return (b.netProfitExecUsd ?? b.netProfitUsd ?? b.potentialProfit) - (a.netProfitExecUsd ?? a.netProfitUsd ?? a.potentialProfit);
         case "symbol":
           return a.symbol.localeCompare(b.symbol);
       }
@@ -236,9 +390,45 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
         </div>
 
         <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px] text-[var(--muted)]">
-          Spreads shown are <span className="font-medium text-[var(--foreground)]">gross</span>.
-          Fees, slippage, withdrawal limits, and transfer time can erase profit.
+          We show <span className="font-medium text-[var(--foreground)]">net spread</span> estimates (fees + slippage + delay).
+          Real execution depends on balances, limits, and speed.
         </div>
+
+        {scannerMeta && (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+              <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Sizing used</div>
+              <div className="mt-1 text-sm font-semibold">
+                ${(scannerMeta.notionalUsd ?? 0).toFixed(0)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+              <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Coverage</div>
+              <div className="mt-1 text-sm font-semibold">
+                {scannerMeta.scannedExchanges.length} venues
+              </div>
+              <div className="text-[11px] text-[var(--muted)]">
+                {scannerMeta.trackedSymbols.length} symbols scanned (cap {scannerMeta.maxSymbols ?? "—"})
+              </div>
+            </div>
+          </div>
+        )}
+
+        {debug && scannerMeta && (
+          <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px] text-[var(--muted)]">
+            <div className="font-semibold text-[var(--foreground)]">Debug</div>
+            <div className="mt-1">
+              Scanned: {scannerMeta.scannedExchanges.length > 0
+                ? scannerMeta.scannedExchanges.map(exchangeLabel).join(", ")
+                : "—"}
+            </div>
+            <div>
+              Opportunities: {oppExchanges.length > 0
+                ? oppExchanges.map(exchangeLabel).join(", ")
+                : "—"}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Controls ──────────────────────────────────────────────── */}
@@ -318,13 +508,19 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400">
-          {error}
+        <div
+          className={
+            errorTone === "warning"
+              ? "rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-200"
+              : "rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400"
+          }
+        >
+          {errorTone === "warning" ? "Action:" : "Blocked:"} {error}
           <button
             onClick={() => setError(null)}
             className="ml-2 text-xs underline opacity-70 hover:opacity-100"
           >
-            dismiss
+            · dismiss
           </button>
         </div>
       )}
@@ -352,8 +548,8 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
           },
           {
             label: "Net Profit",
-            value: totalProfit > 0 ? `$${totalProfit.toFixed(2)}` : "—",
-            sub: "per $1k (est.)",
+            value: totalNetProfitUsd > 0 ? `$${totalNetProfitUsd.toFixed(2)}` : "—",
+            sub: "user sizing",
             icon: "💰",
           },
         ].map((stat) => (
@@ -430,6 +626,68 @@ export function ArbitrageClient({ userId }: { userId: string | null }) {
                 Showing top 50 highly profitable opportunities (of {filteredOpps.length} total)
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* ── TradeSynapse vs External Index ──────────────────────── */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-medium">TradeSynapse vs External Index</h3>
+            {indexOpps.length > 0 && (
+              <span className="rounded-full bg-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)]">
+                {indexOpps.length} signals
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-[var(--muted)]">External index is median across exchanges</div>
+        </div>
+
+        {indexOpps.length === 0 ? (
+          <div className="py-6 text-center text-sm text-[var(--muted)]">No index signals yet (scan to compute).</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wider text-[var(--muted)]">
+                  <th className="pb-2 pr-4">Asset</th>
+                  <th className="pb-2 pr-4 text-right">Internal Mid (USDT)</th>
+                  <th className="pb-2 pr-4 text-right">Index (USDT)</th>
+                  <th className="pb-2 pr-4 text-right">Deviation</th>
+                  <th className="pb-2 pr-4">Sources</th>
+                  <th className="pb-2 text-right">Dispersion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...indexOpps]
+                  .sort((a, b) => Math.abs(b.deviationPct) - Math.abs(a.deviationPct))
+                  .slice(0, 25)
+                  .map((s) => {
+                    const dev = s.deviationPct;
+                    const devClass = dev >= 0.25 ? "text-red-400" : dev <= -0.25 ? "text-[var(--up)]" : "text-[var(--muted)]";
+                    const exchangesUsed = (s.indexSources || [])
+                      .filter((x) => !x.error && typeof x.mid === "number")
+                      .map((x) => exchangeLabel(String(x.exchange)))
+                      .slice(0, 4);
+                    return (
+                      <tr key={s.base} className="border-b border-[var(--border)]/30 transition hover:bg-[var(--accent)]/5">
+                        <td className="py-2.5 pr-4 font-mono font-medium">{s.base}/USDT</td>
+                        <td className="py-2.5 pr-4 text-right font-mono">{s.internalMidUsdt.toFixed(4)}</td>
+                        <td className="py-2.5 pr-4 text-right font-mono">{s.externalIndexUsdt.toFixed(4)}</td>
+                        <td className={`py-2.5 pr-4 text-right font-mono font-semibold ${devClass}`}>{dev > 0 ? "+" : ""}{dev.toFixed(3)}%</td>
+                        <td className="py-2.5 pr-4 text-[11px] text-[var(--muted)]">
+                          {exchangesUsed.length ? exchangesUsed.join(", ") : "—"}
+                          {s.indexSourcesUsed ? ` (${s.indexSourcesUsed})` : ""}
+                        </td>
+                        <td className="py-2.5 text-right font-mono text-[11px] text-[var(--muted)]">
+                          {typeof s.dispersionBps === "number" ? `${s.dispersionBps.toFixed(0)} bps` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

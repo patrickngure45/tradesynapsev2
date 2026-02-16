@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
     const newHash = await hashPassword(newPassword);
     await sql`
-      UPDATE app_user SET password_hash = ${newHash}, updated_at = now()
+      UPDATE app_user SET password_hash = ${newHash}
       WHERE id = ${actingUserId}
     `;
 

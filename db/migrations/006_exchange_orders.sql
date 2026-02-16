@@ -6,7 +6,7 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS ex_market (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   chain text NOT NULL CHECK (chain IN ('bsc')),
-  symbol text NOT NULL, -- e.g. 'TST/USDT'
+  symbol text NOT NULL, -- e.g. 'BTC/USDT'
   base_asset_id uuid NOT NULL REFERENCES ex_asset(id) ON DELETE RESTRICT,
   quote_asset_id uuid NOT NULL REFERENCES ex_asset(id) ON DELETE RESTRICT,
   status text NOT NULL DEFAULT 'enabled' CHECK (status IN ('enabled','disabled')),

@@ -1,3 +1,4 @@
+import "dotenv/config";
 // SEED ADMIN SCRIPT
 // Deposite capital into the admin account to enable testing.
 
@@ -33,7 +34,7 @@ async function main() {
 
 
     // Assets to seed
-    const assetCodes = ["USDT", "BTC", "ETH", "TST"];
+    const assetCodes = ["USDT", "BTC", "ETH"];
     const assetsMap = new Map();
     
     // Get Asset IDs
@@ -49,7 +50,6 @@ async function main() {
       { code: "USDT", amount: 100000.00 },
       { code: "BTC", amount: 5.00 },
       { code: "ETH", amount: 50.00 },
-      { code: "TST", amount: 1000000.00 },
     ];
 
     await sql.begin(async (tx) => {

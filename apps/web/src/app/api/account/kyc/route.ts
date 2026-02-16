@@ -9,7 +9,7 @@ import { createNotification } from "@/lib/notifications";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const KYC_TIERS = ["none", "basic", "verified"] as const;
+const KYC_TIERS = ["none", "basic", "full"] as const;
 
 const upgradeSchema = z.object({
   action: z.literal("upgrade"),
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       }
       const nextTier = "basic";
       await sql`
-        UPDATE app_user SET kyc_level = ${nextTier}, updated_at = now()
+        UPDATE app_user SET kyc_level = ${nextTier}
         WHERE id = ${actingUserId}
       `;
       await createNotification(sql, {
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, kyc_level: nextTier });
     }
 
-    // ── Mode 2: Document submission (basic → verified, pending admin review) ──
+    // ── Mode 2: Document submission (basic → full, pending admin review) ──
     if (current !== "basic") {
       return apiError("kyc_documents_require_basic", {
         status: 409,

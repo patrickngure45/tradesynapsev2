@@ -1,4 +1,6 @@
 // Check Users and Roles
+import "dotenv/config";
+
 import { getSql } from "../src/lib/db";
 
 async function main() {

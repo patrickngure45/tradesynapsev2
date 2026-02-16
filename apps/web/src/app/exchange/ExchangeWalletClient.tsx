@@ -27,6 +27,12 @@ type BalanceRow = {
  available: string;
 };
 
+type ProfileResponse = {
+ user?: {
+ country: string | null;
+ };
+};
+
 type Hold = {
  id: string;
  asset_id: string;
@@ -60,25 +66,42 @@ type WithdrawalRow = {
  created_at: string;
 };
 
-type AdminWithdrawalRow = {
- id: string;
- user_id: string;
- asset_id: string;
- symbol: string;
- chain: string;
+type GasQuote = {
+ enabled: boolean;
+ gasSymbol: string;
  amount: string;
- destination_address: string;
- status: string;
- hold_id: string | null;
- reference: string | null;
- risk_score: number | null;
- risk_recommended_action: string | null;
- risk_model_version: string | null;
- risk_created_at: string | null;
- created_at: string;
+ chargeSymbol?: string;
+ chargeAmount?: string;
+ mode:"static"|"realtime";
+ burnBps: number;
+ details?: Record<string, unknown>;
+};
+
+type AdminWithdrawalRow = {
+  id: string;
+  user_id: string;
+  asset_id: string;
+  symbol: string;
+  chain: string;
+  amount: string;
+  destination_address: string;
+  status: string;
+  hold_id: string | null;
+  reference: string | null;
+  risk_score: number | null;
+  risk_recommended_action: string | null;
+  risk_model_version: string | null;
+  risk_created_at: string | null;
+  created_at: string;
+};
+
+type AdminWallet = {
+  address: string;
+  balances: { symbol: string; amount: string }[];
 };
 
 function isUuid(value: string): boolean {
+
  const v = value.trim();
  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
@@ -90,13 +113,44 @@ function fmtAmount(value: string, decimals: number): string {
  return n.toLocaleString(undefined, { maximumFractionDigits: places });
 }
 
-export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
- const [loadingAction, setLoadingAction] = useState<string | null>(null);
- const [error, setError] = useState<ClientApiError | null>(null);
+function toNumberSafe(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(String(value));
+  return Number.isFinite(n) ? n : 0;
+}
 
- const [assets, setAssets] = useState<Asset[]>([]);
+function fiatForCountry(country: string | null | undefined): string {
+ const normalized = String(country ?? "").trim().toUpperCase();
+ if (normalized === "KE" || normalized === "KENYA") return "KES";
+ if (normalized === "TZ" || normalized === "TANZANIA") return "TZS";
+ if (normalized === "UG" || normalized === "UGANDA") return "UGX";
+ if (normalized === "RW" || normalized === "RWANDA") return "RWF";
+ return "USD";
+}
+
+function fmtFiat(value: number, currency: string): string {
+ if (!Number.isFinite(value)) return "—";
+ try {
+ return new Intl.NumberFormat(undefined, {
+ style: "currency",
+ currency,
+ maximumFractionDigits: 2,
+ }).format(value);
+ } catch {
+ return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${currency}`;
+ }
+}
+
+export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [error, setError] = useState<ClientApiError | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
+
  const [balances, setBalances] = useState<BalanceRow[]>([]);
  const [holds, setHolds] = useState<Hold[]>([]);
+ const [localFiat, setLocalFiat] = useState<string>("USD");
+ const [assetLocalRates, setAssetLocalRates] = useState<Record<string, number>>({});
+ const [assetLocalRateSource, setAssetLocalRateSource] = useState<Record<string, string>>({});
+ const [localValueReady, setLocalValueReady] = useState(false);
 
  const [authMode, setAuthMode] = useState<"session"|"header">("session");
  const [actingUserId, setActingUserId] = useState<string>(() => {
@@ -116,6 +170,19 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [withdrawAmount, setWithdrawAmount] = useState<string>("");
  const [withdrawDestination, setWithdrawDestination] = useState<string>("");
  const [withdrawTotpCode, setWithdrawTotpCode] = useState<string>("");
+ const [gasQuote, setGasQuote] = useState<GasQuote | null>(null);
+
+ const [gasQuoteLoading, setGasQuoteLoading] = useState(false);
+ const [gasQuoteUpdatedAt, setGasQuoteUpdatedAt] = useState<number | null>(null);
+
+ const [transferGasQuoteLoading, setTransferGasQuoteLoading] = useState(false);
+ const [transferGasQuoteUpdatedAt, setTransferGasQuoteUpdatedAt] = useState<number | null>(null);
+
+ const [transferAssetId, setTransferAssetId] = useState<string>("");
+ const [transferAmount, setTransferAmount] = useState<string>("");
+ const [transferRecipientEmail, setTransferRecipientEmail] = useState<string>("");
+ const [transferTotpCode, setTransferTotpCode] = useState<string>("");
+ const [transferGasQuote, setTransferGasQuote] = useState<GasQuote | null>(null);
 
  const [depositSymbol, setDepositSymbol] = useState<string>("USDT");
  const [depositAmount, setDepositAmount] = useState<string>("25");
@@ -127,8 +194,13 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
  const [adminRequested, setAdminRequested] = useState<AdminWithdrawalRow[]>([]);
+  const [adminWallet, setAdminWallet] = useState<AdminWallet | null>(null);
 
- const [holdAssetId, setHoldAssetId] = useState<string>("");
+ const [reverseTransferId, setReverseTransferId] = useState<string>("");
+ const [reverseTransferReason, setReverseTransferReason] = useState<string>("");
+
+  const [holdAssetId, setHoldAssetId] = useState<string>("");
+
  const [holdAmount, setHoldAmount] = useState<string>("");
  const [holdReason, setHoldReason] = useState<string>("order_hold");
 
@@ -147,9 +219,218 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return {"x-user-id": id };
  }, [authMode, actingUserId]);
 
+ const canUseHeader = actingUserId.trim() && isUuid(actingUserId.trim());
+
+ const withdrawableAssets = useMemo(() => assets, [assets]);
+
+ const availableByAssetId = useMemo(() => {
+ const out = new Map<string, number>();
+ for (const b of balances) {
+ out.set(b.asset_id, Number(b.available));
+ }
+ return out;
+ }, [balances]);
+
+ const transferableAssets = useMemo(
+ () =>
+ assets.filter((asset) => {
+ const available = availableByAssetId.get(asset.id);
+ return Number.isFinite(available) && (available as number) > 0;
+ }),
+ [assets, availableByAssetId]
+ );
+
+ const selectedWithdrawAsset = useMemo(
+ () => withdrawableAssets.find((asset) => asset.id === withdrawAssetId) ?? null,
+ [withdrawableAssets, withdrawAssetId]
+ );
+
+ const selectedTransferAsset = useMemo(
+ () => transferableAssets.find((asset) => asset.id === transferAssetId) ?? null,
+ [transferableAssets, transferAssetId]
+ );
+
+ const selectedTransferAvailable = useMemo(() => {
+ if (!selectedTransferAsset) return 0;
+ const row = balances.find((b) => b.asset_id === selectedTransferAsset.id);
+ const available = Number(row?.available ?? NaN);
+ return Number.isFinite(available) ? available : 0;
+ }, [balances, selectedTransferAsset]);
+
+ const transferAmountNumber = Number(transferAmount);
+ const isTransferAmountValid = Number.isFinite(transferAmountNumber) && transferAmountNumber > 0;
+ const isTransferAmountTooHigh = isTransferAmountValid && transferAmountNumber > selectedTransferAvailable;
+ const isRecipientEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(transferRecipientEmail.trim());
+
+ const visibleBalances = useMemo(
+ () =>
+ balances.filter((b) => {
+ const posted = Number(b.posted);
+ const held = Number(b.held);
+ const available = Number(b.available);
+ return posted > 0 || held > 0 || available > 0;
+ }),
+ [balances]
+ );
+
+ const sortedVisibleBalances = useMemo(() => {
+ const rows = [...visibleBalances];
+ const localVal = (b: BalanceRow): number | null => {
+ if (!localValueReady) return null;
+ const available = Number(b.available);
+ const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+ if (!(Number.isFinite(available) && rate != null && Number.isFinite(rate) && rate > 0)) return null;
+ return available * rate;
+ };
+
+ rows.sort((a, b) => {
+ const av = localVal(a);
+ const bv = localVal(b);
+ if (av != null && bv != null && av !== bv) return bv - av;
+ if (av != null && bv == null) return -1;
+ if (av == null && bv != null) return 1;
+ return a.symbol.localeCompare(b.symbol);
+ });
+ return rows;
+ }, [visibleBalances, localValueReady, assetLocalRates]);
+
+ const balancesSummary = useMemo(() => {
+ const activeHolds = holds.filter((h) => String(h.status ?? "").toLowerCase() === "active").length;
+ if (!localValueReady) {
+ return { assetCount: visibleBalances.length, activeHolds, totalLocal: null as number | null };
+ }
+ let total = 0;
+ let hasAny = false;
+ for (const b of visibleBalances) {
+ const available = Number(b.available);
+ const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+ if (!(Number.isFinite(available) && rate != null && Number.isFinite(rate) && rate > 0)) continue;
+ total += available * rate;
+ hasAny = true;
+ }
+ return { assetCount: visibleBalances.length, activeHolds, totalLocal: hasAny ? total : null };
+ }, [holds, visibleBalances, localValueReady, assetLocalRates]);
+
+ async function loadAssetLocalRates(fiat: string) {
+ const fetchWithTimeout = async <T,>(url: string, timeoutMs = 4000): Promise<T> => {
+ const controller = new AbortController();
+ const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+ try {
+ return await fetchJsonOrThrow<T>(url, {
+ cache: "no-store",
+ signal: controller.signal,
+ });
+ } finally {
+ window.clearTimeout(timer);
+ }
+ };
+
+ try {
+ const q = new URLSearchParams({ fiat });
+ const market = await fetchWithTimeout<{
+ assets?: Array<{ symbol: string; index_fiat?: string | null; index_usdt?: string | null }>;
+ fx?: { usdt_fiat?: { mid?: number | string } | null };
+ }>(`/api/exchange/markets/overview?${q.toString()}`, 4500);
+
+ const rates: Record<string, number> = {};
+ const rateSource: Record<string, string> = {};
+ const indexUsdtBySymbol: Record<string, number> = {};
+
+ for (const a of market.assets ?? []) {
+ const sym = String(a.symbol ?? "").trim().toUpperCase();
+ if (!sym) continue;
+
+ const fiatVal = Number(a.index_fiat ?? NaN);
+ if (Number.isFinite(fiatVal) && fiatVal > 0) {
+ rates[sym] = fiatVal;
+ rateSource[sym] = "Market index";
+ }
+
+ const usdtVal = Number(a.index_usdt ?? NaN);
+ if (Number.isFinite(usdtVal) && usdtVal > 0) indexUsdtBySymbol[sym] = usdtVal;
+ }
+
+ const usdtFx = Number(market.fx?.usdt_fiat?.mid ?? NaN);
+ if (Number.isFinite(usdtFx) && usdtFx > 0) {
+ rates.USDT = usdtFx;
+ rateSource.USDT = "Live FX";
+ }
+
+ let usdtLocal = rates.USDT ?? null;
+ if (!(usdtLocal != null && Number.isFinite(usdtLocal) && usdtLocal > 0)) {
+ try {
+ const p2pUsdt = await fetchWithTimeout<{ ads?: Array<{ fixed_price?: string | number }> }>(
+ `/api/p2p/ads?side=BUY&asset=USDT&fiat=${encodeURIComponent(fiat)}`,
+ 2500,
+ );
+ const px = Number(p2pUsdt.ads?.[0]?.fixed_price ?? NaN);
+ if (Number.isFinite(px) && px > 0) {
+ usdtLocal = px;
+ rates.USDT = px;
+ rateSource.USDT = "P2P";
+ }
+
+ // No forced parity: the anchor currency should not be assumed.
+ } catch {
+ // ignore fallback failure
+ }
+ }
+
+ if (usdtLocal != null && Number.isFinite(usdtLocal) && usdtLocal > 0) {
+ for (const [sym, usdtPx] of Object.entries(indexUsdtBySymbol)) {
+ if (rates[sym] != null) continue;
+ rates[sym] = usdtPx * usdtLocal;
+ rateSource[sym] = "Derived";
+ }
+ }
+
+ setAssetLocalRates((prev) => {
+ const nextEntries = Object.entries(rates).filter(([, value]) => Number.isFinite(value) && value > 0);
+ if (nextEntries.length === 0) return prev;
+
+ const out: Record<string, number> = { ...prev };
+ for (const [symbol, next] of nextEntries) {
+ if (symbol === "USDT") {
+ // For the anchor currency, always use freshest authoritative quote (no damping).
+ out[symbol] = next;
+ continue;
+ }
+ const previous = prev[symbol];
+ if (Number.isFinite(previous) && (previous as number) > 0) {
+ const prevValue = previous as number;
+ const relativeDelta = Math.abs(next - prevValue) / Math.max(prevValue, 1e-9);
+
+ if (relativeDelta < 0.003) {
+ out[symbol] = prevValue;
+ continue;
+ }
+
+ // Smooth abrupt changes to avoid UI "dancing".
+ out[symbol] = prevValue * 0.7 + next * 0.3;
+ } else {
+ out[symbol] = next;
+ }
+ }
+
+ return out;
+ });
+
+ setAssetLocalRateSource((prev) => {
+ const out: Record<string, string> = { ...prev };
+ for (const [symbol, source] of Object.entries(rateSource)) {
+ if (source) out[symbol] = source;
+ }
+ return out;
+ });
+ } catch {
+ // Keep previous rates on transient failures to avoid flicker/jumps.
+ }
+ }
+
  async function refreshAll() {
  setLoadingAction("refresh");
  setError(null);
+ setLocalValueReady(Object.keys(assetLocalRates).length > 0);
 
  try {
  const a = await fetchJsonOrThrow<{ assets: Asset[] }>("/api/exchange/assets", {
@@ -197,8 +478,35 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  setWithdrawals([]);
  }
 
+ try {
+ const p = await fetchJsonOrThrow<ProfileResponse>("/api/account/profile", {
+ cache:"no-store",
+ headers: requestHeaders,
+ });
+ const fiat = fiatForCountry(p.user?.country);
+ setLocalFiat(fiat);
+
+ await loadAssetLocalRates(fiat);
+ setLocalValueReady(true);
+ } catch {
+ setLocalFiat("USD");
+ await loadAssetLocalRates("USD");
+ setLocalValueReady(true);
+ }
+
  if (!holdAssetId && a.assets?.[0]?.id) setHoldAssetId(a.assets[0].id);
- if (!withdrawAssetId && a.assets?.[0]?.id) setWithdrawAssetId(a.assets[0].id);
+ if (!transferAssetId) {
+ const firstTransferable = (a.assets ?? []).find((asset) => {
+ const bal = b.balances?.find((row) => row.asset_id === asset.id);
+ const available = Number(bal?.available ?? NaN);
+ return Number.isFinite(available) && available > 0;
+ })?.id;
+ if (firstTransferable) setTransferAssetId(firstTransferable);
+ }
+ if (!withdrawAssetId && a.assets?.length) {
+ const defaultWithdrawAsset = a.assets[0]?.id;
+ if (defaultWithdrawAsset) setWithdrawAssetId(defaultWithdrawAsset);
+ }
  } catch (e) {
  if (e instanceof ApiError) {
  setError({ code: e.code, details: e.details });
@@ -216,6 +524,26 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [authMode]);
 
  useEffect(() => {
+ if (!localFiat) return;
+ let cancelled = false;
+
+ const tick = async () => {
+ if (cancelled) return;
+ await loadAssetLocalRates(localFiat);
+ };
+
+ void tick();
+ const timer = window.setInterval(() => {
+ void tick();
+ }, 20_000);
+
+ return () => {
+ cancelled = true;
+ window.clearInterval(timer);
+ };
+ }, [localFiat]);
+
+ useEffect(() => {
  if (true) return;
  void (async () => {
  try {
@@ -231,7 +559,119 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  })();
  }, [isProd]);
 
- const canUseHeader = actingUserId.trim() && isUuid(actingUserId.trim());
+ useEffect(() => {
+ if (!withdrawAssetId || withdrawableAssets.some((asset) => asset.id === withdrawAssetId)) return;
+ setWithdrawAssetId(withdrawableAssets[0]?.id ?? "");
+ }, [withdrawAssetId, withdrawableAssets]);
+
+ useEffect(() => {
+ if (!transferAssetId || transferableAssets.some((asset) => asset.id === transferAssetId)) return;
+ setTransferAssetId(transferableAssets[0]?.id ?? "");
+ }, [transferAssetId, transferableAssets]);
+
+ useEffect(() => {
+ if (authMode ==="header"&& !canUseHeader) {
+  setGasQuote(null);
+  setGasQuoteLoading(false);
+  setGasQuoteUpdatedAt(null);
+  return;
+ }
+ if (!selectedWithdrawAsset) {
+  setGasQuote(null);
+  setGasQuoteLoading(false);
+  setGasQuoteUpdatedAt(null);
+  return;
+ }
+
+  let cancelled = false;
+  const chain = selectedWithdrawAsset.chain;
+  const sym = selectedWithdrawAsset.symbol;
+
+  const timer = window.setTimeout(() => {
+  void (async () => {
+   setGasQuoteLoading(true);
+   try {
+    const qs = new URLSearchParams({
+    action: "withdrawal_request",
+    chain,
+    asset_symbol: sym,
+    });
+    const json = await fetchJsonOrThrow<{ quote: GasQuote }>(
+    `/api/exchange/gas/quote?${qs.toString()}`,
+    {
+     cache: "no-store",
+     headers: requestHeaders,
+    },
+    );
+    if (!cancelled) {
+    setGasQuote(json.quote ?? null);
+    setGasQuoteUpdatedAt(Date.now());
+    }
+   } catch {
+    if (!cancelled) setGasQuote(null);
+   } finally {
+    if (!cancelled) setGasQuoteLoading(false);
+   }
+  })();
+  }, 250);
+
+  return () => {
+  cancelled = true;
+  window.clearTimeout(timer);
+  };
+ }, [authMode, canUseHeader, requestHeaders, selectedWithdrawAsset?.chain, selectedWithdrawAsset?.symbol]);
+
+ useEffect(() => {
+ if (authMode ==="header"&& !canUseHeader) {
+ setTransferGasQuote(null);
+  setTransferGasQuoteLoading(false);
+  setTransferGasQuoteUpdatedAt(null);
+ return;
+ }
+ if (!selectedTransferAsset) {
+ setTransferGasQuote(null);
+  setTransferGasQuoteLoading(false);
+  setTransferGasQuoteUpdatedAt(null);
+ return;
+ }
+
+  let cancelled = false;
+  const chain = selectedTransferAsset.chain;
+  const sym = selectedTransferAsset.symbol;
+
+  const timer = window.setTimeout(() => {
+  void (async () => {
+   setTransferGasQuoteLoading(true);
+   try {
+    const qs = new URLSearchParams({
+    action: "user_transfer",
+    chain,
+    asset_symbol: sym,
+    });
+    const json = await fetchJsonOrThrow<{ quote: GasQuote }>(
+    `/api/exchange/gas/quote?${qs.toString()}`,
+    {
+     cache: "no-store",
+     headers: requestHeaders,
+    },
+    );
+    if (!cancelled) {
+    setTransferGasQuote(json.quote ?? null);
+    setTransferGasQuoteUpdatedAt(Date.now());
+    }
+   } catch {
+    if (!cancelled) setTransferGasQuote(null);
+   } finally {
+    if (!cancelled) setTransferGasQuoteLoading(false);
+   }
+  })();
+  }, 250);
+
+  return () => {
+  cancelled = true;
+  window.clearTimeout(timer);
+  };
+ }, [authMode, canUseHeader, requestHeaders, selectedTransferAsset?.chain, selectedTransferAsset?.symbol]);
 
  const adminHeaders = useMemo(() => {
  const h: Record<string, string> = {};
@@ -240,36 +680,85 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return h;
  }, [adminKey, adminId]);
 
+  const runEvacuation = async () => {
+    setLoadingAction("evacuate");
+    setError(null);
+    try {
+      const json = await fetchJsonOrThrow<{ success?: boolean; message?: string }>(
+        "/api/exchange/evacuate",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(requestHeaders ?? {}),
+          },
+          body: JSON.stringify({}),
+        }
+      );
+      if (json.success === false) {
+        setToastKind("error");
+        setToastMessage(json.message ?? "Add funds failed.");
+        setError({
+          code: "evacuation_failed",
+          details: json.message ?? "Could not pull funds from connected exchanges.",
+        });
+        return;
+      }
+
+      setToastKind("success");
+      setToastMessage(json.message ?? "Evacuation completed.");
+      await refreshAll();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError({ code: e.code, details: e.details });
+      } else {
+        setError({ code: e instanceof Error ? e.message : String(e) });
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
  return (
- <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+ <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-6">
  <Toast message={toastMessage} kind={toastKind} onDone={() => setToastMessage(null)} />
 
- <div className="flex flex-wrap items-center justify-between gap-3">
- <div>
+ <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+ <div className="min-w-0">
  <h2 className="text-lg font-medium">Trading Balance (P2P & Spot)</h2>
  <p className="mt-1 text-sm text-[var(--muted)]">
  Funds available for P2P trading and spot markets.
  </p>
  </div>
 
- <button
- type="button"
- className="rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={loadingAction === "refresh"}
- onClick={() => void refreshAll()}
- >
- {loadingAction === "refresh" ?"Refreshing…":"Refresh"}
- </button>
+ <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+   <button
+   type="button"
+   className="w-full whitespace-normal break-words sm:w-auto rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+   disabled={loadingAction === "refresh"}
+   onClick={() => void refreshAll()}
+   >
+   {loadingAction === "refresh" ?"Refreshing…":"Refresh"}
+   </button>
+   <button
+   type="button"
+  onClick={() => void runEvacuation()}
+  disabled={loadingAction === "evacuate" || (authMode === "header" && !canUseHeader)}
+  className="w-full whitespace-normal break-words sm:w-auto rounded border border-[var(--up)]/30 bg-[var(--up)]/10 px-3 py-2 text-xs font-bold text-[var(--up)] hover:bg-[var(--up)]/20"
+   >
+  {loadingAction === "evacuate" ? "Processing…" : "Add funds"}
+   </button>
+ </div>
  </div>
 
- <div className="mt-4 grid gap-3">
+ <div className="mt-4 grid min-w-0 gap-3">
  <ApiErrorBanner error={error} className="p-3"onRetry={() => void refreshAll()} />
 
  {/* ── Deposit Address ─────────────────────────────── */}
  <div className="mt-2 rounded border border-[var(--border)] bg-[var(--card)]/50 p-4 hidden">
  <h3 className="text-sm font-medium">Deposit (BSC)</h3>
  <p className="mt-1 text-[11px] text-[var(--muted)]">
- Send BEP-20 tokens (TST, USDT) or BNB to your unique deposit address. The deposit watcher credits your ledger automatically.
+ Send supported BEP-20 tokens or native BNB to your unique deposit address. The deposit watcher credits your ledger automatically.
  </p>
  {depositAddress ? (
  <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -324,62 +813,356 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  )}
  </div>
 
- <div className="mt-2">
+ <div className="mt-2 min-w-0">
  <h3 className="text-sm font-medium">Balances</h3>
- <div className="mt-2 overflow-x-auto rounded border border-[var(--border)]">
- <table className="w-full text-left text-xs">
- <thead className="bg-[var(--card)] text-[var(--muted)]">
- <tr>
- <th className="px-3 py-2">Asset</th>
- <th className="px-3 py-2">Total</th>
- <th className="px-3 py-2">Held</th>
- <th className="px-3 py-2">Available</th>
- <th className="px-3 py-2 text-right">Actions</th>
- </tr>
- </thead>
- <tbody>
- {balances.length === 0 ? (
- <tr>
- <td className="px-3 py-3 text-[var(--muted)]" colSpan={5}>
- No balances yet.
- </td>
- </tr>
- ) : (
- balances.map((b) => (
- <tr key={b.asset_id} className="border-t border-[var(--border)]">
- <td className="px-3 py-2">
- <div className="font-medium">
- {b.symbol} <span className="text-[var(--muted)]">({b.chain})</span>
+
+ <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+ <span className="rounded border border-[var(--border)] px-2 py-1">Assets: {balancesSummary.assetCount}</span>
+ <span className="rounded border border-[var(--border)] px-2 py-1">Active holds: {balancesSummary.activeHolds}</span>
+ <span className="rounded border border-[var(--border)] px-2 py-1">
+ Total (available): {!localValueReady ? "Updating…" : balancesSummary.totalLocal == null ? `— ${localFiat}` : fmtFiat(balancesSummary.totalLocal, localFiat)}
+ </span>
  </div>
- </td>
- <td className="px-3 py-2 font-mono">{fmtAmount(b.posted, b.decimals)}</td>
- <td className="px-3 py-2 font-mono">{fmtAmount(b.held, b.decimals)}</td>
- <td className="px-3 py-2 font-mono font-bold text-[var(--foreground)]">{fmtAmount(b.available, b.decimals)}</td>
- <td className="px-3 py-2 text-right">
- <div className="flex justify-end gap-2">
- <Link 
- href={`/p2p?side=BUY&asset=${b.symbol}`}
- className="rounded bg-[var(--up)]/10 px-2 py-1 text-[10px] font-bold text-[var(--up)] hover:bg-[var(--up)]/20"
- >
- BUY
- </Link>
- <Link 
- href={`/p2p?side=SELL&asset=${b.symbol}`}
- className="rounded bg-[var(--down)]/10 px-2 py-1 text-[10px] font-bold text-[var(--down)] hover:bg-[var(--down)]/20"
- >
- SELL
- </Link>
+
+ {/* Mobile layout (no horizontal scrolling) */}
+ <div className="mt-2 grid gap-2 md:hidden">
+   {sortedVisibleBalances.length === 0 ? (
+     <div className="rounded border border-[var(--border)] px-3 py-3 text-xs text-[var(--muted)]">
+       No non-zero balances yet.
+     </div>
+   ) : (
+     sortedVisibleBalances.map((b) => {
+       const available = Number(b.available);
+       const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+       const rowLocalEquivalent =
+         Number.isFinite(available) && rate != null ? available * rate : null;
+
+       return (
+         <div key={b.asset_id} className="rounded border border-[var(--border)] bg-[var(--card)]/50 p-3">
+           <div className="flex min-w-0 items-start justify-between gap-3">
+             <div className="min-w-0">
+               <div className="font-medium">{b.symbol.toUpperCase()}</div>
+               <div className="mt-0.5 break-words text-[11px] text-[var(--muted)]">
+                 Local: { !localValueReady ? "Updating…" : rowLocalEquivalent == null ? `— ${localFiat}` : fmtFiat(rowLocalEquivalent, localFiat) }
+               </div>
+               {localValueReady && assetLocalRateSource[b.symbol.toUpperCase()] ? (
+                 <div className="mt-0.5 break-words text-[10px] text-[var(--muted)]">
+                   {assetLocalRateSource[b.symbol.toUpperCase()]}
+                 </div>
+               ) : null}
+             </div>
+             <div className="shrink-0 text-right">
+               <div className="text-[10px] text-[var(--muted)]">Available</div>
+               <div className="break-all font-mono text-xs font-bold text-[var(--foreground)]">
+                 {fmtAmount(b.available, b.decimals)}
+               </div>
+             </div>
+           </div>
+
+           <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+             <div className="min-w-0">
+               <div className="text-[10px] text-[var(--muted)]">Posted</div>
+               <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.posted, b.decimals)}</div>
+             </div>
+             <div className="min-w-0 text-right">
+               <div className="text-[10px] text-[var(--muted)]">Held</div>
+               <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.held, b.decimals)}</div>
+             </div>
+           </div>
+
+           <div className="mt-2 flex flex-wrap justify-end gap-2">
+             <span className="text-[var(--muted)]">—</span>
+           </div>
+         </div>
+       );
+     })
+   )}
  </div>
- </td>
- </tr>
- ))
- )}
- </tbody>
- </table>
+
+ {/* Desktop/tablet layout */}
+ <div className="mt-2 hidden rounded border border-[var(--border)] md:block">
+   <table className="w-full table-fixed text-left text-xs">
+     <thead className="bg-[var(--card)] text-[var(--muted)]">
+       <tr>
+         <th className="px-3 py-2">Token</th>
+         <th className="hidden px-3 py-2 lg:table-cell">Posted</th>
+         <th className="hidden px-3 py-2 lg:table-cell">Held</th>
+         <th className="px-3 py-2">Available</th>
+         <th className="px-3 py-2">Local Value</th>
+         <th className="px-3 py-2 text-right">Actions</th>
+       </tr>
+     </thead>
+     <tbody>
+       {sortedVisibleBalances.length === 0 ? (
+         <tr>
+           <td className="px-3 py-3 text-[var(--muted)]" colSpan={6}>
+             No non-zero balances yet.
+           </td>
+         </tr>
+       ) : (
+         sortedVisibleBalances.map((b) => {
+           const available = Number(b.available);
+           const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+           const rowLocalEquivalent =
+             Number.isFinite(available) && rate != null ? available * rate : null;
+
+           return (
+             <tr key={b.asset_id} className="border-t border-[var(--border)]">
+               <td className="px-3 py-2">
+                 <div className="font-medium">{b.symbol.toUpperCase()}</div>
+               </td>
+               <td className="hidden px-3 py-2 font-mono text-[var(--muted)] lg:table-cell">
+                 <span className="block break-all">{fmtAmount(b.posted, b.decimals)}</span>
+               </td>
+               <td className="hidden px-3 py-2 font-mono text-[var(--muted)] lg:table-cell">
+                 <span className="block break-all">{fmtAmount(b.held, b.decimals)}</span>
+               </td>
+               <td className="px-3 py-2 font-mono font-bold text-[var(--foreground)]">
+                 <span className="block break-all">{fmtAmount(b.available, b.decimals)}</span>
+               </td>
+               <td className="px-3 py-2 font-mono">
+                 {!localValueReady
+                   ? "Updating…"
+                   : rowLocalEquivalent == null
+                     ? `— ${localFiat}`
+                     : fmtFiat(rowLocalEquivalent, localFiat)}
+                 {localValueReady && assetLocalRateSource[b.symbol.toUpperCase()] ? (
+                   <div className="break-words text-[10px] text-[var(--muted)]">
+                     {assetLocalRateSource[b.symbol.toUpperCase()]}
+                   </div>
+                 ) : null}
+               </td>
+               <td className="px-3 py-2 text-right">
+                 <span className="text-[var(--muted)]">—</span>
+               </td>
+             </tr>
+           );
+         })
+       )}
+     </tbody>
+   </table>
  </div>
  </div>
 
- <div className="mt-2 grid gap-3 md:grid-cols-2">
+ <div className="mt-2 grid min-w-0 gap-3 md:grid-cols-2">
+ <div className="min-w-0 rounded-xl border border-[var(--border)] p-4">
+ <h3 className="text-sm font-medium">Send funds to another user</h3>
+ <p className="mt-1 text-xs text-[var(--muted)]">
+ Instant internal transfer by recipient email. Network fee is estimated in BNB and may be charged in the asset you send.
+ </p>
+ <div className="mt-3 grid gap-2">
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">Asset</span>
+ <select
+ className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+ value={transferAssetId}
+ onChange={(e) => setTransferAssetId(e.target.value)}
+ >
+ <option value="">(select)</option>
+ {transferableAssets.map((a) => (
+ <option key={a.id} value={a.id}>
+ {a.symbol} ({a.chain})
+ </option>
+ ))}
+ </select>
+ {selectedTransferAsset ? (
+ <span className="break-words text-[11px] text-[var(--muted)]">
+ Available: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(String(selectedTransferAvailable), selectedTransferAsset.decimals)} {selectedTransferAsset.symbol.toUpperCase()}</span>
+ </span>
+ ) : null}
+ </label>
+
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">Amount</span>
+ <div className="flex items-center gap-2">
+ <input
+ className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+ value={transferAmount}
+ onChange={(e) => setTransferAmount(e.target.value)}
+ placeholder="e.g. 100"
+ inputMode="decimal"
+ />
+ <button
+ type="button"
+ className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+ disabled={!selectedTransferAsset || selectedTransferAvailable <= 0}
+ onClick={() => setTransferAmount(String(selectedTransferAvailable))}
+ >
+ Max
+ </button>
+ </div>
+ {isTransferAmountTooHigh ? (
+ <span className="text-[11px] text-[var(--down)]">Amount exceeds available balance.</span>
+ ) : null}
+ </label>
+
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">Recipient email</span>
+ <input
+ className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+ value={transferRecipientEmail}
+ onChange={(e) => setTransferRecipientEmail(e.target.value)}
+ placeholder="user@example.com"
+ autoCapitalize="none"
+ autoCorrect="off"
+ spellCheck={false}
+ />
+ {transferRecipientEmail && !isRecipientEmailValid ? (
+ <span className="text-[11px] text-[var(--down)]">Enter a valid recipient email.</span>
+ ) : null}
+ </label>
+
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
+ <input
+ className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+ value={transferTotpCode}
+ onChange={(e) => setTransferTotpCode(e.target.value.replace(/\D/g,"").slice(0, 6))}
+ placeholder="6-digit code"
+ inputMode="numeric"
+ maxLength={6}
+ autoComplete="one-time-code"
+ />
+ </label>
+
+ <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+ {transferGasQuoteLoading ? (
+ <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
+ ) : null}
+ {transferGasQuote && !transferGasQuote.enabled ? (
+ <>
+ <div className="break-words">
+ {Number(transferGasQuote.amount) > 0 ? (
+ <>
+ Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(transferGasQuote.amount, 8)} {transferGasQuote.gasSymbol}</span>
+ <span className="ml-1">(waived)</span>
+ </>
+ ) : (
+ <>
+ Network fee: <span className="font-mono text-[var(--foreground)]">off</span>
+ <span className="ml-1">({transferGasQuote.gasSymbol})</span>
+ </>
+ )}
+ </div>
+ </>
+ ) : transferGasQuote?.enabled && Number(transferGasQuote.amount) > 0 ? (
+ <>
+ <div className="break-words">
+ Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(transferGasQuote.amount, 8)} {transferGasQuote.gasSymbol}</span>
+ <span className="ml-1">({transferGasQuote.mode ==="realtime" ? "live" : "fixed"})</span>
+ {typeof transferGasQuoteUpdatedAt === "number" ? (
+ <span className="ml-1">• updated {new Date(transferGasQuoteUpdatedAt).toLocaleTimeString()}</span>
+ ) : null}
+ </div>
+ {transferGasQuote.chargeAmount && transferGasQuote.chargeSymbol && selectedTransferAsset ? (
+ <div className="break-words text-[11px] text-[var(--muted)]">
+ Charged as <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(transferGasQuote.chargeAmount, selectedTransferAsset.decimals)} {transferGasQuote.chargeSymbol.toUpperCase()}</span>
+ </div>
+ ) : (
+ <div className="break-words text-[11px] text-[var(--up)]">Covered by the platform (conversion unavailable)</div>
+ )}
+ {selectedTransferAsset && isTransferAmountValid && isRecipientEmailValid ? (
+ <div className="break-words text-[11px] text-[var(--muted)]">
+ You are sending <span className="break-all font-mono text-[var(--foreground)]">{transferAmount}</span> {selectedTransferAsset.symbol.toUpperCase()} to <span className="break-all font-medium text-[var(--foreground)]">{transferRecipientEmail.trim()}</span>.
+ </div>
+ ) : null}
+ </>
+ ) : (
+ <>Network fee: <span className="font-mono">—</span></>
+ )}
+ </div>
+ <button
+ type="button"
+ className="mt-1 w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+ disabled={
+ loadingAction === "transfer:request" ||
+ !transferAssetId ||
+ !transferableAssets.some((asset) => asset.id === transferAssetId) ||
+ !transferAmount ||
+ !isTransferAmountValid ||
+ isTransferAmountTooHigh ||
+ !transferRecipientEmail ||
+ !isRecipientEmailValid ||
+ (authMode ==="header"&& !canUseHeader)
+ }
+ onClick={async () => {
+ setLoadingAction("transfer:request");
+ setError(null);
+ try {
+ const res = await fetchJsonOrThrow<{
+ transfer?: {
+ symbol?: string;
+ fees?: {
+ transfer_fee_asset_amount?: string;
+ gas_fallback_asset_amount?: string;
+ gas_charged_in_asset_amount?: string;
+ gas_sponsored?: boolean;
+ network_fee_display?: { amount: string; symbol: string };
+ total_debit_asset_amount?: string;
+ };
+ }
+ }>("/api/exchange/transfers/request", {
+ method:"POST",
+ headers: {
+ "content-type":"application/json",
+ ...(requestHeaders ?? {}),
+ },
+ body: JSON.stringify({
+ asset_id: transferAssetId,
+ amount: transferAmount,
+ recipient_email: transferRecipientEmail,
+ ...(transferTotpCode.length === 6 ? { totp_code: transferTotpCode } : {}),
+ }),
+ });
+ setToastKind("success");
+ const symbol = res.transfer?.symbol ?? selectedTransferAsset?.symbol?.toUpperCase() ?? "";
+ const transferFee = res.transfer?.fees?.transfer_fee_asset_amount ?? "0";
+ const networkFeeDisplay = res.transfer?.fees?.network_fee_display;
+ const gasChargedInAsset =
+   res.transfer?.fees?.gas_charged_in_asset_amount ?? res.transfer?.fees?.gas_fallback_asset_amount ?? "0";
+ const gasSponsored = Boolean(res.transfer?.fees?.gas_sponsored);
+ const totalDebit = res.transfer?.fees?.total_debit_asset_amount;
+ setToastMessage(
+ totalDebit
+ ? (() => {
+     const net = networkFeeDisplay?.symbol
+       ? `Network ${networkFeeDisplay.amount} ${networkFeeDisplay.symbol}`
+       : null;
+     const gas = gasSponsored
+       ? "network fee covered"
+       : toNumberSafe(gasChargedInAsset) > 0
+         ? `charged ${gasChargedInAsset} ${symbol} for network`
+         : null;
+     const parts = [
+       `Debited ${totalDebit} ${symbol}`,
+       transferFee && toNumberSafe(transferFee) > 0 ? `fee ${transferFee}` : null,
+       net,
+       gas,
+     ].filter(Boolean);
+     return `Transfer completed. ${parts.join(" • ")}.`;
+   })()
+ : "Transfer completed."
+ );
+ setTransferAmount("");
+ setTransferRecipientEmail("");
+ setTransferTotpCode("");
+ await refreshAll();
+ } catch (e) {
+ if (e instanceof ApiError) {
+ setError({ code: e.code, details: e.details });
+ } else {
+ setError({ code: e instanceof Error ? e.message : String(e) });
+ }
+ } finally {
+ setLoadingAction(null);
+ }
+ }}
+ >
+ {loadingAction === "transfer:request" ? "Sending…" : "Send transfer"}
+ </button>
+ </div>
+ </div>
+
  <div className="rounded-xl border border-[var(--border)] p-4 hidden">
  <h3 className="text-sm font-medium">Create hold</h3>
  <div className="mt-3 grid gap-2">
@@ -409,6 +1192,44 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  inputMode="decimal"
  />
  </label>
+
+ <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+ {gasQuoteLoading ? (
+ <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
+ ) : null}
+ {gasQuote && !gasQuote.enabled ? (
+ <div className="break-words">
+ {Number(gasQuote.amount) > 0 ? (
+ <>
+ Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
+ <span className="ml-1">(waived)</span>
+ </>
+ ) : (
+ <>
+ Network fee: <span className="font-mono text-[var(--foreground)]">off</span>
+ <span className="ml-1">({gasQuote.gasSymbol})</span>
+ </>
+ )}
+ </div>
+ ) : gasQuote?.enabled && Number(gasQuote.amount) > 0 ? (
+ <>
+ <div className="break-words">
+ Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
+ <span className="ml-1">({gasQuote.mode ==="realtime" ? "live" : "fixed"})</span>
+ {typeof gasQuoteUpdatedAt === "number" ? (
+ <span className="ml-1">• updated {new Date(gasQuoteUpdatedAt).toLocaleTimeString()}</span>
+ ) : null}
+ </div>
+ {gasQuote.chargeAmount && gasQuote.chargeSymbol ? (
+ <div className="mt-1 break-words text-[11px] text-[var(--muted)]">
+ Charged as <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.chargeAmount, 8)} {gasQuote.chargeSymbol}</span>
+ </div>
+ ) : null}
+ </>
+ ) : (
+ <>Network fee: <span className="font-mono">—</span></>
+ )}
+ </div>
 
  <label className="grid gap-1">
  <span className="text-[11px] text-[var(--muted)]">Reason</span>
@@ -522,272 +1343,100 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  </div>
  </div>
 
- <div className="mt-2 rounded-xl border border-[var(--border)] p-4">
- <h3 className="text-sm font-medium">Withdrawals (allowlist-first)</h3>
- <p className="mt-1 text-xs text-[var(--muted)]">
- Create an allowlisted destination, then request a withdrawal (creates a hold).
- </p>
-
- <div className="mt-3 grid gap-3 md:grid-cols-2">
- <div className="rounded-lg border border-[var(--border)] p-3">
- <div className="text-xs font-medium">Allowlist</div>
- <div className="mt-2 grid gap-2">
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Address (BSC)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={newAllowlistAddress}
- onChange={(e) => setNewAllowlistAddress(e.target.value)}
- placeholder="0x..."
- autoCapitalize="none"
- autoCorrect="off"
- spellCheck={false}
- disabled={isProd}
- />
- </label>
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Label (optional)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={newAllowlistLabel}
- onChange={(e) => setNewAllowlistLabel(e.target.value)}
- placeholder="My Ledger"
- disabled={isProd}
- />
- </label>
-
- <button
- type="button"
- className="mt-1 w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
- disabled={
- loadingAction === "allowlist:add" ||
- isProd ||
- !newAllowlistAddress ||
- (authMode ==="header"&& !canUseHeader)
- }
- onClick={async () => {
- setLoadingAction("allowlist:add");
- setError(null);
- try {
- await fetchJsonOrThrow("/api/exchange/withdrawals/allowlist", {
- method:"POST",
- headers: {
-"content-type":"application/json",
- ...(requestHeaders ?? {}),
- },
- body: JSON.stringify({
- chain:"bsc",
- address: newAllowlistAddress,
- label: newAllowlistLabel ? newAllowlistLabel : undefined,
- }),
- });
- setToastKind("success");
- setToastMessage("Allowlist updated.");
- setNewAllowlistAddress("");
- setNewAllowlistLabel("");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Add allowlisted address
- </button>
-
- <div className="mt-2 grid gap-1">
- {allowlist.length === 0 ? (
- <div className="text-xs text-[var(--muted)]">No allowlisted addresses.</div>
- ) : (
- allowlist.map((row) => (
- <button
- key={row.id}
- type="button"
- className="rounded border border-[var(--border)] px-2 py-2 text-left text-[11px] hover:bg-[var(--card)]"
- onClick={() => setWithdrawDestination(row.address)}
- disabled={row.status !=="active"}
- title="Click to use as destination"
- >
- <div className="flex items-center justify-between gap-2">
- <span className="truncate font-mono" title={row.address}>{row.address}</span>
- <span className="text-[var(--muted)]">{row.status}</span>
- </div>
- {row.label ? <div className="text-[var(--muted)]">{row.label}</div> : null}
- </button>
- ))
- )}
- </div>
- </div>
- </div>
-
- <div className="rounded-lg border border-[var(--border)] p-3">
- <div className="text-xs font-medium">Request withdrawal</div>
- <div className="mt-2 grid gap-2">
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Asset</span>
- <select
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={withdrawAssetId}
- onChange={(e) => setWithdrawAssetId(e.target.value)}
- >
- <option value="">(select)</option>
- {assets.map((a) => (
- <option key={a.id} value={a.id}>
- {a.symbol} ({a.chain})
- </option>
- ))}
- </select>
- </label>
-
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Amount</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={withdrawAmount}
- onChange={(e) => setWithdrawAmount(e.target.value)}
- placeholder="e.g. 10"
- inputMode="decimal"
- />
- </label>
-
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Destination (allowlisted)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={withdrawDestination}
- onChange={(e) => setWithdrawDestination(e.target.value)}
- placeholder="0x..."
- autoCapitalize="none"
- autoCorrect="off"
- spellCheck={false}
- />
- </label>
-
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={withdrawTotpCode}
- onChange={(e) => setWithdrawTotpCode(e.target.value.replace(/\D/g,"").slice(0, 6))}
- placeholder="6-digit code"
- inputMode="numeric"
- maxLength={6}
- autoComplete="one-time-code"
- />
- </label>
-
- <button
- type="button"
- className="mt-1 w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
- disabled={
- loadingAction === "withdraw:request" ||
- !withdrawAssetId ||
- !withdrawAmount ||
- !(parseFloat(withdrawAmount) > 0) ||
- !withdrawDestination ||
- (authMode ==="header"&& !canUseHeader)
- }
- onClick={async () => {
- if (!confirm(`Withdraw ${withdrawAmount} to ${withdrawDestination}? Funds will be held immediately.`)) return;
- setLoadingAction("withdraw:request");
- setError(null);
- try {
- await fetchJsonOrThrow("/api/exchange/withdrawals/request", {
- method:"POST",
- headers: {
-"content-type":"application/json",
- ...(requestHeaders ?? {}),
- },
- body: JSON.stringify({
- asset_id: withdrawAssetId,
- amount: withdrawAmount,
- destination_address: withdrawDestination,
- ...(withdrawTotpCode.length === 6 ? { totp_code: withdrawTotpCode } : {}),
- }),
- });
- setToastKind("success");
- setToastMessage("Withdrawal requested (funds held).");
- setWithdrawAmount("");
- setWithdrawTotpCode("");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Request withdrawal
- </button>
-
- <div className="mt-2 grid gap-2">
- {withdrawals.length === 0 ? (
- <div className="text-xs text-[var(--muted)]">No withdrawal requests.</div>
- ) : (
- withdrawals.map((w) => (
- <div
- key={w.id}
- className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--border)] px-2 py-2 text-[11px]"
- >
- <div className="min-w-0 flex-1">
- <div className="font-medium break-all">
- {w.symbol} {w.amount} → <span className="font-mono">{w.destination_address}</span>
- </div>
- <div className="truncate max-w-[8rem] font-mono text-[var(--muted)]" title={w.id}>
- {w.id} <span className="ml-2">({w.status})</span>
- </div>
- </div>
- <button
- type="button"
- className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={
- loadingAction === `withdraw:cancel:${w.id}` ||
- w.status !=="requested"||
- (authMode ==="header"&& !canUseHeader)
- }
- onClick={async () => {
- setLoadingAction(`withdraw:cancel:${w.id}`);
- setError(null);
- try {
- await fetchJsonOrThrow(`/api/exchange/withdrawals/${w.id}/cancel`, {
- method:"POST",
- headers: requestHeaders,
- });
- setToastKind("success");
- setToastMessage("Withdrawal canceled.");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Cancel
- </button>
- </div>
- ))
- )}
- </div>
- </div>
- </div>
- </div>
  </div>
 
 {/* Dev tools removed */}
+
+ {isAdmin ? (
+ <div className="mt-2 rounded-xl border border-[var(--border)] p-4">
+ <div>
+ <h3 className="text-sm font-medium">Admin: Reverse transfer</h3>
+ <p className="mt-1 text-xs text-[var(--muted)]">
+ Creates a compensating ledger entry. Only succeeds if the recipient still has enough available balance.
+ </p>
+ </div>
+
+ <div className="mt-3 grid gap-2 md:grid-cols-2">
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">Transfer entry id</span>
+ <input
+ className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+ value={reverseTransferId}
+ placeholder="uuid"
+ onChange={(e) => setReverseTransferId(e.target.value)}
+ />
+ </label>
+ <label className="grid gap-1">
+ <span className="text-[11px] text-[var(--muted)]">Reason (optional)</span>
+ <input
+ className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+ value={reverseTransferReason}
+ placeholder="customer_support"
+ onChange={(e) => setReverseTransferReason(e.target.value)}
+ />
+ </label>
+ </div>
+
+ <button
+ type="button"
+ className="mt-3 w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+ disabled={
+ loadingAction === "admin:transfer:reverse" ||
+ !reverseTransferId.trim() ||
+ !isUuid(reverseTransferId.trim()) ||
+ (authMode === "header" && !canUseHeader)
+ }
+ onClick={async () => {
+ const id = reverseTransferId.trim();
+ if (!isUuid(id)) {
+ setError({ code: "invalid_input", details: "transfer entry id must be a uuid" });
+ return;
+ }
+
+ setLoadingAction("admin:transfer:reverse");
+ setError(null);
+ try {
+ const res = await fetchJsonOrThrow<{ reversal?: { id: string; amount?: string; symbol?: string } }>(
+ `/api/exchange/admin/transfers/${id}/reverse`,
+ {
+ method: "POST",
+ headers: {
+ "content-type": "application/json",
+ ...(requestHeaders ?? {}),
+ ...adminHeaders,
+ },
+ body: JSON.stringify({
+ ...(reverseTransferReason.trim() ? { reason: reverseTransferReason.trim() } : {}),
+ }),
+ },
+ );
+
+ setToastKind("success");
+ const sym = (res.reversal?.symbol ?? "").toUpperCase();
+ const amt = res.reversal?.amount;
+ setToastMessage(
+ amt && sym
+ ? `Transfer reversed. Returned ${amt} ${sym}.`
+ : "Transfer reversed.",
+ );
+ setReverseTransferId("");
+ setReverseTransferReason("");
+ await refreshAll();
+ } catch (e) {
+ if (e instanceof ApiError) {
+ setError({ code: e.code, details: e.details });
+ } else {
+ setError({ code: e instanceof Error ? e.message : String(e) });
+ }
+ } finally {
+ setLoadingAction(null);
+ }
+ }}
+ >
+ {loadingAction === "admin:transfer:reverse" ? "Reversing…" : "Reverse transfer"}
+ </button>
+ </div>
+ ) : null}
 
  {isAdmin && false ? (
  <div className="mt-2 rounded-xl border border-[var(--border)] p-4">
@@ -974,7 +1623,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  </div>
  </div>
  ) : null}
- </div>
  </section>
  );
 }

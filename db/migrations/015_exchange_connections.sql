@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS copy_trading_sub_leader_idx
 -- ── Arbitrage price snapshots (for cross-exchange arb detection) ─────
 CREATE TABLE IF NOT EXISTS arb_price_snapshot (
   id bigserial PRIMARY KEY,
-  symbol text NOT NULL,           -- e.g. 'TSTUSDT'
+  symbol text NOT NULL,           -- e.g. 'BTCUSDT'
   exchange text NOT NULL,         -- 'tradesynapse' | 'binance' | 'bybit'
   bid numeric NOT NULL,
   ask numeric NOT NULL,

@@ -19,7 +19,10 @@ type Ad = {
   min_limit: string;
   max_limit: string;
   payment_window_minutes: number;
-  payment_method_ids: string[]; // for now just IDs, real app needs to join names
+  // Seller's supported payment rails for this ad (e.g. ['mpesa','bank_transfer']).
+  // Returned by the API via join against seller's saved methods.
+  payment_methods?: string[];
+  payment_method_ids?: string[];
   email: string;
   display_name?: string | null;
   terms: string | null;
@@ -30,7 +33,7 @@ import { ALL_CURRENCIES } from "@/lib/p2p/constants"; // Import constants
 export function P2PMarketplace() {
   const params = useSearchParams();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [asset, setAsset] = useState("TST");
+  const [asset, setAsset] = useState("USDT");
   const [fiat, setFiat] = useState("USD"); // Global default; user can switch
   const [amount, setAmount] = useState("");
 
@@ -53,6 +56,8 @@ export function P2PMarketplace() {
   
   const [ads, setAds] = useState<Ad[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
 
@@ -68,12 +73,24 @@ export function P2PMarketplace() {
         });
         
         const res = await fetch(`/api/p2p/ads?${query.toString()}`);
-        if (!res.ok) throw new Error("Failed to fetch");
+        if (!res.ok) {
+          let code: string | undefined;
+          try {
+            const body = await res.json();
+            code = body?.error;
+          } catch {
+            // ignore
+          }
+          throw new Error(code || `http_${res.status}`);
+        }
         
         const data = await res.json();
         setAds(data.ads || []);
+        setFetchError(null);
       } catch (err) {
         console.error(err);
+        const msg = err instanceof Error ? err.message : "fetch_failed";
+        setFetchError(msg);
       } finally {
         setLoading(false);
       }
@@ -82,7 +99,7 @@ export function P2PMarketplace() {
     // Debounce slightly in real app
     const t = setTimeout(fetchAds, 100);
     return () => clearTimeout(t);
-  }, [side, asset, fiat, amount]);
+  }, [side, asset, fiat, amount, retryNonce]);
 
   return (
     <div className="space-y-6">
@@ -131,7 +148,6 @@ export function P2PMarketplace() {
               onChange={(e) => setAsset(e.target.value)}
               className="h-10 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 text-sm font-medium outline-none focus:border-[var(--accent)]"
             >
-              <option value="TST">TST</option>
               <option value="USDT">USDT</option>
               <option value="BNB">BNB</option>
             </select>
@@ -180,6 +196,24 @@ export function P2PMarketplace() {
 
       {/* ── Ads List ────────────────────────────────────── */}
       <div className="space-y-3">
+        {fetchError && !loading && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-[var(--foreground)]">Failed to load ads</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">Error: {fetchError}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRetryNonce((n) => n + 1)}
+                className="flex h-10 items-center justify-center rounded-lg bg-[var(--accent)] px-4 text-sm font-bold text-white transition hover:brightness-110"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           // Skeleton
           Array.from({ length: 3 }).map((_, i) => (
@@ -203,8 +237,6 @@ export function P2PMarketplace() {
         )}
       </div>
 
-      {showCreateModal && <CreateAdModal onClose={() => setShowCreateModal(false)} />}
-      
       {selectedAd && (
         <TakeAdModal 
           ad={{
@@ -272,13 +304,16 @@ function AdCard({ ad, mySide, asset, onTake }: { ad: Ad, mySide: "BUY" | "SELL",
       {/* Payment Methods */}
       <div className="w-full md:w-40">
         <div className="flex flex-wrap gap-1">
-          {(Array.isArray(ad.payment_method_ids) ? ad.payment_method_ids : []).map((id) => (
-            <span key={id} className={`rounded px-1.5 py-0.5 text-[10px] font-medium border border-[var(--border)]`}>
-              {getPaymentMethodName(id)}
+          {(Array.isArray(ad.payment_methods) ? ad.payment_methods : []).map((identifier) => (
+            <span
+              key={identifier}
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium border border-[var(--border)]"
+            >
+              {getPaymentMethodName(identifier)}
             </span>
           ))}
-          {(!ad.payment_method_ids || (Array.isArray(ad.payment_method_ids) && ad.payment_method_ids.length === 0)) && (
-             <span className="text-[10px] text-[var(--muted)]">Bank Transfer</span>
+          {(!ad.payment_methods || (Array.isArray(ad.payment_methods) && ad.payment_methods.length === 0)) && (
+            <span className="text-[10px] text-[var(--muted)]">Bank Transfer</span>
           )}
         </div>
       </div>

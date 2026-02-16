@@ -26,6 +26,18 @@ export function formatClientErrorDetails(details: unknown): string[] | null {
 
   if (typeof details === "string") return [details];
 
+  if (details && typeof details === "object") {
+    const obj = details as Record<string, unknown>;
+    const lines: string[] = [];
+
+    const message = typeof obj.message === "string" ? obj.message : null;
+    const error = typeof obj.error === "string" ? obj.error : null;
+    if (message) lines.push(message);
+    if (error && error !== message) lines.push(`error: ${error}`);
+
+    if (lines.length > 0) return lines;
+  }
+
   try {
     return [JSON.stringify(details, null, 2)];
   } catch {
@@ -141,6 +153,11 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     message: "The signed-in user is not allowed to perform this action.",
   },
 
+  p2p_country_not_supported: {
+    title: "Country not supported",
+    message: "P2P is not available in your country yet.",
+  },
+
   // Not found
   not_found: {
     title: "Not found",
@@ -167,6 +184,18 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
   invalid_input: {
     title: "Invalid input",
     message: "Some fields were invalid. Check your inputs and try again.",
+  },
+
+  // Server
+  internal_error: {
+    title: "Server error",
+    message: "The server hit an unexpected error. Try again in a moment.",
+  },
+
+  // Dependencies
+  upstream_unavailable: {
+    title: "Service unavailable",
+    message: "A required dependency is unavailable (typically the database). Try again shortly.",
   },
   invalid_metadata_json: {
     title: "Invalid metadata",
@@ -207,6 +236,36 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
   insufficient_balance: {
     title: "Insufficient balance",
     message: "You don't have enough available balance for this action.",
+  },
+
+  recipient_not_found: {
+    title: "Recipient not found",
+    message: "No user exists with that email. Check for typos and try again.",
+  },
+  recipient_inactive: {
+    title: "Recipient unavailable",
+    message: "That recipient account is not active and cannot receive transfers.",
+  },
+  recipient_same_as_sender: {
+    title: "Invalid recipient",
+    message: "You cannot send a transfer to yourself.",
+  },
+
+  transfer_not_found: {
+    title: "Transfer not found",
+    message: "That transfer could not be found.",
+  },
+  transfer_not_reversible: {
+    title: "Transfer not reversible",
+    message: "This transfer cannot be reversed automatically.",
+  },
+  transfer_already_reversed: {
+    title: "Already reversed",
+    message: "This transfer has already been reversed.",
+  },
+  recipient_insufficient_balance_for_reversal: {
+    title: "Cannot reverse transfer",
+    message: "The recipient no longer has enough available balance to reverse this transfer.",
   },
 
   withdrawal_address_not_allowlisted: {
@@ -285,6 +344,10 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
   upload_failed: {
     title: "Upload failed",
     message: "Failed to upload evidence. Try again.",
+  },
+  evacuation_failed: {
+    title: "Add funds failed",
+    message: "Could not pull funds from connected exchanges. Check connection status and try again.",
   },
   open_dispute_failed: {
     title: "Open dispute failed",

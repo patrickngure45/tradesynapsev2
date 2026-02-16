@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     const report = await analyzeMarketRegime(exchange, symbol);
     return NextResponse.json(report);
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("[regime] Error:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

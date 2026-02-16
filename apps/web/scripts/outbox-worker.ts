@@ -14,6 +14,8 @@ import {
 import { handleWithdrawalRequestedRiskSignal } from "../src/lib/outbox/handlers/exchangeWithdrawalRisk";
 import { handleWithdrawalBroadcast } from "../src/lib/outbox/handlers/exchangeWithdrawalBroadcast";
 import { handleCopyTradeExecution } from "../src/lib/outbox/handlers/copyTradeExecution";
+import { handleTradingBotExecution } from "../src/lib/outbox/handlers/tradingBotExecution";
+import { handleTradingBotUnwind } from "../src/lib/outbox/handlers/tradingBotUnwind";
 
 const MAX_ATTEMPTS = Math.max(1, Math.min(25, Number.parseInt(process.env.OUTBOX_MAX_ATTEMPTS ?? "10", 10) || 10));
 const BATCH_SIZE = Math.max(1, Math.min(200, Number.parseInt(process.env.OUTBOX_BATCH ?? "25", 10) || 25));
@@ -58,6 +60,20 @@ async function dispatch(sql: ReturnType<typeof getSql>, ev: OutboxRow): Promise<
       const order = payload.order as any;
       if (!order || typeof order !== "object") return;
       await handleCopyTradeExecution(sql, { order });
+      return;
+    }
+
+    case "trading.bot.execute": {
+      const executionId = String(payload.execution_id ?? "");
+      if (!executionId) return;
+      await handleTradingBotExecution(sql, { executionId });
+      return;
+    }
+
+    case "trading.bot.unwind": {
+      const executionId = String(payload.execution_id ?? "");
+      if (!executionId) return;
+      await handleTradingBotUnwind(sql, { executionId });
       return;
     }
 

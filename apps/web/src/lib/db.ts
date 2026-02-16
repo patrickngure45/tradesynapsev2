@@ -10,6 +10,13 @@ export function createSql() {
     throw new Error("DATABASE_URL is not set");
   }
 
+  const connectTimeoutSec = (() => {
+    const raw = process.env.DB_CONNECT_TIMEOUT_SEC;
+    if (!raw) return 30;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 30;
+  })();
+
   // Accept SQLAlchemy-style URLs (e.g. postgresql+asyncpg://...) by normalizing
   // to a standard URL understood by postgres.js.
   databaseUrl = databaseUrl.replace(/^postgresql\+asyncpg:\/\//i, "postgresql://");
@@ -34,6 +41,7 @@ export function createSql() {
   return postgres(databaseUrl, {
     max: 10,
     idle_timeout: 20,
+    connect_timeout: connectTimeoutSec,
     ...(ssl ? { ssl } : {}),
   });
 }

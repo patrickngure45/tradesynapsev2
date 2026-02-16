@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS p2p_payment_method_user_idx ON p2p_payment_method(use
 
 
 -- 2. P2P Ads (Maker Offers)
--- "I want to BUY USDT for USD" or "I want to SELL TST for NGN"
+-- "I want to BUY USDT for USD" or "I want to SELL BTC for NGN"
 CREATE TABLE IF NOT EXISTS p2p_ad (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,

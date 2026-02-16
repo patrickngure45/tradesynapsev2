@@ -33,6 +33,7 @@ export function OnChainWalletPanel() {
         throw new Error(data.error ?? "Failed to get deposit address");
       }
       const data = await res.json();
+
       // Map API response to Component state
       setInfo({
         address: data.address,
@@ -86,8 +87,8 @@ export function OnChainWalletPanel() {
           {/* Deposit address */}
           <div>
             <div className="mb-1 text-xs text-[var(--muted)]">Deposit Address (BNB Smart Chain)</div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 overflow-hidden text-ellipsis rounded bg-[var(--background)] px-3 py-2 font-mono text-xs">
+            <div className="flex min-w-0 items-center gap-2">
+              <code className="min-w-0 flex-1 overflow-hidden text-ellipsis rounded bg-[var(--background)] px-3 py-2 font-mono text-xs">
                 {info.address}
               </code>
               <button
@@ -104,20 +105,17 @@ export function OnChainWalletPanel() {
 
           {/* On-Chain balances */}
           <div>
-            <div className="mb-2 text-xs text-[var(--muted)]">On-Chain Balances</div>
+            <div className="mb-2 text-xs text-[var(--muted)]">On-Chain Balance</div>
             {info.balances.length === 0 ? (
-              <div className="text-xs text-[var(--muted)]">No balances found</div>
+              <div className="text-xs text-[var(--muted)]">No on-chain balances found</div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {info.balances.map((b) => (
-                  <div
-                    key={b.asset}
-                    className="flex items-center justify-between rounded bg-[var(--background)] px-3 py-2"
-                  >
-                    <span className="text-sm font-medium">{b.asset}</span>
-                    <span className="font-mono text-sm">
-                      {parseFloat(b.balance).toFixed(6)}
-                    </span>
+                  <div key={b.asset} className="rounded bg-[var(--background)] px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{b.asset.toUpperCase()}</span>
+                      <span className="font-mono text-sm">{Number(b.balance).toLocaleString(undefined, { maximumFractionDigits: 8 })}</span>
+                    </div>
                   </div>
                 ))}
               </div>

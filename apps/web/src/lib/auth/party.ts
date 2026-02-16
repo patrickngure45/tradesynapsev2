@@ -6,7 +6,8 @@ const enforceAuth = isProd || process.env.ENFORCE_AUTH === "1";
 /**
  * Resolve the acting user identity from the request.
  *
- * In production (or when ENFORCE_AUTH=1), **only** the signed session cookie is trusted.
+ * In production (or when ENFORCE_AUTH=1), **only** the signed session cookie
+ * or a valid internal service token is trusted.
  * In development, the `x-user-id` header is also accepted
  * (convenience for scripts/smoke tests).
  */
@@ -19,9 +20,26 @@ export function getActingUserId(request: Request): string | null {
       const verified = verifySessionToken({ token, secret });
       if (verified.ok) return verified.payload.uid;
     }
+  } else if (enforceAuth) {
+    // In production, refuse to operate without a session secret.
+    // This prevents silent auth bypass if the env var is unset.
+    console.error("[FATAL] PROOFPACK_SESSION_SECRET is not set in production!");
+    return null;
   }
 
-  // 2. In dev only (without ENFORCE_AUTH), fall back to the x-user-id header.
+  // 2. Internal service-to-service calls (e.g. copy trading placing orders
+  //    on behalf of subscribers). Trusted in ALL environments when the
+  //    shared secret matches.
+  const internalSecret = process.env.INTERNAL_SERVICE_SECRET;
+  if (internalSecret) {
+    const headerSecret = request.headers.get("x-internal-service-token");
+    if (headerSecret && headerSecret === internalSecret) {
+      const uid = request.headers.get("x-user-id");
+      if (uid) return uid;
+    }
+  }
+
+  // 3. In dev only (without ENFORCE_AUTH), fall back to the x-user-id header.
   if (!enforceAuth) {
     const header = request.headers.get("x-user-id");
     if (header) return header;

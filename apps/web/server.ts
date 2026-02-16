@@ -33,8 +33,13 @@ const port = parseInt(process.env.PORT ?? "3000", 10);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+// Next.js dev server uses WebSocket upgrades for HMR. If we attach our own
+// `upgrade` handler we must forward unknown upgrades to Next, otherwise the
+// sockets can leak/hang and dev can crash.
+let handleUpgrade: undefined | ((req: any, socket: any, head: any) => void);
 
 app.prepare().then(() => {
+  handleUpgrade = (app as any).getUpgradeHandler ? (app as any).getUpgradeHandler() : undefined;
   const sql = createSql();
 
   const server = createServer((req, res) => {
@@ -49,7 +54,11 @@ app.prepare().then(() => {
     const { pathname } = parse(req.url ?? "/", true);
 
     if (pathname !== "/ws") {
-      // Not our upgrade — let Next.js HMR or other handlers deal with it
+      // Not our upgrade — forward to Next.js (HMR etc) if available.
+      if (handleUpgrade) {
+        return handleUpgrade(req, socket, head);
+      }
+      socket.destroy();
       return;
     }
 

@@ -112,7 +112,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
 
   // Form State
   const [side, setSide] = useState<"BUY" | "SELL">("SELL");
-  const [asset, setAsset] = useState("TST");
+  const [asset, setAsset] = useState("USDT");
   const [fiat, setFiat] = useState("KES"); // Default to KES
 
   const [priceType, setPriceType] = useState<"fixed" | "floating">("fixed");
@@ -156,7 +156,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
     setError(null);
     setLoading(true);
 
-    if (selectedMethods.length === 0) {
+    if (side === "SELL" && selectedMethods.length === 0) {
       setError("Please select at least one payment method.");
       setLoading(false);
       return;
@@ -177,7 +177,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
           max_limit: parseFloat(maxLimit),
           terms,
           payment_window_minutes: 15,
-          payment_methods: selectedMethods,
+          payment_methods: side === "SELL" ? selectedMethods : [],
         }),
       });
 
@@ -185,9 +185,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
 
       if (!res.ok) {
         console.error("Ad creation failed:", data); // Log to client console
-        if (data.error === "merchant_shield_error") {
-            setError(data.message || "Insufficient TST Stake.");
-        } else if (res.status === 401 || data.error === "unauthorized" || data.error === "missing_x_user_id") {
+        if (res.status === 401 || data.error === "unauthorized" || data.error === "missing_x_user_id") {
             setError("unauthorized");
         } else {
             // Show detailed error if available, otherwise fallback
@@ -253,9 +251,6 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <>
                   <p>{error}</p>
-                  {error.includes("TST") && (
-                     <a href="/exchange" className="mt-2 text-xs underline hover:text-red-400">Buy TST on Spot Market →</a>
-                  )}
                 </>
               )}
             </div>
@@ -291,7 +286,6 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setAsset(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
                 >
-                  <option value="TST">TST</option>
                   <option value="USDT">USDT</option>
                   <option value="BNB">BNB</option>
                 </select>
@@ -446,13 +440,6 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                 />
              </div>
              
-             {/* Info */}
-             <div className="rounded bg-[var(--card-bg)] p-3 text-xs text-[var(--muted)] border border-[var(--border)]">
-               <p>
-                 <span className="font-semibold text-[var(--accent)]">Merchant Shield:</span> You must hold at least <span className="text-[var(--fg)]">500 TST</span> to post this ad.
-               </p>
-             </div>
-
           </div>
 
           <div className="mt-6 flex justify-end gap-3">

@@ -11,6 +11,8 @@ import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { checkWithdrawalVelocity } from "@/lib/exchange/withdrawalVelocity";
 import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
+import { chargeGasFeeFromQuote, quoteGasFee } from "@/lib/exchange/gas";
+import { add3818, toBigInt3818 } from "@/lib/exchange/fixed3818";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -121,7 +123,31 @@ export async function POST(request: Request) {
     `;
 
     const bal = balRows[0];
-    if (!bal?.ok) {
+
+    const gasQuote = await quoteGasFee(txSql, {
+      action: "withdrawal_request",
+      chain: asset.chain,
+      assetSymbol: asset.symbol,
+    });
+    if ("code" in gasQuote) {
+      return { status: 409 as const, body: { error: gasQuote.code, details: gasQuote.details } };
+    }
+
+    const feeChargeAmount = gasQuote.enabled ? (gasQuote.chargeAmount ?? "") : "0";
+    if (gasQuote.enabled && (!feeChargeAmount || toBigInt3818(feeChargeAmount) < 0n)) {
+      return {
+        status: 409 as const,
+        body: {
+          error: "gas_fee_invalid",
+          details: { message: "missing_fee_charge_amount", quote: gasQuote },
+        },
+      };
+    }
+
+    const requestedTotal = add3818(input.amount, feeChargeAmount || "0");
+    const availableBig = toBigInt3818(bal?.available ?? "0");
+    const okTotal = availableBig >= toBigInt3818(requestedTotal);
+    if (!okTotal) {
       return {
         status: 409 as const,
         body: {
@@ -131,6 +157,11 @@ export async function POST(request: Request) {
             held: bal?.held ?? "0",
             available: bal?.available ?? "0",
             requested: input.amount,
+            network_fee_display: gasQuote.enabled
+              ? { amount: gasQuote.amount, symbol: gasQuote.gasSymbol }
+              : { amount: "0", symbol: gasQuote.gasSymbol },
+            fee_charged_in_asset: feeChargeAmount || "0",
+            total_debit: requestedTotal,
           },
         },
       };
@@ -198,6 +229,23 @@ export async function POST(request: Request) {
       },
     });
 
+    if (gasQuote.enabled && toBigInt3818(feeChargeAmount || "0") > 0n) {
+      const gasErr = await chargeGasFeeFromQuote(
+        txSql,
+        {
+          userId: actingUserId,
+          action: "withdrawal_request",
+          reference: `withdrawal:${withdrawalId}`,
+          chain: asset.chain,
+          assetSymbol: asset.symbol,
+        },
+        gasQuote,
+      );
+      if (gasErr) {
+        return { status: 409 as const, body: { error: gasErr.code, details: gasErr.details } };
+      }
+    }
+
       return {
         status: 201 as const,
         body: {
@@ -211,6 +259,19 @@ export async function POST(request: Request) {
             status: "requested",
             hold_id: holdId,
             created_at: reqRows[0]!.created_at,
+            fees: gasQuote.enabled
+              ? {
+                network_fee_display_amount: gasQuote.amount,
+                network_fee_display_symbol: gasQuote.gasSymbol,
+                fee_charged_in_asset_amount: feeChargeAmount || "0",
+                fee_charged_in_asset_symbol: asset.symbol,
+              }
+              : {
+                network_fee_display_amount: "0",
+                network_fee_display_symbol: gasQuote.gasSymbol,
+                fee_charged_in_asset_amount: "0",
+                fee_charged_in_asset_symbol: asset.symbol,
+              },
           },
         },
       };
@@ -243,6 +304,11 @@ export async function POST(request: Request) {
   } catch (e) {
     const resp = responseForDbError("exchange.withdrawals.request", e);
     if (resp) return resp;
-    throw e;
+    console.error("exchange.withdrawals.request failed:", e);
+    return apiError("internal_error", {
+      details: {
+        message: e instanceof Error ? e.message : String(e),
+      },
+    });
   }
 }

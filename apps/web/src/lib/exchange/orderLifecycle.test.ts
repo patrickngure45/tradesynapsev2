@@ -156,7 +156,7 @@ describe("order lifecycle integration", () => {
 
   it("multi-level sweep with fee accounting on in-memory ledger", () => {
     const ledger = new TestLedger();
-    const BASE = "TST";
+    const BASE = "BNB";
     const QUOTE = "USDT";
     const FEE_USER = "fees";
 
@@ -234,11 +234,11 @@ describe("order lifecycle integration", () => {
     ledger.releaseHold("h-alice", "alice", QUOTE);   // leftover from over-reserve
     ledger.releaseHold("h-charlie", "charlie", BASE); // charlie had 5, filled 4 → 1 back
 
-    // Assertions: alice has 7 TST
+    // Assertions: alice has 7 BNB
     expect(ledger.posted("alice", BASE)).toBe("7");
-    // Bob has 0 TST (all sold), some USDT
+    // Bob has 0 BNB (all sold), some USDT
     expect(ledger.posted("bob", BASE)).toBe("0");
-    // Charlie still has 1 TST back from released hold
+    // Charlie still has 1 BNB back from released hold
     expect(ledger.posted("charlie", BASE)).toBe("1");
     // Fee user got all fees
     const totalFees = add3818(add3818(takerFee1, makerFee1), add3818(takerFee2, makerFee2));

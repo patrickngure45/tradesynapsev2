@@ -201,8 +201,8 @@ export async function getActiveSubscriptionsForLeader(
 
 /**
  * Propagates an order from a leader to their active subscribers.
- * NOTE: This uses internal API loopback to place orders on behalf of users.
- * This works in environments where `x-user-id` header is respected (non-enforced auth).
+ * Uses an internal service token to securely place orders on behalf of users
+ * without relying on the dev-only x-user-id header bypass.
  */
 export async function propagateLeaderOrder(
   sql: Sql,
@@ -220,6 +220,11 @@ export async function propagateLeaderOrder(
   if (subs.length === 0) return; // No one to copy
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const serviceSecret = process.env.INTERNAL_SERVICE_SECRET;
+  if (!serviceSecret) {
+    console.error("[copy-trading] INTERNAL_SERVICE_SECRET not set — cannot propagate orders");
+    return;
+  }
 
   // 2. Process each subscriber
   // We run these in parallel, but with a catch-all to prevent one failure stopping others.
@@ -227,8 +232,6 @@ export async function propagateLeaderOrder(
     subs.map(async (sub) => {
       try {
         // Calculate Quantity: (Leader Quantity) * (Copy Ratio)
-        // We do naive float math here for MVP; simpler than Fixed3818 helper imports if not critical.
-        // Ideally should use mul3818.
         const ratio = parseFloat(sub.copy_ratio);
         const leaderQty = parseFloat(params.quantity);
         let subQty = leaderQty * ratio;
@@ -242,41 +245,32 @@ export async function propagateLeaderOrder(
         // Avoid dust
         if (subQty <= 0.00000001) return;
 
-        // Construct Payload
-        const payload: Record<string, any> = {
+        // Construct Payload — always use MARKET for guaranteed fill on copy trades
+        const payload: Record<string, string> = {
           market_id: params.marketId,
           side: params.side,
-          type: "market", // Always copy as MARKET orders to ensure fill? Or retain limit?
-          // Copy trading usually converts Limit to Market OR places a Limit at same price.
-          // BUT if leader places Limit, it might not fill. If we place Market, we pay seeker fees.
-          // Let's stick to Matching the type for now, or default to Market for guaranteed entry.
-          // "Mirroring" usually implies Taker execution to sync positions. Best to use MARKET.
-          quantity: subQty.toFixed(8), // Truncate
+          type: "market",
+          quantity: subQty.toFixed(8),
         };
-        
-        // If we really want to support Limit copying:
-        // if (params.type === 'limit' && params.price) { payload.type = 'limit'; payload.price = params.price; }
 
-        // Execute Call
-        // This relies on `d/final/apps/web/src/lib/auth/party.ts` accepting x-user-id header
+        // Execute Call with internal service token for prod-safe auth
         const res = await fetch(`${baseUrl}/api/exchange/orders`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-user-id": sub.follower_user_id, // Impersonate
+            "x-internal-service-token": serviceSecret,
+            "x-user-id": sub.follower_user_id,
           },
           body: JSON.stringify(payload),
         });
 
         if (!res.ok) {
            const err = await res.text();
-           console.error(`Failed to copy trade for sub ${sub.id}: ${res.status}`, err);
-        } else {
-           console.log(`Copied trade for sub ${sub.id} (Leader: ${params.leaderUserId})`);
+           console.error(`[copy-trading] Failed for sub ${sub.id}: HTTP ${res.status}`);
         }
 
       } catch (e) {
-        console.error(`Error processing copy trade for sub ${sub.id}`, e);
+        console.error(`[copy-trading] Error processing sub ${sub.id}:`, e instanceof Error ? e.message : e);
       }
     })
   );

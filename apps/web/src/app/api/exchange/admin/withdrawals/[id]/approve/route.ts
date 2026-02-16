@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { enqueueOutbox } from "@/lib/outbox";
 import { responseForDbError } from "@/lib/dbTransient";
-import { requireAdmin } from "@/lib/auth/admin";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createNotification } from "@/lib/notifications";
@@ -23,8 +23,8 @@ const postSchema = z
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const startMs = Date.now();
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
 
   const { id } = await params;
 
@@ -49,10 +49,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
 
-    const rows = await txSql<{ id: string; status: string; user_id: string; amount: string; asset_id: string }[]>`
-      SELECT id, status, user_id::text AS user_id, amount::text AS amount, asset_id::text AS asset_id
-      FROM ex_withdrawal_request
-      WHERE id = ${id}
+    const rows = await txSql<{ id: string; status: string; user_id: string; amount: string; asset_id: string; asset_symbol: string }[]>`
+      SELECT w.id, w.status, w.user_id::text AS user_id, w.amount::text AS amount, w.asset_id::text AS asset_id, a.symbol AS asset_symbol
+      FROM ex_withdrawal_request w
+      JOIN ex_asset a ON a.id = w.asset_id
+      WHERE w.id = ${id}
       LIMIT 1
     `;
 

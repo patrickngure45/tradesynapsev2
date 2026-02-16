@@ -6,8 +6,6 @@ import { SiteChrome } from "@/components/SiteChrome";
 import { HomepageStats } from "./HomepageStats";
 import { MarketPulse } from "@/components/dashboard/MarketPulse";
 
-const isDev = process.env.NODE_ENV !== "production";
-
 /* ── Feature-card data ─────────────────────────────────────────── */
 const features: {
   href: string;
@@ -31,7 +29,7 @@ const features: {
   {
     href: "/p2p",
     title: "P2P Marketplace",
-    desc: "Buy & sell TST instantly via M-Pesa, Airtel Money, and bank transfer. Local escrow protection.",
+    desc: "Buy & sell USDT instantly via M-Pesa, Airtel Money, and bank transfer. Local escrow protection.",
     iconBg: "bg-[color-mix(in_srgb,var(--accent)_15%,transparent)]",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round">
@@ -122,27 +120,26 @@ export default function Home() {
           </div>
           
           <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-6xl">
-            The Exchange for <span className="mr-2 text-[var(--accent)]">You.</span>
+            Trade smarter with <span className="mr-2 text-[var(--accent)]">TradeSynapse.</span>
           </h1>
           
           <p className="max-w-2xl text-balance text-lg text-[var(--muted)]">
-            Your personal command center. 
-            Automated intelligence, global arbitrage scanning, and seamless P2P trading with M-Pesa.
-            Built for the decentralized economy.
+            A clean command center for spot trading, P2P exchange, wallet operations, and market intelligence.
+            Track opportunities, execute quickly, and manage risk from one place.
           </p>
           
           <div className="mt-4 flex flex-wrap justify-center gap-4">
             <Link
-              href="/p2p"
+              href="/exchange"
               className="inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-8 text-sm font-medium text-[var(--bg)] transition-colors hover:bg-[var(--accent-hover)]"
             >
-              Start P2P Trading
+              Open Trading Terminal
             </Link>
             <Link
-              href="/exchange"
+              href="/p2p"
               className="inline-flex h-10 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--card-bg)] px-8 text-sm font-medium transition-colors hover:bg-[var(--hover-bg)]"
             >
-              Launch Terminal
+              Start P2P Trade
             </Link>
           </div>
         </header>
@@ -158,7 +155,15 @@ export default function Home() {
         <HomepageStats />
 
         {/* ── Features ─────────────────────────────────────────── */}
-        <section className="fade-in-up delay-200 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="fade-in-up delay-200">
+          <div className="mb-5 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight">Quick Access</h2>
+              <p className="text-sm text-[var(--muted)]">Everything you need to operate the platform day to day.</p>
+            </div>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((feature) => (
             <Link
               key={feature.title}
@@ -174,8 +179,14 @@ export default function Home() {
               <p className="text-sm leading-relaxed text-[var(--muted)]">
                 {feature.desc}
               </p>
+
+              <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)]">
+                Open
+                <span className="transition-transform group-hover:translate-x-0.5">→</span>
+              </div>
             </Link>
           ))}
+          </div>
         </section>
       </main>
     </SiteChrome>

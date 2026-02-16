@@ -11,8 +11,13 @@ export async function GET(req: NextRequest) {
   }
 
   const sql = getSql();
-  // Find the first user
-  const [user] = await sql`SELECT id, email FROM app_user LIMIT 1`;
+  // Prefer the admin user if present (dev convenience)
+  const [user] = await sql`
+    SELECT id, email
+    FROM app_user
+    ORDER BY (role = 'admin') DESC, created_at ASC
+    LIMIT 1
+  `;
 
   if (!user) {
     return NextResponse.json({ error: "no_users_found" }, { status: 404 });

@@ -2,7 +2,7 @@
  * BEP-20 Token interactions on BSC
  *
  * Provides balance checks, transfer functions, and deposit detection
- * for TST, USDT, and native BNB.
+ * for USDT and native BNB.
  */
 import { ethers } from "ethers";
 import { getBscProvider } from "./wallet";
@@ -17,15 +17,13 @@ const ERC20_ABI = [
 ] as const;
 
 // ── Known contract addresses ─────────────────────────────────────────
-export type KnownToken = "TST" | "USDT" | "BNB";
+export type KnownToken = "USDT" | "BNB";
 
 const MAINNET_TOKENS: Record<string, string> = {
-  TST: "0xc3e9233caCe921C8C5DC299075269d1Ef8e01214",
   USDT: "0x55d398326f99059fF775485246999027B3197955", // BSC-USD (Binance-Peg)
 };
 
 const TESTNET_TOKENS: Record<string, string> = {
-  TST: "0x297aB5E3Cd7798cC5cA75F30fa06e695F4E954f5",
   USDT: "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd", // Testnet USDT mock
 };
 
@@ -76,7 +74,7 @@ export async function getAllBalances(walletAddress: string): Promise<
   }
 
   // BEP-20 tokens
-  for (const symbol of ["TST", "USDT"] as const) {
+  for (const symbol of ["USDT"] as const) {
     const addr = getTokenAddress(symbol);
     if (!addr) continue;
     try {

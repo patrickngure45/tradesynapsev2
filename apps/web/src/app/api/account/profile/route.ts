@@ -32,9 +32,8 @@ export async function GET(request: Request) {
         totp_enabled: boolean;
         country: string | null;
         created_at: string;
-        pay_fees_with_tst: boolean;
       }[]>`
-        SELECT id, email, display_name, status, kyc_level, email_verified, totp_enabled, country, created_at, pay_fees_with_tst
+        SELECT id, email, display_name, status, kyc_level, email_verified, totp_enabled, country, created_at
         FROM app_user
         WHERE id = ${actingUserId}
         LIMIT 1
@@ -48,46 +47,5 @@ export async function GET(request: Request) {
     const resp = responseForDbError("account.profile", e);
     if (resp) return resp;
     throw e;
-  }
-}
-
-/**
- * PATCH /api/account/profile — update profile settings
- */
-export async function PATCH(request: Request) {
-  const sql = getSql();
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("unauthorized", { status: 401 });
-
-  try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
-    if (activeErr) return apiError(activeErr);
-
-    const body = await request.json();
-
-    if (typeof body.pay_fees_with_tst === 'boolean') {
-      await retryOnceOnTransientDbError(async () => {
-        await sql`
-          UPDATE app_user
-          SET pay_fees_with_tst = ${body.pay_fees_with_tst}
-          WHERE id = ${actingUserId}
-        `;
-      });
-    }
-
-    // Refresh and return
-    const rows = await retryOnceOnTransientDbError(async () => {
-      return await sql`SELECT id, pay_fees_with_tst FROM app_user WHERE id = ${actingUserId}`;
-    });
-
-    return Response.json({ user: rows[0] });
-
-  } catch (e) {
-    console.error("PATCH /api/account/profile error:", e);
-    const resp = responseForDbError("account.profile.update", e);
-    if (resp) return resp;
-    return apiError("internal_error");
   }
 }

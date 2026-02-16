@@ -14,6 +14,37 @@ type ArbOpp = {
   potentialProfit: number;
   netSpreadPct: number;
   netProfit: number;
+  netSpreadDepthPct?: number | null;
+  notionalUsd?: number;
+  execNotionalUsd?: number;
+  grossProfitUsd?: number;
+  netProfitUsd?: number;
+  grossProfitExecUsd?: number;
+  netProfitExecUsd?: number;
+  readiness?: {
+    state: "discoverable" | "action_required" | "executable";
+    canExecute: boolean;
+    reasons: string[];
+  };
+  fee?: {
+    buyTaker?: number;
+    sellTaker?: number;
+    feePct?: number;
+    sourceBuy?: string;
+    sourceSell?: string;
+  } | null;
+  depth?: {
+    buyVwap?: number;
+    sellVwap?: number;
+    buySlippageBps?: number;
+    sellSlippageBps?: number;
+  } | null;
+  execution?: {
+    status: "ready" | "missing" | "unknown";
+    blockers: string[];
+    required?: { usdtBuy: number; baseSell: number; base: string };
+    max?: { notionalUsd: number; baseSell: number; limitedBy: string[] };
+  } | null;
   ts: string;
 };
 
@@ -43,10 +74,35 @@ function spreadTier(pct: number): { label: string; class: string } {
   return { label: "WATCH", class: "bg-[var(--muted)]/20 text-[var(--muted)]" };
 }
 
+function readinessReasonLabel(reason: string) {
+  const map: Record<string, string> = {
+    connect_exchange_api: "Connect exchange API",
+    execution_data_unavailable: "Execution data unavailable",
+    buy_balance_unavailable: "Buy balance unavailable",
+    sell_balance_unavailable: "Sell balance unavailable",
+    insufficient_usdt_on_buy: "Insufficient buy-side USDT",
+    insufficient_base_on_sell: "Insufficient sell-side asset",
+    min_amount_buy: "Below buy min amount",
+    min_amount_sell: "Below sell min amount",
+    min_notional_buy: "Below buy min notional",
+    min_notional_sell: "Below sell min notional",
+    execution_window_closed: "Window closed (try again soon)",
+  };
+  return map[reason] ?? reason.replaceAll("_", " ");
+}
+
 export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectAction }: { opp: ArbOpp, connectedExchanges: string[], onConnectAction: () => void }) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [executeBanner, setExecuteBanner] = useState<
+    | null
+    | {
+        tone: "success" | "error";
+        title: string;
+        detail?: string;
+      }
+  >(null);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [connectTarget, setConnectTarget] = useState<string>("");
   
@@ -55,8 +111,53 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
   const [apiSecret, setApiSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [connectBanner, setConnectBanner] = useState<null | { title: string; detail?: string }>(null);
 
   const tier = spreadTier(opp.spreadPct);
+
+  const notionalLabel = (() => {
+    const n = opp.notionalUsd;
+    if (!n || !Number.isFinite(n) || n <= 0) return null;
+    if (n >= 1000) return "$1000";
+    if (n >= 100) return `$${Math.round(n)}`;
+    return `$${n.toFixed(0)}`;
+  })();
+
+  const exec = opp.execution;
+  const readiness = opp.readiness;
+  const readinessBadge = (() => {
+    if (!readiness) return { label: "DISCOVERABLE", className: "bg-[var(--border)] text-[var(--muted)]" };
+    if (readiness.state === "executable") return { label: "EXECUTABLE", className: "bg-[var(--up)]/15 text-[var(--up)]" };
+    if (readiness.state === "action_required") return { label: "ACTION REQUIRED", className: "bg-yellow-500/15 text-yellow-300" };
+    return { label: "DISCOVERABLE", className: "bg-[var(--border)] text-[var(--muted)]" };
+  })();
+  const execBadge = (() => {
+    if (!exec) return null;
+    if (exec.status === "ready") return { label: "READY", className: "bg-[var(--up)]/15 text-[var(--up)]" };
+    if (exec.status === "missing") return { label: "MISSING FUNDS", className: "bg-red-500/15 text-red-400" };
+    return { label: "UNKNOWN", className: "bg-[var(--border)] text-[var(--muted)]" };
+  })();
+  const displayNetUsd = (() => {
+    if (typeof opp.netProfitExecUsd === "number" && Number.isFinite(opp.netProfitExecUsd)) return opp.netProfitExecUsd;
+    return opp.netProfitUsd ?? 0;
+  })();
+
+  const displayNetSpreadPct = (() => {
+    if (typeof opp.netSpreadDepthPct === "number" && Number.isFinite(opp.netSpreadDepthPct)) return opp.netSpreadDepthPct;
+    return opp.netSpreadPct ?? 0;
+  })();
+
+  const feePct = opp.fee?.feePct;
+  const buySlip = opp.depth?.buySlippageBps;
+  const sellSlip = opp.depth?.sellSlippageBps;
+  const hasDepthOrFees =
+    (typeof feePct === "number" && Number.isFinite(feePct)) ||
+    (typeof buySlip === "number" && Number.isFinite(buySlip)) ||
+    (typeof sellSlip === "number" && Number.isFinite(sellSlip));
+
+  const canConnectToEnable = Boolean(readiness?.reasons?.includes("connect_exchange_api"));
+  const canExecute = Boolean(readiness?.canExecute);
+  const executeDisabled = executing || displayNetUsd <= 0 || (!canExecute && !canConnectToEnable);
 
   const handleAnalyze = async () => {
     if (analyzing || analysis) return;
@@ -73,27 +174,78 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
 
   const executeTradeLogic = async () => {
      setExecuting(true);
+     setExecuteBanner(null);
      try {
        const res = await fetch("/api/exchange/arbitrage/execute", {
          method: "POST",
          headers: { "Content-Type": "application/json" },
          body: JSON.stringify({ opp })
        });
-       
-       const data = await res.json();
+
+       const data = await res.json().catch(() => ({} as any));
 
        if (!res.ok) {
-         throw new Error(data.message || data.error || "Execution failed");
+         const code = String((data as any)?.error ?? "execution_failed");
+         const message = String((data as any)?.message ?? (data as any)?.error ?? "Execution failed");
+
+         const detail = (() => {
+           if (code === "min_notional_not_met") {
+             const d = (data as any)?.detail;
+             const bn = typeof d?.buyNotionalUsd === "number" ? d.buyNotionalUsd : null;
+             const sn = typeof d?.sellNotionalUsd === "number" ? d.sellNotionalUsd : null;
+             const bmin = typeof d?.costMinBuy === "number" ? d.costMinBuy : null;
+             const smin = typeof d?.costMinSell === "number" ? d.costMinSell : null;
+             if (bn != null || sn != null || bmin != null || smin != null) {
+               return `buy $${(bn ?? 0).toFixed(2)} (min $${(bmin ?? 0).toFixed(2)}) · sell $${(sn ?? 0).toFixed(2)} (min $${(smin ?? 0).toFixed(2)})`;
+             }
+             return undefined;
+           }
+           if (code === "min_qty_not_met") {
+             const c = (data as any)?.constraints;
+             const minBuy = typeof c?.buy?.amountMin === "number" ? c.buy.amountMin : null;
+             const minSell = typeof c?.sell?.amountMin === "number" ? c.sell.amountMin : null;
+             if (minBuy != null || minSell != null) {
+               return `min qty buy ${minBuy ?? "—"} · sell ${minSell ?? "—"}`;
+             }
+             return undefined;
+           }
+           if (code === "insufficient_balances") {
+             const b = (data as any)?.balances;
+             const usdt = typeof b?.buy?.usdtFree === "number" ? b.buy.usdtFree : null;
+             const base = typeof b?.sell?.base === "string" ? b.sell.base : null;
+             const baseFree = typeof b?.sell?.baseFree === "number" ? b.sell.baseFree : null;
+             if (usdt != null || (base && baseFree != null)) {
+               return `buy USDT free ${usdt != null ? usdt.toFixed(2) : "—"} · sell ${base ?? "BASE"} free ${baseFree != null ? baseFree.toFixed(6) : "—"}`;
+             }
+             return undefined;
+           }
+           if (code === "not_profitable") {
+             const q = (data as any)?.quote;
+             const net = typeof q?.netSpreadPct === "number" ? q.netSpreadPct : null;
+             const gross = typeof q?.grossSpreadPct === "number" ? q.grossSpreadPct : null;
+             if (net != null || gross != null) {
+               return `net ${(net ?? 0).toFixed(3)}% · gross ${(gross ?? 0).toFixed(3)}%`;
+             }
+             return undefined;
+           }
+           return undefined;
+         })();
+
+         setExecuteBanner({ tone: "error", title: message, detail });
+         return;
        }
-       
-       // Success Message
-       const buyInfo = data.data.buy ? `${data.data.buy.exchange} (${data.data.buy.status})` : "Skipped";
-       const sellInfo = data.data.sell ? `${data.data.sell.exchange} (${data.data.sell.status})` : "Skipped";
-       
-       alert(`✅ Trade Executed!\n\nBought on: ${buyInfo}\nSold on: ${sellInfo}\n\nArbitrage complete.`);
+
+       const buyInfo = (data as any)?.data?.buy ? `${(data as any).data.buy.exchange} (${(data as any).data.buy.status})` : "Skipped";
+       const sellInfo = (data as any)?.data?.sell ? `${(data as any).data.sell.exchange} (${(data as any).data.sell.status})` : "Skipped";
+
+       setExecuteBanner({
+         tone: "success",
+         title: "Auto-trade submitted",
+         detail: `Bought on: ${buyInfo} · Sold on: ${sellInfo}`,
+       });
 
      } catch (e: any) {
-        alert(`❌ Execution Error: ${e.message}`);
+        setExecuteBanner({ tone: "error", title: e?.message || "Execution error" });
      } finally {
         setExecuting(false);
      }
@@ -109,9 +261,11 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
     
     if (missingBuy) {
         setConnectTarget(buyEx);
+      setConnectBanner(null);
         setShowConnectModal(true);
     } else if (missingSell) {
         setConnectTarget(sellEx);
+      setConnectBanner(null);
         setShowConnectModal(true);
     } else {
         executeTradeLogic();
@@ -122,6 +276,7 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
     if (!connectTarget) return; 
 
     setConnecting(true);
+    setConnectBanner(null);
     try {
         const res = await fetch("/api/exchange/connections", {
             method: "POST",
@@ -142,10 +297,11 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
             executeTradeLogic();
         } else {
             const data = await res.json().catch(() => ({}));
-            alert(`Failed to save API Key: ${data.message || data.error || "Unknown error"}`);
+        const msg = String((data as any)?.message || (data as any)?.error || "Unknown error");
+        setConnectBanner({ title: "Failed to save API key", detail: msg });
         }
     } catch (e) {
-        alert("Connection error.");
+      setConnectBanner({ title: "Connection error", detail: "Could not reach server." });
     } finally {
         setConnecting(false);
     }
@@ -202,12 +358,17 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
         <div className="flex items-center gap-6">
             <div className="text-right">
                 <div className="text-[9px] uppercase text-[var(--muted)]">Net Spread</div>
-                <div className={`font-mono text-sm font-bold ${(opp.netSpreadPct ?? 0) > 0 ? "text-[var(--up)]" : "text-red-500"}`}>
-                {(opp.netSpreadPct ?? 0) > 0 ? "+" : ""}{(opp.netSpreadPct ?? 0).toFixed(3)}%
+                <div className={`font-mono text-sm font-bold ${displayNetSpreadPct > 0 ? "text-[var(--up)]" : "text-red-500"}`}>
+                {displayNetSpreadPct > 0 ? "+" : ""}{displayNetSpreadPct.toFixed(3)}%
                 </div>
                 <div className="font-mono text-[10px] text-[var(--muted)]">
                   gross {(opp.spreadPct ?? 0).toFixed(3)}%
                 </div>
+                {hasDepthOrFees && (
+                  <div className="font-mono text-[10px] text-[var(--muted)]">
+                    depth {(typeof buySlip === "number" && Number.isFinite(buySlip)) ? `${Math.round(buySlip)}bps` : "—"} / {(typeof sellSlip === "number" && Number.isFinite(sellSlip)) ? `${Math.round(sellSlip)}bps` : "—"} · fees {(typeof feePct === "number" && Number.isFinite(feePct)) ? `${feePct.toFixed(2)}%` : "—"}
+                  </div>
+                )}
             </div>
             
             <div className="text-right">
@@ -217,6 +378,13 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
                 </div>
                 <div className="font-mono text-[10px] text-[var(--muted)]">
                   gross ~${(opp.potentialProfit ?? 0).toFixed(2)}
+                </div>
+            </div>
+
+            <div className="text-right">
+                <div className="text-[9px] uppercase text-[var(--muted)]">Net {notionalLabel ?? "Your"}</div>
+                <div className={`font-mono text-sm font-bold ${displayNetUsd > 0 ? "text-[var(--up)]" : "text-red-500"}`}>
+                  {displayNetUsd > 0 ? "+" : ""}${displayNetUsd.toFixed(2)}
                 </div>
             </div>
         </div>
@@ -238,14 +406,84 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
 
             <button
                 onClick={handleExecute}
-                disabled={executing || (opp.netProfit ?? 0) <= 0}
+              disabled={executeDisabled}
                 className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50 disabled:grayscale"
-                title={(opp.netProfit ?? 0) <= 0 ? "Not profitable after fees" : "Execute trade"}
+              title={
+                displayNetUsd <= 0
+                  ? "Not profitable after fees"
+                  : canConnectToEnable
+                    ? "Connect API key to enable trading"
+                    : canExecute
+                      ? "Execute trade"
+                      : "Requirements not yet met"
+              }
             >
-               {executing ? "..." : (opp.netProfit ?? 0) > 0 ? "Auto-Trade" : "Unprofitable"}
+               {executing ? "..." : displayNetUsd <= 0 ? "Unprofitable" : canConnectToEnable ? "Connect & Trade" : canExecute ? "Auto-Trade" : "Locked"}
             </button>
         </div>
       </div>
+
+      {readiness && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px]">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${readinessBadge.className}`}>{readinessBadge.label}</span>
+            {readiness.reasons.length > 0 ? (
+              <span className="text-[var(--muted)]">
+                {readiness.reasons.slice(0, 2).map(readinessReasonLabel).join(" · ")}
+              </span>
+            ) : (
+              <span className="text-[var(--muted)]">Ready for execution checks</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {execBadge && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px]">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${execBadge.className}`}>{execBadge.label}</span>
+            <span className="text-[var(--muted)]">
+              Balance check: {exec?.status === "ready" ? "sufficient" : exec?.status === "missing" ? "insufficient" : "unavailable"}
+            </span>
+          </div>
+          {exec?.max && (
+            <div className="font-mono text-[10px] text-[var(--muted)]">
+              max ≈ ${exec.max.notionalUsd.toFixed(0)}
+            </div>
+          )}
+          {!exec?.max && exec?.required && (
+            <div className="font-mono text-[10px] text-[var(--muted)]">
+              need ≈ ${exec.required.usdtBuy.toFixed(0)} USDT (buy) · {exec.required.baseSell.toFixed(6)} {exec.required.base} (sell)
+            </div>
+          )}
+        </div>
+      )}
+
+      {executeBanner && (
+        <div
+          className={
+            "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-[11px] " +
+            (executeBanner.tone === "success"
+              ? "border-[var(--up)]/30 bg-[var(--up)]/10 text-[var(--up)]"
+              : "border-red-500/30 bg-red-500/10 text-red-300")
+          }
+        >
+          <div className="min-w-0">
+            <div className="font-semibold text-[11px]">{executeBanner.title}</div>
+            {executeBanner.detail && (
+              <div className="mt-0.5 font-mono text-[10px] opacity-90">{executeBanner.detail}</div>
+            )}
+          </div>
+          <button
+            onClick={() => setExecuteBanner(null)}
+            className="rounded px-2 py-1 text-[10px] font-semibold hover:bg-black/10"
+            aria-label="Dismiss"
+            title="Dismiss"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* 2. Analysis Result (Expandable) */}
       {analysis && (
@@ -271,6 +509,15 @@ export function ArbitrageOpportunityRow({ opp, connectedExchanges, onConnectActi
                     To execute this trade automatically, TradeSynapse needs access to your <b>{exchangeLabel(connectTarget)}</b> account via API.
                     Your keys will be encrypted and saved for future trades.
                  </p>
+
+                 {connectBanner && (
+                   <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+                     <div className="font-semibold">{connectBanner.title}</div>
+                     {connectBanner.detail && (
+                       <div className="mt-0.5 font-mono text-[10px] opacity-90">{connectBanner.detail}</div>
+                     )}
+                   </div>
+                 )}
                  
                  <div className="mt-4 space-y-3">
                      <div>

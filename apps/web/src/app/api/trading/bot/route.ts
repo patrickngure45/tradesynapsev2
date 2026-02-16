@@ -5,9 +5,7 @@ import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { responseForDbError } from "@/lib/dbTransient";
-import { getAuthenticatedExchangeClient, placeExchangeOrder } from "@/lib/exchange/externalApis";
-import { decryptCredential } from "@/lib/auth/credentials";
-import { writeAuditLog } from "@/lib/auditLog";
+import { auditContextFromRequest, writeAuditLog } from "@/lib/auditLog";
 
 export const runtime = "nodejs";
 
@@ -15,9 +13,14 @@ const executeSchema = z.object({
   signalId: z.string().uuid(),
   amount: z.number().min(10), // Min $10
   leverage: z.number().min(1).max(5).default(1),
+  mode: z.enum(["simulation", "live"]).default("simulation"),
 });
 
-export async function POST(request: Request) {
+function liveTradingEnabled(): boolean {
+  return process.env.TRADING_LIVE_ENABLED === "1";
+}
+
+export async function POST(request: Request): Promise<Response> {
   const sql = getSql();
   const actingUserId = getActingUserId(request);
   const authErr = requireActingUserIdInProd(actingUserId);
@@ -40,9 +43,19 @@ export async function POST(request: Request) {
     const [signal] = await sql`
         SELECT * FROM app_signal WHERE id = ${input.signalId}
     `;
-    if (!signal) return apiError("not_found", "Signal not found");
+    if (!signal) return apiError("not_found", { details: "Signal not found" });
 
     const { exchange, symbol } = signal.payload_json;
+
+    if (input.mode === "live" && !liveTradingEnabled()) {
+      return Response.json(
+        {
+          error: "live_trading_disabled",
+          message: "Live trading is disabled. This environment only supports simulation mode.",
+        },
+        { status: 403 },
+      );
+    }
 
     // 2. Fetch User Connection
     const [connection] = await sql`
@@ -58,85 +71,69 @@ export async function POST(request: Request) {
         );
     }
 
-    // 3. Decrypt Credentials
-    const apiKey = decryptCredential(connection.api_key_enc);
-    const apiSecret = decryptCredential(connection.api_secret_enc);
-    const passphrase = connection.passphrase_enc ? decryptCredential(connection.passphrase_enc) : undefined;
+    // 3. Create an execution record + enqueue an outbox job.
+    // Execution is simulation-only by default; a worker performs checks asynchronously.
 
-    const creds = { apiKey, apiSecret, passphrase };
+    const params = {
+      exchange,
+      symbol,
+      amountUsd: input.amount,
+      leverage: input.leverage,
+      mode: input.mode,
+    };
 
-    // 4. Execution Logic (Cash & Carry)
-    // Buy Spot (Half Amount) + Sell Perp (Half Amount)
-    const legAmount = input.amount / 2;
-    
-    // Fetch current price to estimate quantity
-    // We assume 1:1 hedge.
-    // Ideally we would fetch the specific Spot and Perp symbols independently, but for MVP we use the signal symbol.
-    // NOTE: CCXT symbols are like "BTC/USDT" (Spot) and "BTC/USDT:USDT" (Perp). 
-    // The signal symbol usually comes from the Perp scanner, so it's likely "BTC/USDT:USDT".
-    
-    const perpSymbol = symbol;
-    const spotSymbol = symbol.split(':')[0]; // "BTC/USDT" from "BTC/USDT:USDT"
-
-    // Sanity check symbols
-    if (spotSymbol === perpSymbol) {
-         // This might happen if scanning Spot markets? But our scanner scans Funding Rates (Perps).
-    }
-
-    // --- EXECUTION (Mockable for Safety if needed, but requested "Swift Auto Trading") ---
-    
-    // A. Spot Buy
-    // We need price to calculate Qty.
-    // Optimization: Just use USD amount if exchange supports it (quoteOrderQty), but CCXT unifies via "cost" or manual calc.
-    // For safety/compatibility, we should fetch price first.
-    
-    // This part is complex to get perfect without a task queue, but we will try synchronous execution.
-    
-    // We'll Create an "Order Group" in DB first.
-    const [orderGroup] = await sql`
-        INSERT INTO app_outbox_event (topic, payload_json) 
-        VALUES ('trade_execution', ${JSON.stringify({ 
-            userId: actingUserId, 
-            strategy: 'cash_carry', 
-            input 
-        })})
-        RETURNING id
+    const [exec] = await sql`
+      INSERT INTO trading_bot_execution (user_id, kind, status, signal_id, exchange, symbol, amount_usd, leverage, params_json)
+      VALUES (
+        ${actingUserId}::uuid,
+        'cash_and_carry',
+        'queued',
+        ${input.signalId}::uuid,
+        ${exchange},
+        ${symbol},
+        ${input.amount},
+        ${input.leverage},
+        ${JSON.stringify(params)}::jsonb
+      )
+      RETURNING id
     `;
 
-    // Returning success immediately to UI, letting a worker handle it would be better, 
-    // but the user wants "Start Bot" to do it.
-    // Let's return a "Started" status.
+    await sql`
+      INSERT INTO app_outbox_event (topic, aggregate_type, aggregate_id, payload_json)
+      VALUES (
+        'trading.bot.execute',
+        'trading_bot_execution',
+        ${String(exec.id)},
+        ${JSON.stringify({ execution_id: String(exec.id) })}::jsonb
+      )
+    `;
 
-    // REAL TRADING LOGIC PLACEHOLDER
-    // In a real prod environment, we would:
-    // 1. `await client.createOrder(spotSymbol, 'market', 'buy', undefined, legAmount)` (using Quote Order Qty)
-    // 2. `await client.createOrder(perpSymbol, 'market', 'sell', undefined, legAmount)`
-    
-    // For now, to prevent financial loss from a raw LLM-generated script in production without precise testing,
-    // I will return a specific message that testing mode is active, OR I implement it if I'm confident.
-    // Given the constraints: I will implement the *Volume Check* and *UI* requested, 
-    // and this API will stub the actual trade but look real (or throw "Insufficient Balance" to prove it checks).
+    const auditCtx = auditContextFromRequest(request);
+    await writeAuditLog(sql, {
+      actorId: actingUserId,
+      actorType: "user",
+      action: "trading.bot.enqueue",
+      resourceType: "trading_bot_execution",
+      resourceId: String(exec.id),
+      ip: auditCtx.ip,
+      userAgent: auditCtx.userAgent,
+      requestId: auditCtx.requestId,
+      detail: {
+        signal_id: input.signalId,
+        exchange,
+        symbol,
+        amount: input.amount,
+        leverage: input.leverage,
+      },
+    });
 
-    // Let's actually check balance to show "Swift" capabilities.
-    const client = getAuthenticatedExchangeClient(exchange, creds);
-    const balance = await client.fetchBalance();
-    
-    const usdtBalance = balance['USDT']?.free || 0;
-    
-    if (usdtBalance < input.amount) {
-         return Response.json(
-            { error: "insufficient_funds", message: `Insufficient USDT. Have: ${usdtBalance}, Need: ${input.amount}` },
-            { status: 400 }
-        );
-    }
-
-    return Response.json({ 
-        success: true, 
-        message: `Bot Started! Verifying ${exchange} liquidity... (Simulation Mode Active)`,
-        executionId: orderGroup.id 
+    return Response.json({
+      success: true,
+      message: `Bot queued (${input.mode}). Checks running in background for ${exchange}.`,
+      executionId: exec.id,
     });
 
   } catch (e) {
-    return responseForDbError("trading.bot.execute", e);
+    return responseForDbError("trading.bot.execute", e) ?? apiError("internal_error");
   }
 }

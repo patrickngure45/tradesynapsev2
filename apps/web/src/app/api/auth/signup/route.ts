@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   try {
     verifyToken = await createVerificationToken(sql, user!.id as string);
     if (verifyToken) {
-      const baseUrl = request.headers.get("origin") ?? "http://localhost:3010";
+      const baseUrl = request.headers.get("origin") ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3010";
       const verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`;
       const tpl = verificationEmail(verifyUrl);
       const mailResult = await sendMail({ to: emailLower, subject: tpl.subject, text: tpl.text, html: tpl.html });

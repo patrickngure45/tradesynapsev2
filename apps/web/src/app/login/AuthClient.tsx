@@ -11,6 +11,9 @@ export function AuthClient() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [backupCode, setBackupCode] = useState("");
+  const [needsTotp, setNeedsTotp] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [country, setCountry] = useState("ZZ");
   const [acceptTerms, setAcceptTerms] = useState(false);
@@ -35,6 +38,10 @@ export function AuthClient() {
     try {
       const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
       const body: Record<string, unknown> = { email, password };
+      if (mode === "login") {
+        if (totpCode.trim().length > 0) body.totp_code = totpCode.trim();
+        if (backupCode.trim().length > 0) body.backup_code = backupCode.trim();
+      }
       if (mode === "signup" && displayName.trim()) {
         body.displayName = displayName.trim();
       }
@@ -62,11 +69,18 @@ export function AuthClient() {
       const data = await res.json();
 
       if (!res.ok) {
+        if (mode === "login" && (data.error === "totp_required" || data.totp_required)) {
+          setNeedsTotp(true);
+          setError("Enter your 2FA code to continue");
+          return;
+        }
         const msg =
           data.error === "email_taken"
             ? "An account with this email already exists"
             : data.error === "invalid_credentials"
               ? "Invalid email or password"
+              : data.error === "invalid_totp_code"
+                ? "Invalid 2FA or backup code"
               : data.error?.includes?.("Invalid input")
                 ? "Please check your details and try again"
               : data.error ?? "Something went wrong";
@@ -149,7 +163,7 @@ export function AuthClient() {
         <button
           role="tab"
           aria-selected={mode === "login"}
-          onClick={() => { setMode("login"); setError(null); }}
+          onClick={() => { setMode("login"); setError(null); setNeedsTotp(false); setTotpCode(""); setBackupCode(""); }}
           className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
             mode === "login"
               ? "bg-[var(--accent)] text-white"
@@ -161,7 +175,7 @@ export function AuthClient() {
         <button
           role="tab"
           aria-selected={mode === "signup"}
-          onClick={() => { setMode("signup"); setError(null); }}
+          onClick={() => { setMode("signup"); setError(null); setNeedsTotp(false); setTotpCode(""); setBackupCode(""); }}
           className={`flex-1 rounded-md py-2 text-sm font-medium transition ${
             mode === "signup"
               ? "bg-[var(--accent)] text-white"
@@ -237,6 +251,36 @@ export function AuthClient() {
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 text-sm outline-none transition focus:border-[var(--accent)]"
           />
         </label>
+
+        {mode === "login" && needsTotp && (
+          <>
+            <label className="block">
+              <span className="text-xs text-[var(--muted)]">2FA Code</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit code"
+                maxLength={6}
+                autoComplete="one-time-code"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 font-mono text-sm tracking-wider outline-none transition focus:border-[var(--accent)]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[var(--muted)]">Backup Code (optional)</span>
+              <input
+                type="text"
+                value={backupCode}
+                onChange={(e) => setBackupCode(e.target.value.toUpperCase())}
+                placeholder="XXXX-XXXX"
+                autoComplete="off"
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-4 py-2.5 font-mono text-sm tracking-wider outline-none transition focus:border-[var(--accent)]"
+              />
+            </label>
+          </>
+        )}
 
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400">

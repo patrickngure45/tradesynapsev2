@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { getActingUserId } from "@/lib/auth/party";
+import { chargeGasFee } from "@/lib/exchange/gas";
 import {
   subscribe,
   getMySubscriptions,
@@ -13,7 +15,7 @@ export const runtime = "nodejs";
  * Returns the current user's copy-trading subscriptions
  */
 export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
+  const userId = getActingUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest) {
  * Body: { leaderId, copyRatio?, maxPerTrade?, connectionId? }
  */
 export async function POST(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
+  const userId = getActingUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -46,13 +48,26 @@ export async function POST(req: NextRequest) {
     }
 
     const sql = getSql();
-    const sub = await subscribe(sql, userId, body.leaderId, {
-      copyRatio: body.copyRatio,
-      maxPerTrade: body.maxPerTrade,
-      connectionId: body.connectionId,
+    const result = await sql.begin(async (tx) => {
+      const txSql = tx as unknown as typeof sql;
+
+      const gasErr = await chargeGasFee(txSql, {
+        userId,
+        action: "copy_trading_subscribe",
+        reference: String(body.leaderId),
+      });
+      if (gasErr) return { status: gasErr.code === "insufficient_gas" ? 409 : 500, body: { error: gasErr.code, details: gasErr.details } };
+
+      const sub = await subscribe(txSql, userId, body.leaderId, {
+        copyRatio: body.copyRatio,
+        maxPerTrade: body.maxPerTrade,
+        connectionId: body.connectionId,
+      });
+
+      return { status: 201, body: { subscription: sub } };
     });
 
-    return NextResponse.json({ subscription: sub }, { status: 201 });
+    return NextResponse.json(result.body, { status: result.status });
   } catch (err: unknown) {
     console.error("[copy-trading] Error subscribing:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Failed to subscribe" }, { status: 500 });
@@ -65,7 +80,7 @@ export async function POST(req: NextRequest) {
  * Body: { subscriptionId, status?, copyRatio?, maxPerTrade? }
  */
 export async function PATCH(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
+  const userId = getActingUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -77,17 +92,27 @@ export async function PATCH(req: NextRequest) {
     }
 
     const sql = getSql();
-    const sub = await updateSubscription(sql, body.subscriptionId, userId, {
-      status: body.status,
-      copyRatio: body.copyRatio,
-      maxPerTrade: body.maxPerTrade,
+    const result = await sql.begin(async (tx) => {
+      const txSql = tx as unknown as typeof sql;
+
+      const gasErr = await chargeGasFee(txSql, {
+        userId,
+        action: "copy_trading_update",
+        reference: String(body.subscriptionId),
+      });
+      if (gasErr) return { status: gasErr.code === "insufficient_gas" ? 409 : 500, body: { error: gasErr.code, details: gasErr.details } };
+
+      const sub = await updateSubscription(txSql, body.subscriptionId, userId, {
+        status: body.status,
+        copyRatio: body.copyRatio,
+        maxPerTrade: body.maxPerTrade,
+      });
+
+      if (!sub) return { status: 404, body: { error: "Subscription not found" } };
+      return { status: 200, body: { subscription: sub } };
     });
 
-    if (!sub) {
-      return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ subscription: sub });
+    return NextResponse.json(result.body, { status: result.status });
   } catch (err: unknown) {
     console.error("[copy-trading] Error updating subscription:", err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: "Failed to update" }, { status: 500 });

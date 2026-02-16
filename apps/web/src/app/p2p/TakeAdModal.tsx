@@ -53,6 +53,19 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
     if (!f || !p) return "0.00";
     return (f / p).toFixed(6);
   };
+
+  const getCreateOrderErrorMessage = (errorCode?: string, fallback?: string) => {
+    switch (errorCode) {
+      case "seller_payment_details_missing":
+        return "Seller payment details are missing. Please choose another ad or ask the seller to update payment details.";
+      case "seller_payment_method_required":
+        return "Select your payment method before creating this sell order.";
+      case "invalid_seller_payment_method":
+        return "The selected payment method is invalid. Please choose another method.";
+      default:
+        return fallback || "Failed to create order";
+    }
+  };
   
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,7 +104,9 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
         throw new Error("Server Error: " + text.slice(0, 100));
       }
 
-      if (!res.ok) throw new Error(data.message || "Failed to create order");
+      if (!res.ok) {
+        throw new Error(getCreateOrderErrorMessage(data.error, data.message));
+      }
 
       router.push(`/p2p/orders/${data.order_id}`);
       

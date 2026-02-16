@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error("[funding] Error:", err);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

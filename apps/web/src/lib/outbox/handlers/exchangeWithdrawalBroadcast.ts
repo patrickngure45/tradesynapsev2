@@ -17,8 +17,8 @@ import { sendToken, sendBnb, getTokenAddress } from "@/lib/blockchain/tokens";
 import { enqueueOutbox } from "@/lib/outbox";
 import { createNotification } from "@/lib/notifications";
 
-/** Well-known system/omnibus ledger account owner. */
-const SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
+/** Well-known system/omnibus ledger account owner (must match migration 007). */
+const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 // ── Types ────────────────────────────────────────────────────────────
 type WithdrawalRow = {
@@ -156,7 +156,7 @@ export async function handleWithdrawalBroadcast(
         VALUES (
           'withdrawal_settlement',
           ${"withdrawal:" + locked.id},
-          ${JSON.stringify({ withdrawal_id: locked.id, tx_hash: txHash, asset: asset.symbol })}::jsonb
+          ${{ withdrawal_id: locked.id, tx_hash: txHash, asset: asset.symbol }}::jsonb
         )
         RETURNING id
       `;

@@ -28,15 +28,14 @@ export async function POST(req: NextRequest) {
 
     if (submissions.length === 0) {
         // Fallback: Just force upgrade user even if no submission?
-        // Let's force upgrade to 'verified' directly if requested
+        // Force upgrade to highest tier ('full') directly if requested
         await sql`
             UPDATE app_user 
-            SET kyc_level = 'verified', 
+            SET kyc_level = 'full', 
                 email_verified = true,
-                updated_at = now()
             WHERE id = ${targetUserId}
         `;
-        return NextResponse.json({ message: "Forced upgrade to Verified (No submission found)" });
+        return NextResponse.json({ message: "Forced upgrade to Full (No submission found)" });
     }
 
     const submissionId = submissions[0].id;
@@ -54,7 +53,7 @@ export async function POST(req: NextRequest) {
 
         await txSql`
             UPDATE app_user 
-            SET kyc_level = 'verified', updated_at = now()
+            SET kyc_level = 'full'
             WHERE id = ${targetUserId}
         `;
 

@@ -9,6 +9,7 @@ type RegimeReport = {
   metrics: {
     fundingRate: number;
     volatilityScore: number;
+    spreadBps?: number;
   };
   reason: string;
 };
@@ -22,28 +23,39 @@ const REC_META: Record<string, { label: string; color: string; icon: string }> =
   "STAY_FLAT": { label: "Stay Cash", color: "text-[var(--muted)]", icon: "🛑" },
 };
 
-export function MarketRegimeWidget({ symbol = "BTC/USDT" }: { symbol?: string }) {
+export function MarketRegimeWidget({
+  symbol = "BTC/USDT",
+  exchange = "binance",
+}: {
+  symbol?: string;
+  exchange?: string;
+}) {
   const [report, setReport] = useState<RegimeReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/intelligence/regime?symbol=${encodeURIComponent(symbol)}`)
+    fetch(`/api/intelligence/regime?exchange=${encodeURIComponent(exchange)}&symbol=${encodeURIComponent(symbol)}`)
        .then(res => res.json())
        .then(data => setReport(data))
        .catch(() => setReport(null))
        .finally(() => setLoading(false));
-  }, [symbol]);
+  }, [exchange, symbol]);
 
   if (loading) return <div className="h-24 animate-pulse rounded-xl bg-[var(--card)]/50" />;
   if (!report) return null;
 
   const meta = REC_META[report.recommendation] || REC_META["STAY_FLAT"];
+  const showFunding = (exchange ?? "").toLowerCase() !== "internal";
+  const fundingLabel = showFunding ? "Funding Cost" : "Spread";
+  const fundingValue = showFunding
+    ? `${(report.metrics.fundingRate * 100).toFixed(4)}%`
+    : `${(report.metrics.spreadBps ?? 0).toFixed(1)} bps`;
 
   return (
     <div className="h-full rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 transition hover:border-[var(--accent)]/40 flex flex-col gap-4">
           <div className="min-w-0">
-            <h3 className="text-xs font-bold uppercase text-[var(--muted)] truncate">Market Regime · {symbol}</h3>
+            <h3 className="text-xs font-bold uppercase text-[var(--muted)] truncate">Market Regime · {symbol}{showFunding ? "" : " (internal)"}</h3>
             <div className={`mt-2 flex items-center gap-2 text-xl font-bold ${meta.color}`}>
                 <span className="text-2xl">{meta.icon}</span>
                 <span>{meta.label}</span>
@@ -62,10 +74,10 @@ export function MarketRegimeWidget({ symbol = "BTC/USDT" }: { symbol?: string })
              </div>
              
              <div>
-                 <div className="text-[10px] uppercase text-[var(--muted)] mb-1">Funding Cost</div>
-                 <div className={`text-sm font-mono font-medium ${report.metrics.fundingRate > 0.0002 ? "text-red-400" : "text-green-400"}`}>
-                    {(report.metrics.fundingRate * 100).toFixed(4)}%
-                 </div>
+                <div className="text-[10px] uppercase text-[var(--muted)] mb-1">{fundingLabel}</div>
+                <div className={`text-sm font-mono font-medium ${showFunding ? (report.metrics.fundingRate > 0.0002 ? "text-red-400" : "text-green-400") : "text-[var(--muted)]"}`}>
+                  {fundingValue}
+                </div>
              </div>
           </div>
 
@@ -73,7 +85,5 @@ export function MarketRegimeWidget({ symbol = "BTC/USDT" }: { symbol?: string })
              {report.reason}
           </p>
     </div>
-  );
-}
   );
 }

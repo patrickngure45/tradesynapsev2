@@ -1,5 +1,5 @@
 import { getSql } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/admin";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { apiError } from "@/lib/api/errors";
 import { listDeadLetters, retryDeadLetter, countDeadLetters } from "@/lib/outbox";
 import { responseForDbError } from "@/lib/dbTransient";
@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 /** GET /api/exchange/admin/outbox/dead-letters — list dead-lettered outbox events */
 export async function GET(request: Request) {
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
   const url = new URL(request.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? "50")));
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0"));
@@ -33,8 +33,8 @@ export async function GET(request: Request) {
 /** POST /api/exchange/admin/outbox/dead-letters — retry a dead-lettered event */
 export async function POST(request: Request) {
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
   const body = await request.json().catch(() => ({}));
   const id = typeof body.id === "string" ? body.id : null;
 

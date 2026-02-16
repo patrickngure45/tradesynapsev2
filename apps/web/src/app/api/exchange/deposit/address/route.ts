@@ -12,9 +12,16 @@ import { responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { getOrCreateDepositAddress } from "@/lib/blockchain/wallet";
 import { logRouteResponse } from "@/lib/routeLog";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const inputSchema = z
+  .object({
+    chain: z.enum(["bsc", "eth"]).optional().default("bsc"),
+  })
+  .optional();
 
 export async function POST(request: Request) {
   const startMs = Date.now();
@@ -29,6 +36,10 @@ export async function POST(request: Request) {
   const sql = getSql();
 
   try {
+    const body = await request.json().catch(() => ({}));
+    const input = inputSchema?.parse(body);
+    const chain = input?.chain ?? "bsc";
+
     // Verify user exists and is active
     const users = await sql<{ id: string; status: string }[]>`
       SELECT id, status FROM app_user WHERE id = ${userId} LIMIT 1
@@ -40,15 +51,15 @@ export async function POST(request: Request) {
       return apiError("user_inactive", { status: 403 });
     }
 
-    const { address, isNew } = await getOrCreateDepositAddress(sql, userId, "bsc");
+    const { address, isNew } = await getOrCreateDepositAddress(sql, userId, chain);
 
     const response = Response.json({
       address,
-      chain: "bsc",
+      chain,
       is_new: isNew,
     });
 
-    logRouteResponse(request, response, { startMs, meta: { userId, isNew } });
+    logRouteResponse(request, response, { startMs, meta: { userId, isNew, chain } });
     return response;
   } catch (e) {
     const resp = responseForDbError("exchange.deposit.address", e);

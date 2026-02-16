@@ -3,6 +3,9 @@
 **/.next/
 **/out/
 
+# Local scratch artifacts
+**/.tmp/
+
 # Env files
 **/.env
 **/.env.*

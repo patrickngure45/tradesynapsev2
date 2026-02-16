@@ -13,10 +13,6 @@ npx tsx scripts/seed-prod.ts
 echo "👤 Ensuring Admin User..."
 npx tsx scripts/seed-admin-prod.ts
 
-# 4. Initialize Market Data
-echo "📊 Checking Market Activity..."
-npx tsx scripts/seed-market-maker.ts
-
-# 5. Start Application
+# 4. Start Application
 echo "🚀 Starting Production Server..."
 npm run start:prod

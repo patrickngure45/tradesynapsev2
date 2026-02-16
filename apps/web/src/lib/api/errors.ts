@@ -25,15 +25,19 @@ export function statusForApiError(code: string): number {
     case "user_not_active":
     case "buyer_not_active":
     case "seller_not_active":
+    case "p2p_country_not_supported":
       return 403;
 
     // Not found
     case "not_found":
+    case "recipient_not_found":
     case "trade_not_found":
     case "dispute_not_found":
     case "user_not_found":
     case "market_not_found":
     case "order_not_found":
+    case "ad_not_found":
+    case "transfer_not_found":
       return 404;
 
     // Conflict / state machine
@@ -47,10 +51,32 @@ export function statusForApiError(code: string): number {
     case "trade_not_cancelable":
     case "trade_state_conflict":
     case "insufficient_balance":
+    case "recipient_inactive":
+    case "recipient_same_as_sender":
+    case "transfer_not_reversible":
+    case "transfer_already_reversed":
+    case "recipient_insufficient_balance_for_reversal":
+    case "seller_insufficient_funds":
+    case "insufficient_liquidity_on_ad":
+    case "seller_payment_details_missing":
     case "order_state_conflict":
     case "market_disabled":
     case "withdrawal_risk_blocked":
+    case "ad_is_not_online":
       return 409;
+
+    // Gas token
+    case "insufficient_gas":
+      return 409;
+    case "gas_disabled":
+      return 403;
+    case "gas_asset_not_found":
+    case "gas_fee_invalid":
+      return 500;
+
+    // Forbidden
+    case "cannot_trade_own_ad":
+      return 403;
 
     // Rate limiting
     case "rate_limit_exceeded":
@@ -65,6 +91,8 @@ export function statusForApiError(code: string): number {
     case "invalid_metadata_json":
     case "buyer_not_found":
     case "seller_not_found":
+    case "seller_payment_method_required":
+    case "invalid_seller_payment_method":
       return 400;
 
     // Server misconfig
@@ -72,6 +100,10 @@ export function statusForApiError(code: string): number {
     case "session_secret_not_configured":
     case "session_bootstrap_not_configured":
     case "admin_key_not_configured":
+      return 500;
+
+    // Internal
+    case "internal_error":
       return 500;
 
     // Upstream / dependencies

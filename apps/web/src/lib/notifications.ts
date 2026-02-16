@@ -8,10 +8,15 @@ export type NotificationType =
   | "withdrawal_approved"
   | "withdrawal_rejected"
   | "withdrawal_completed"
+  | "trade_won"
+  | "trade_lost"
   | "p2p_order_created"
   | "p2p_payment_confirmed"
   | "p2p_order_completed"
   | "p2p_order_cancelled"
+  | "p2p_dispute_opened"
+  | "p2p_dispute_resolved"
+  | "p2p_feedback_received"
   | "system";
 
 export async function createNotification(

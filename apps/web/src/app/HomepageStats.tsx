@@ -48,8 +48,8 @@ export function HomepageStats() {
         return;
       }
 
-      // Pick primary market (TST/USDT or first)
-      const primary = markets.find((m) => m.symbol.includes("TST")) ?? markets[0];
+      // Pick primary market (prefer */USDT)
+      const primary = markets.find((m) => m.symbol.toUpperCase().endsWith("/USDT")) ?? markets[0];
       const sr = await fetch(
         `/api/exchange/marketdata/stats?market_id=${primary.id}&window_hours=24`,
         fetchOpts,
@@ -88,6 +88,8 @@ export function HomepageStats() {
   if (!stats) return null; // no markets yet
 
   const change = pctChange(stats.open, stats.last);
+  const quoteSymbol = stats.symbol.split("/")[1]?.trim() || "";
+  const volumeLabel = quoteSymbol ? `24h Volume (${quoteSymbol})` : "24h Volume";
 
   return (
     <div className="fade-in-up flex flex-wrap items-center justify-center gap-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-6 py-4 shadow-[var(--shadow)]">
@@ -97,7 +99,7 @@ export function HomepageStats() {
         value={change.text}
         className={change.up ? "text-[var(--up)]" : "text-[var(--down)]"}
       />
-      <Stat label="24h Volume" value={`$${fmt(stats.volume)}`} />
+      <Stat label={volumeLabel} value={fmt(stats.volume)} />
       <Stat label="Trades" value={stats.trade_count.toLocaleString()} />
       <Stat label="Markets" value={String(totalMarkets)} />
     </div>

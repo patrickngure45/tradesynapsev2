@@ -19,5 +19,12 @@ services:
       
       # Public Vars
       - NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+      # Gas fees (BNB)
+      - GAS_ENABLED=${GAS_ENABLED:-false}
+      - GAS_FEE_MODE=${GAS_FEE_MODE:-realtime}
+      - GAS_ACTION_FEE_BNB=${GAS_ACTION_FEE_BNB:-0}
+      - GAS_USER_TRANSFER_FEE_BNB=${GAS_USER_TRANSFER_FEE_BNB:-0}
+      - GAS_BURN_BPS=${GAS_BURN_BPS:-25}
     
     restart: always

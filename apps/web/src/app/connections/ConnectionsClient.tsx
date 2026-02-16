@@ -146,6 +146,9 @@ export function ConnectionsClient({ userId }: { userId: string | null }) {
         <div>
           <h2 className="text-lg font-semibold">API Connections</h2>
           <p className="text-xs text-[var(--muted)]">Connect external exchange APIs for arbitrage signals and copy trading.</p>
+          <p className="mt-1 text-[11px] text-[var(--muted)]">
+            Scanning works without keys. Bots: Cash &amp; Carry needs 1 exchange; cross-exchange strategies may need 2.
+          </p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}

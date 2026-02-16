@@ -15,6 +15,7 @@ type OrderSummary = {
   price: string;
   created_at: string;
   my_side: "BUY" | "SELL";
+    payment_details_ready?: boolean;
 };
 
 export default function P2POrdersListPage() {
@@ -31,8 +32,18 @@ export default function P2POrdersListPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const activeOrders = orders.filter(o => ['created', 'paid_confirmed'].includes(o.status));
-  const pastOrders = orders.filter(o => !['created', 'paid_confirmed'].includes(o.status));
+    // Treat disputed orders as active so users can find them quickly.
+    // (They still require chat + potential admin action.)
+    const activeOrders = orders.filter((o) => ["created", "paid_confirmed", "disputed"].includes(o.status));
+    const pastOrders = orders.filter((o) => !["created", "paid_confirmed", "disputed"].includes(o.status));
+
+    const activeOrdersSorted = [...activeOrders].sort((a, b) => {
+        const aMissing = a.payment_details_ready ? 1 : 0;
+        const bMissing = b.payment_details_ready ? 1 : 0;
+        if (aMissing !== bMissing) return aMissing - bMissing;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    const missingDetailsCount = activeOrders.filter((order) => !order.payment_details_ready).length;
 
   return (
     <SiteChrome>
@@ -57,13 +68,21 @@ export default function P2POrdersListPage() {
                         Active Orders 
                         <span className="bg-blue-500/20 text-blue-400 text-xs px-2 py-0.5 rounded-full">{activeOrders.length}</span>
                     </h2>
+                    {activeOrders.length > 1 && (
+                        <p className="mb-2 text-xs text-[var(--muted)]">Showing highest-risk orders first (missing payment details).</p>
+                    )}
+                    {missingDetailsCount > 0 && (
+                        <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                            {missingDetailsCount} active {missingDetailsCount === 1 ? "order needs" : "orders need"} seller payment details before payment.
+                        </p>
+                    )}
                     {activeOrders.length === 0 ? (
                         <div className="text-sm text-[var(--muted)] italic p-4 border border-[var(--border)] rounded-lg bg-[var(--card)]">
                             No active orders.
                         </div>
                     ) : (
                         <div className="grid gap-4">
-                            {activeOrders.map(order => <OrderCard key={order.id} order={order} />)}
+                            {activeOrdersSorted.map(order => <OrderCard key={order.id} order={order} showPaymentDetailsBadge />)}
                         </div>
                     )}
                 </section>
@@ -75,7 +94,7 @@ export default function P2POrdersListPage() {
                         <div className="text-sm text-[var(--muted)] italic">No history yet.</div>
                     ) : (
                          <div className="grid gap-4 opacity-75">
-                            {pastOrders.map(order => <OrderCard key={order.id} order={order} />)}
+                                     {pastOrders.map(order => <OrderCard key={order.id} order={order} />)}
                         </div>
                     )}
                 </section>
@@ -86,7 +105,7 @@ export default function P2POrdersListPage() {
   );
 }
 
-function OrderCard({ order }: { order: OrderSummary }) {
+function OrderCard({ order, showPaymentDetailsBadge }: { order: OrderSummary; showPaymentDetailsBadge?: boolean }) {
     const isBuy = order.my_side === 'BUY';
     const colorClass = isBuy ? "text-[var(--up)]" : "text-[var(--down)]";
     
@@ -94,6 +113,7 @@ function OrderCard({ order }: { order: OrderSummary }) {
     const statusColors: Record<string, string> = {
         created: "bg-blue-500/10 text-blue-400 border-blue-500/20",
         paid_confirmed: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+        disputed: "bg-red-500/10 text-red-400 border-red-500/20",
         completed: "bg-green-500/10 text-green-500 border-green-500/20",
         cancelled: "bg-gray-500/10 text-gray-500 border-gray-500/20",
     };
@@ -119,6 +139,17 @@ function OrderCard({ order }: { order: OrderSummary }) {
                      <span className={`text-xs px-2 py-1 rounded border font-mono uppercase ${statusColors[order.status] || "bg-gray-800"}`}>
                          {order.status.replace('_', ' ')}
                      </span>
+                            {showPaymentDetailsBadge && (
+                                <span
+                                    className={`text-[10px] rounded-full border px-2 py-0.5 font-semibold ${
+                                      order.payment_details_ready
+                                         ? "border-green-500/30 bg-green-500/15 text-green-400"
+                                         : "border-amber-500/30 bg-amber-500/15 text-amber-400"
+                                    }`}
+                                >
+                                    {order.payment_details_ready ? "Payment details: Verified" : "Payment details: Missing"}
+                                </span>
+                            )}
                      <span className="text-[10px] text-[var(--muted)]">
                          {new Date(order.created_at).toLocaleString()}
                      </span>

@@ -26,13 +26,13 @@ export const metadata: Metadata = {
     template: "%s | TradeSynapse",
   },
   description:
-    "Next-gen spot exchange on BNB Smart Chain. Trade TST/USDT with real-time order books, cross-exchange arbitrage scanning, and copy trading.",
-  keywords: ["crypto exchange", "BSC", "spot trading", "order book", "TST", "USDT", "arbitrage", "copy trading"],
+    "Next-gen spot exchange on BNB Smart Chain. Trade with real-time order books, cross-exchange arbitrage scanning, and copy trading.",
+  keywords: ["crypto exchange", "BSC", "spot trading", "order book", "USDT", "BNB", "arbitrage", "copy trading"],
   openGraph: {
     type: "website",
     siteName: "TradeSynapse",
     title: "TradeSynapse — Spot Exchange on BSC",
-    description: "Trade TST/USDT with real-time order books, arbitrage scanning, and copy trading on BNB Smart Chain.",
+    description: "Trade with real-time order books, arbitrage scanning, and copy trading on BNB Smart Chain.",
   },
   twitter: {
     card: "summary_large_image",

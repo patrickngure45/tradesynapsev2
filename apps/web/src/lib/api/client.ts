@@ -1,5 +1,6 @@
 export type ApiErrorPayload = {
   error?: string;
+  message?: string;
   details?: unknown;
   _raw?: unknown;
 };
@@ -64,7 +65,19 @@ export async function fetchJsonOrThrow<T>(
     if (json && typeof json === "object" && "error" in (json as ApiErrorPayload)) {
       const payload = json as ApiErrorPayload;
       const code = typeof payload.error === "string" ? payload.error : `http_${res.status}`;
-      throw new ApiError(code, { details: payload.details, status: res.status });
+      const details =
+        payload.details !== undefined
+          ? payload.details
+          : typeof payload.message === "string"
+            ? payload.message
+            : undefined;
+      throw new ApiError(code, { details, status: res.status });
+    }
+
+    if (json && typeof json === "object" && "message" in (json as ApiErrorPayload)) {
+      const payload = json as ApiErrorPayload;
+      const details = typeof payload.message === "string" ? payload.message : json;
+      throw new ApiError(`http_${res.status}`, { details, status: res.status });
     }
 
     throw new ApiError(`http_${res.status}`, { details: json, status: res.status });

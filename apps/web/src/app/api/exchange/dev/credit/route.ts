@@ -10,7 +10,7 @@ import { responseForDbError } from "@/lib/dbTransient";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
+const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 const creditSchema = z.object({
   chain: z.literal("bsc").optional().default("bsc"),

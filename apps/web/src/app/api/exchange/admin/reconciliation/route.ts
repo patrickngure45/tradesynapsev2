@@ -1,5 +1,5 @@
 import { apiError } from "@/lib/api/errors";
-import { requireAdmin } from "@/lib/auth/admin";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { runFullReconciliation } from "@/lib/exchange/reconciliation";
@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const sql = getSql();
-  const admin = await requireAdmin(sql, request);
-  if (!admin.ok) return apiError(admin.error);
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
 
   try {
     const report = await retryOnceOnTransientDbError(async () => {

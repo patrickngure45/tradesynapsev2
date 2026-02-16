@@ -39,10 +39,39 @@ type PortfolioData = {
   recentFills: Fill[];
 };
 
+type ProfileResponse = {
+  user?: {
+    country: string | null;
+  };
+};
+
+function fiatForCountry(country: string | null | undefined): string {
+  const normalized = String(country ?? "").trim().toUpperCase();
+  if (normalized === "KE" || normalized === "KENYA") return "KES";
+  if (normalized === "TZ" || normalized === "TANZANIA") return "TZS";
+  if (normalized === "UG" || normalized === "UGANDA") return "UGX";
+  if (normalized === "RW" || normalized === "RWANDA") return "RWF";
+  return "USD";
+}
+
+function fmtFiat(value: number, currency: string): string {
+  if (!Number.isFinite(value)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${currency}`;
+  }
+}
+
 export function PortfolioClient() {
   const [data, setData] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [localFiat, setLocalFiat] = useState<string>("USD");
 
   const fetchPortfolio = useCallback(async () => {
     try {
@@ -54,6 +83,20 @@ export function PortfolioClient() {
       if (!res.ok) throw new Error("Failed to fetch");
       const json = await res.json();
       setData(json);
+
+      try {
+        const profileRes = await fetch("/api/account/profile", {
+          credentials: "include",
+          headers: userId ? { "x-user-id": userId } : {},
+          cache: "no-store",
+        });
+        const profile = (await profileRes.json().catch(() => ({}))) as ProfileResponse;
+        const fiat = fiatForCountry(profile.user?.country);
+        setLocalFiat(fiat);
+      } catch {
+        setLocalFiat("USD");
+      }
+
       setError(null);
     } catch {
       setError("Failed to load portfolio data");
@@ -83,6 +126,14 @@ export function PortfolioClient() {
 
   const pnlValue = parseFloat(data.pnl.realizedPnl);
   const pnlColor = pnlValue > 0 ? "text-[var(--up)]" : pnlValue < 0 ? "text-[var(--down)]" : "text-[var(--muted)]";
+
+  const balancesWithActivity = data.balances.filter((b) => {
+    const posted = Number(b.posted);
+    const held = Number(b.held);
+    return (Number.isFinite(posted) && posted !== 0) || (Number.isFinite(held) && held !== 0);
+  });
+
+  const balancesToShow = balancesWithActivity.length > 0 ? balancesWithActivity : data.balances;
 
   return (
     <div className="space-y-6">
@@ -132,35 +183,37 @@ export function PortfolioClient() {
 
       {/* Balances */}
       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h3 className="mb-3 text-sm font-medium">Asset Balances</h3>
-        {data.balances.length === 0 ? (
+        <h3 className="mb-3 text-sm font-medium">Balances</h3>
+        {balancesToShow.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">No balances yet. <Link href="/wallet" className="text-[var(--accent)] hover:underline">Deposit funds</Link></p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted)]">
-                  <th className="pb-2">Asset</th>
-                  <th className="pb-2 text-right">Total</th>
+                  <th className="pb-2">Token</th>
                   <th className="pb-2 text-right">Available</th>
-                  <th className="pb-2 text-right">In Orders</th>
+                  <th className="pb-2 text-right">Held</th>
+                  <th className="pb-2 text-right">Local Value</th>
                 </tr>
               </thead>
               <tbody>
-                {data.balances
-                  .filter((b) => parseFloat(b.posted) !== 0)
-                  .map((b) => (
+                {balancesToShow.map((b) => {
+                  const available = Number(b.available);
+                  const held = Number(b.held);
+                  const localEquivalent = null;
+
+                  return (
                     <tr key={b.assetId} className="border-b border-[var(--border)]/50">
-                      <td className="py-2 font-medium">{b.symbol}</td>
-                      <td className="py-2 text-right font-mono">{parseFloat(b.posted).toFixed(4)}</td>
-                      <td className="py-2 text-right font-mono text-[var(--up)]">
-                        {parseFloat(b.available).toFixed(4)}
-                      </td>
+                      <td className="py-2 font-medium">{b.symbol.toUpperCase()}</td>
+                      <td className="py-2 text-right font-mono">{Number.isFinite(available) ? available.toFixed(8).replace(/0+$/, "").replace(/\.$/, "") : b.available}</td>
+                      <td className="py-2 text-right font-mono text-[var(--muted)]">{Number.isFinite(held) ? held.toFixed(8).replace(/0+$/, "").replace(/\.$/, "") : b.held}</td>
                       <td className="py-2 text-right font-mono text-[var(--muted)]">
-                        {parseFloat(b.held).toFixed(4)}
+                        {localEquivalent == null ? `— ${localFiat}` : fmtFiat(localEquivalent, localFiat)}
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

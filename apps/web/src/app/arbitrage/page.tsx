@@ -28,14 +28,14 @@ export default async function ArbitragePage() {
         <div>
           <h1 className="text-2xl font-bold">Arbitrage & Yield Scanner</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Cross-exchange price comparison · Cash & Carry opportunities
+            USDT-based sizing · Cross-exchange price comparison · Cash & Carry opportunities
           </p>
         </div>
         
         {/* Market Intelligence (Regime) */}
         <div className="grid gap-4 md:grid-cols-2">
-           <MarketRegimeWidget symbol="BTC/USDT" />
-           <MarketRegimeWidget symbol="ETH/USDT" />
+          <MarketRegimeWidget symbol="BTC/USDT" exchange="internal" />
+          <MarketRegimeWidget symbol="ETH/USDT" exchange="internal" />
         </div>
 
         {/* AI Section (Conversational) */}

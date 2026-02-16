@@ -10,7 +10,7 @@ import { responseForDbError } from "@/lib/dbTransient";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
+const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 const inputSchema = z.object({
   chain: z.literal("bsc").optional().default("bsc"),
@@ -63,18 +63,22 @@ export async function POST(request: Request) {
     `;
     if (assets.length === 0) return { status: 404 as const, body: { error: "not_found" } };
 
-    const assetId = assets[0]!.id;
+    const sourceAssetId = assets[0]!.id;
+
+    const creditedAmount: string = input.amount;
+    const conversionRateUsed: string = "1";
+    const pricingSources: Record<string, unknown> | null = null;
 
     const userAccountRows = await txSql<{ id: string }[]>`
       INSERT INTO ex_ledger_account (user_id, asset_id)
-      VALUES (${userId}, ${assetId})
+      VALUES (${userId}, ${sourceAssetId})
       ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
       RETURNING id
     `;
 
     const systemAccountRows = await txSql<{ id: string }[]>`
       INSERT INTO ex_ledger_account (user_id, asset_id)
-      VALUES (${SYSTEM_USER_ID}::uuid, ${assetId})
+      VALUES (${SYSTEM_USER_ID}::uuid, ${sourceAssetId})
       ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
       RETURNING id
     `;
@@ -84,7 +88,7 @@ export async function POST(request: Request) {
       VALUES (
         'deposit',
         ${input.reference ?? input.tx_hash ?? null},
-        ${{ chain: input.chain, asset_symbol: input.asset_symbol, tx_hash: input.tx_hash ?? null }}::jsonb
+        ${{ chain: input.chain, asset_symbol: input.asset_symbol, asset_id: sourceAssetId, amount: input.amount, conversion_rate: conversionRateUsed, pricing_sources: pricingSources ?? undefined, tx_hash: input.tx_hash ?? null }}::jsonb
       )
       RETURNING id
     `;
@@ -95,8 +99,8 @@ export async function POST(request: Request) {
     await txSql`
       INSERT INTO ex_journal_line (entry_id, account_id, asset_id, amount)
       VALUES
-        (${entryId}, ${userAccountRows[0]!.id}, ${assetId}, (${input.amount}::numeric)),
-        (${entryId}, ${systemAccountRows[0]!.id}, ${assetId}, ((${input.amount}::numeric) * -1))
+        (${entryId}, ${userAccountRows[0]!.id}, ${sourceAssetId}, (${creditedAmount}::numeric)),
+        (${entryId}, ${systemAccountRows[0]!.id}, ${sourceAssetId}, ((${creditedAmount}::numeric) * -1))
     `;
 
     return {
@@ -105,8 +109,9 @@ export async function POST(request: Request) {
         ok: true,
         entry_id: entryId,
         user_id: userId,
-        asset_id: assetId,
-        amount: input.amount,
+        asset_id: sourceAssetId,
+        amount: creditedAmount,
+        conversion_rate: conversionRateUsed,
       },
     };
     });

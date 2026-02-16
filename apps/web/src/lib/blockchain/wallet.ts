@@ -12,6 +12,7 @@ import type { Sql } from "postgres";
 
 // ── BSC RPC Provider ─────────────────────────────────────────────────
 let _provider: ethers.JsonRpcProvider | null = null;
+let _ethProvider: ethers.JsonRpcProvider | null = null;
 
 export function getBscProvider(): ethers.JsonRpcProvider {
   if (!_provider) {
@@ -22,6 +23,17 @@ export function getBscProvider(): ethers.JsonRpcProvider {
     });
   }
   return _provider;
+}
+
+export function getEthProvider(): ethers.JsonRpcProvider {
+  if (!_ethProvider) {
+    const rpcUrl = process.env.ETH_RPC_URL || process.env.ETHEREUM_RPC_URL || "https://cloudflare-eth.com";
+    _ethProvider = new ethers.JsonRpcProvider(rpcUrl, {
+      name: "ethereum",
+      chainId: Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 11155111 : 1,
+    });
+  }
+  return _ethProvider;
 }
 
 // ── HD Wallet ────────────────────────────────────────────────────────

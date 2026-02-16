@@ -15,6 +15,9 @@ export default function AdminError({
       <h2 className="text-lg font-semibold">Admin Error</h2>
       <p className="max-w-md text-sm text-[var(--muted)]">
         The admin dashboard encountered an error.
+        {error.message ? (
+          <span className="mt-2 block font-mono text-xs">{error.message}</span>
+        ) : null}
         {error.digest && (
           <span className="mt-2 block font-mono text-xs">ID: {error.digest}</span>
         )}

@@ -1,180 +1,385 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getActingUserId } from "@/lib/auth/party";
+import { z } from "zod";
+import { apiError } from "@/lib/api/errors";
+import { requireActiveUser } from "@/lib/auth/activeUser";
+import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { getSql } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
+import { hasUsablePaymentDetails, normalizePaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
+import { canPerformP2POrderAction } from "@/lib/p2p/orderStateMachine";
+import { createPgRateLimiter, type PgRateLimiter } from "@/lib/rateLimitPg";
+
+const actionSchema = z.object({
+  action: z.enum(["PAY_CONFIRMED", "RELEASE", "CANCEL"]),
+});
+
+let p2pOrderActionLimiter: PgRateLimiter | null = null;
+function getP2POrderActionLimiter(): PgRateLimiter {
+  if (p2pOrderActionLimiter) return p2pOrderActionLimiter;
+  const sql = getSql();
+  p2pOrderActionLimiter = createPgRateLimiter(sql, {
+    name: "p2p-order-action",
+    windowMs: 60_000,
+    max: 30,
+  });
+  return p2pOrderActionLimiter;
+}
 
 export async function POST(
   req: NextRequest,
   props: { params: Promise<{ id: string }> }
-) {
+): Promise<Response> {
   try {
     const params = await props.params;
     const userId = getActingUserId(req);
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const sql = getSql();
-    const orderId = params.id;
-    const body = await req.json();
-    const { action } = body; // PAY_CONFIRMED, RELEASE, CANCEL
+    const authErr = requireActingUserIdInProd(userId);
+    if (authErr) return apiError(authErr);
+    if (!userId) return apiError("unauthorized", { status: 401 });
 
-    return await sql.begin(async (txArg) => {
-      const tx = txArg as any;
-      // 1. Fetch Order and Lock
+    const sql = getSql();
+    const activeErr = await requireActiveUser(sql, userId);
+    if (activeErr) return apiError(activeErr);
+
+    const rl = await getP2POrderActionLimiter().consume(`user:${userId}`);
+    if (!rl.allowed) {
+      return apiError("rate_limit_exceeded", {
+        status: 429,
+        details: { limit: rl.limit, remaining: rl.remaining, resetMs: rl.resetMs },
+      });
+    }
+
+    const orderId = params.id;
+    const body = await req.json().catch(() => null);
+    const parsed = actionSchema.safeParse(body);
+    if (!parsed.success) {
+      return apiError("invalid_input", { status: 400, details: parsed.error.issues });
+    }
+    const { action } = parsed.data;
+    const auditCtx = auditContextFromRequest(req);
+
+    return await sql.begin(async (tx: any) => {
       const [order] = await tx`
-        SELECT * FROM p2p_order WHERE id = ${orderId} FOR UPDATE
+        SELECT o.*, a.symbol AS asset_symbol
+        FROM p2p_order o
+        JOIN ex_asset a ON a.id = o.asset_id
+        WHERE o.id = ${orderId}
+          AND (o.buyer_id = ${userId} OR o.seller_id = ${userId})
+        FOR UPDATE
       `;
-      if (!order) throw new Error("Order not found");
+
+      // Return 404 for both not-found and access denied (prevents existence leaks).
+      if (!order) return apiError("order_not_found", { status: 404 });
 
       const isBuyer = order.buyer_id === userId;
       const isSeller = order.seller_id === userId;
 
-      if (!isBuyer && !isSeller) {
-        throw new Error("Unauthorized");
+      const guard = canPerformP2POrderAction({
+        status: order.status,
+        action,
+        actorRole: isBuyer ? "buyer" : "seller",
+        nowMs: Date.now(),
+        expiresAtMs: order.expires_at ? new Date(order.expires_at).getTime() : null,
+      });
+      if (!guard.ok) {
+        return apiError(guard.code, {
+          status: guard.httpStatus,
+          details: guard.message ? { message: guard.message } : undefined,
+        });
       }
 
-      let updatedOrder;
+      // ── PAY_CONFIRMED ─────────────────────────────────────────────
+      if (action === "PAY_CONFIRMED") {
+        if (!isBuyer) return apiError("actor_not_allowed", { status: 403 });
 
-      // --- PAY_CONFIRMED ---
-      if (action === 'PAY_CONFIRMED') {
-        if (!isBuyer) throw new Error("Only buyer can confirm payment");
-        if (order.status !== 'created') throw new Error("Invalid state for payment confirmation");
+        const snapshot = normalizePaymentMethodSnapshot(order.payment_method_snapshot);
+        if (!hasUsablePaymentDetails(snapshot)) {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Payment details are not ready for this order." },
+          });
+        }
 
-        [updatedOrder] = await tx`
-          UPDATE p2p_order 
+        const updated = await tx`
+          UPDATE p2p_order
           SET status = 'paid_confirmed', paid_at = now()
-          WHERE id = ${orderId}
+          WHERE id = ${orderId} AND status = 'created'
           RETURNING *
         `;
-        
-        // System message
+        const updatedOrder = updated[0];
+        if (!updatedOrder) return apiError("order_state_conflict", { status: 409 });
+
         await tx`
-          INSERT INTO p2p_chat_message (order_id, content) 
-          VALUES (${orderId}, 'Buyer has marked as paid. Seller please verify.')
+          INSERT INTO p2p_chat_message (order_id, sender_id, content)
+          VALUES (${orderId}, NULL, 'Buyer has marked as paid. Seller please verify.')
         `;
-        
+
+        await writeAuditLog(tx as any, {
+          actorId: userId,
+          actorType: "user",
+          action: "p2p.order.paid_confirmed",
+          resourceType: "p2p_order",
+          resourceId: orderId,
+          detail: { order_id: orderId },
+          ...auditCtx,
+        });
+
         await createNotification(tx, {
           userId: order.seller_id,
           type: "p2p_payment_confirmed",
           title: "Payment Marked as Sent",
-          body: `Buyer marked order ${orderId.slice(0,8)} as paid. Please check your bank.`,
-          metadata: { order_id: orderId }
+          body: `Buyer marked order ${orderId.slice(0, 8)} as paid. Please check your bank.`,
+          metadata: { order_id: orderId },
         });
+
+        return NextResponse.json(updatedOrder);
       }
 
-      // --- RELEASE (Finalize) ---
-      else if (action === 'RELEASE') {
-        if (!isSeller) throw new Error("Only seller can release");
-        if (order.status !== 'paid_confirmed' && order.status !== 'created') throw new Error("Invalid state for release");
+      // ── RELEASE ───────────────────────────────────────────────────
+      if (action === "RELEASE") {
+        if (!isSeller) return apiError("actor_not_allowed", { status: 403 });
+        if (!order.escrow_hold_id) {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Escrow hold not found for this order." },
+          });
+        }
 
-        // Ensure Buyer Account Exists
+        const sellerAcctRows = (await tx`
+          INSERT INTO ex_ledger_account (user_id, asset_id)
+          VALUES (${order.seller_id}::uuid, ${order.asset_id}::uuid)
+          ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
+          RETURNING id
+        `) as { id: string }[];
+        const buyerAcctRows = (await tx`
+          INSERT INTO ex_ledger_account (user_id, asset_id)
+          VALUES (${order.buyer_id}::uuid, ${order.asset_id}::uuid)
+          ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
+          RETURNING id
+        `) as { id: string }[];
+        const sellerAccountId = sellerAcctRows[0]!.id;
+        const buyerAccountId = buyerAcctRows[0]!.id;
+
+        const holds = (await tx`
+          SELECT id::text, account_id::text, asset_id::text, amount::text, status
+          FROM ex_hold
+          WHERE id = ${order.escrow_hold_id}::uuid
+          FOR UPDATE
+        `) as { id: string; account_id: string; asset_id: string; amount: string; status: string }[];
+        const hold = holds[0];
+        if (!hold) {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Escrow hold is missing." },
+          });
+        }
+
+        // If the hold is already consumed, a previous release attempt likely succeeded
+        // but crashed before updating the order row. Finish the order idempotently.
+        if (hold.status === "consumed") {
+          const updated = await tx`
+            UPDATE p2p_order
+            SET status = 'completed', completed_at = now()
+            WHERE id = ${orderId} AND status = 'paid_confirmed'
+            RETURNING *
+          `;
+          const updatedOrder = updated[0];
+          if (!updatedOrder) return apiError("order_state_conflict", { status: 409 });
+
+          await tx`
+            INSERT INTO p2p_chat_message (order_id, sender_id, content)
+            VALUES (${orderId}, NULL, 'System: Crypto released to buyer. Order completed.')
+          `;
+
+          await writeAuditLog(tx as any, {
+            actorId: userId,
+            actorType: "user",
+            action: "p2p.order.released",
+            resourceType: "p2p_order",
+            resourceId: orderId,
+            detail: { order_id: orderId, journal_entry_ref: `p2p_order:${orderId}`, idempotent_recover: true },
+            ...auditCtx,
+          });
+
+          await createNotification(tx, {
+            userId: order.buyer_id,
+            type: "p2p_order_completed",
+            title: "Order Completed",
+            body: `Seller released ${order.amount_asset} ${order.asset_symbol} to your wallet.`,
+            metadata: { order_id: orderId },
+          });
+
+          return NextResponse.json(updatedOrder);
+        }
+
+        if (hold.status !== "active") {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Escrow hold is not active." },
+          });
+        }
+
+        if (hold.account_id !== String(sellerAccountId)) {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Escrow hold account mismatch." },
+          });
+        }
+
+        const invariantRows = (await tx`
+          SELECT (
+            (${hold.asset_id}::uuid = ${order.asset_id}::uuid)
+            AND (${hold.amount}::numeric = ${order.amount_asset}::numeric)
+          ) AS ok
+        `) as { ok: boolean }[];
+        if (!invariantRows[0]?.ok) {
+          return apiError("order_state_conflict", {
+            status: 409,
+            details: { message: "Escrow hold does not match order amount/asset." },
+          });
+        }
+
+        // Idempotency: if a previous attempt already created a journal entry,
+        // do not create another transfer.
+        const existingEntries = (await tx`
+          SELECT id::text
+          FROM ex_journal_entry
+          WHERE type = 'p2p_trade' AND reference = ${`p2p_order:${orderId}`}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `) as { id: string }[];
+
+        if (existingEntries.length === 0) {
+          const entryRows = (await tx`
+            INSERT INTO ex_journal_entry (type, reference, metadata_json)
+            VALUES (
+              'p2p_trade',
+              ${`p2p_order:${orderId}`},
+              ${JSON.stringify({
+                order_id: orderId,
+                asset_symbol: order.asset_symbol,
+                amount_asset: order.amount_asset,
+                fiat_currency: order.fiat_currency,
+                amount_fiat: order.amount_fiat,
+              })}::jsonb
+            )
+            RETURNING id
+          `) as { id: string }[];
+          const entryId = entryRows[0]!.id;
+
+          await tx`
+            INSERT INTO ex_journal_line (entry_id, account_id, asset_id, amount)
+            VALUES
+              (${entryId}::uuid, ${sellerAccountId}::uuid, ${order.asset_id}::uuid, ((${order.amount_asset}::numeric) * -1)),
+              (${entryId}::uuid, ${buyerAccountId}::uuid, ${order.asset_id}::uuid, (${order.amount_asset}::numeric))
+          `;
+        }
+
+        // Consume escrow hold (idempotent)
         await tx`
-          INSERT INTO ex_ledger_account (user_id, asset_id, status)
-          VALUES (${order.buyer_id}, ${order.asset_id}, 'active')
-          ON CONFLICT (user_id, asset_id) DO NOTHING
+          UPDATE ex_hold
+          SET status = 'consumed', released_at = now()
+          WHERE id = ${hold.id}::uuid AND status = 'active'
         `;
-        
-        // Debit Locked from Seller (It's already out of 'balance')
-         await tx`
-          UPDATE ex_ledger_account 
-          SET locked = locked - ${order.amount_asset}
-          WHERE user_id = ${order.seller_id} AND asset_id = ${order.asset_id}
-        `;
-        
-        // Credit Balance to Buyer
-        await tx`
-           UPDATE ex_ledger_account
-           SET balance = balance + ${order.amount_asset}
-           WHERE user_id = ${order.buyer_id} AND asset_id = ${order.asset_id}
-        `;
-        
-        [updatedOrder] = await tx`
-          UPDATE p2p_order 
+
+        const updated = await tx`
+          UPDATE p2p_order
           SET status = 'completed', completed_at = now()
-          WHERE id = ${orderId}
+          WHERE id = ${orderId} AND status = 'paid_confirmed'
           RETURNING *
         `;
-        
-         // System message
+        const updatedOrder = updated[0];
+        if (!updatedOrder) return apiError("order_state_conflict", { status: 409 });
+
         await tx`
-          INSERT INTO p2p_chat_message (order_id, content) 
-          VALUES (${orderId}, 'System: Crypto released to buyer. Order completed.')
+          INSERT INTO p2p_chat_message (order_id, sender_id, content)
+          VALUES (${orderId}, NULL, 'System: Crypto released to buyer. Order completed.')
         `;
-        
+
+        await writeAuditLog(tx as any, {
+          actorId: userId,
+          actorType: "user",
+          action: "p2p.order.released",
+          resourceType: "p2p_order",
+          resourceId: orderId,
+          detail: { order_id: orderId, journal_entry_ref: `p2p_order:${orderId}` },
+          ...auditCtx,
+        });
+
         await createNotification(tx, {
           userId: order.buyer_id,
           type: "p2p_order_completed",
           title: "Order Completed",
           body: `Seller released ${order.amount_asset} ${order.asset_symbol} to your wallet.`,
-          metadata: { order_id: orderId }
+          metadata: { order_id: orderId },
         });
+
+        return NextResponse.json(updatedOrder);
       }
 
-      // --- CANCEL ---
-      else if (action === 'CANCEL') {
-        if (order.status === 'completed' || order.status === 'cancelled') throw new Error("Order already finalized");
-        
-        // Only Buyer can cancel manually unless specific conditions (skipping complex ACL for now)
-        // If Seller tries to cancel, we should check if they can (e.g. timeout or buyer not paid)
-        // For MVP: Allow Buyer to Cancel anytime. Allow Seller ONLY if not paid?
-        // Let's stick to Buyer cancels. If Seller wants to cancel, they must Appeal.
-        // Actually, if status is 'created' and timeout passed, anyone can cancel.
-        // Simplified: Buyer can cancel.
-        
-        if (!isBuyer) {
-            // Check if seller and timed out?
-            // Ignoring for MVP simplicity. Only Buyer cancels.
-            throw new Error("Only Buyer can cancel active order");
+      // ── CANCEL ────────────────────────────────────────────────────
+      if (action === "CANCEL") {
+        // role + timing rules are enforced by the shared guard; keep local role var
+        // only for system message / audit metadata.
+
+        if (order.escrow_hold_id) {
+          await tx`
+            UPDATE ex_hold
+            SET status = 'released', released_at = now()
+            WHERE id = ${order.escrow_hold_id}::uuid AND status = 'active'
+          `;
         }
 
-        // Restore Funds to Seller
-        // Move from Locked -> Balance
         await tx`
-          UPDATE ex_ledger_account 
-          SET 
-            locked = locked - ${order.amount_asset},
-            balance = balance + ${order.amount_asset}
-          WHERE user_id = ${order.seller_id} AND asset_id = ${order.asset_id}
-        `;
-        
-        // Restore Ad Liquidity
-        await tx`
-           UPDATE p2p_ad
-           SET remaining_amount = remaining_amount + ${order.amount_asset}
-           WHERE id = ${order.ad_id}
+          UPDATE p2p_ad
+          SET remaining_amount = remaining_amount + ${order.amount_asset}
+          WHERE id = ${order.ad_id}
         `;
 
-        [updatedOrder] = await tx`
-          UPDATE p2p_order 
+        const updated = await tx`
+          UPDATE p2p_order
           SET status = 'cancelled', cancelled_at = now()
-          WHERE id = ${orderId}
+          WHERE id = ${orderId} AND status = 'created'
           RETURNING *
         `;
-        
-        // System message
+        const updatedOrder = updated[0];
+        if (!updatedOrder) return apiError("order_state_conflict", { status: 409 });
+
         await tx`
-          INSERT INTO p2p_chat_message (order_id, content) 
-          VALUES (${orderId}, 'System: Order cancelled by buyer.')
+          INSERT INTO p2p_chat_message (order_id, sender_id, content)
+          VALUES (
+            ${orderId},
+            NULL,
+            ${isBuyer ? "System: Order cancelled by buyer." : "System: Order cancelled due to timeout."}
+          )
         `;
-        
+
+        await writeAuditLog(tx as any, {
+          actorId: userId,
+          actorType: "user",
+          action: "p2p.order.cancelled",
+          resourceType: "p2p_order",
+          resourceId: orderId,
+          detail: { order_id: orderId, by: isBuyer ? "buyer" : "seller_timeout" },
+          ...auditCtx,
+        });
+
         await createNotification(tx, {
           userId: order.seller_id,
           type: "p2p_order_cancelled",
           title: "Order Cancelled",
-          body: `Order ${orderId.slice(0,8)} was cancelled by the buyer. Funds returned to your available balance.`,
-          metadata: { order_id: orderId }
+          body: `Order ${orderId.slice(0, 8)} was cancelled. Funds returned to your available balance.`,
+          metadata: { order_id: orderId },
         });
-      }
-      
-      else {
-        throw new Error("Invalid action");
+
+        return NextResponse.json(updatedOrder);
       }
 
-      return NextResponse.json(updatedOrder);
+      return apiError("invalid_input", { status: 400 });
     });
-
   } catch (error) {
     console.error("Error performing order action:", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Internal Error" }, { status: 400 });
+    if (error instanceof Response) return error;
+    return apiError("internal_error");
   }
 }

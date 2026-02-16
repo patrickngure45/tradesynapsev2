@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { getActingUserId } from "@/lib/auth/party";
 import {
   getPublicLeaders,
   registerLeader,
@@ -28,7 +29,7 @@ export async function GET() {
  * Body: { displayName, bio? }
  */
 export async function POST(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
+  const userId = getActingUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

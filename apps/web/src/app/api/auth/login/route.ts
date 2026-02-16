@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth/password";
 import { createSessionToken, serializeSessionCookie } from "@/lib/auth/session";
+import { verifyTOTP } from "@/lib/auth/totp";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { logRouteResponse } from "@/lib/routeLog";
 
@@ -11,7 +12,15 @@ export const runtime = "nodejs";
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  totp_code: z.string().optional(),
+  backup_code: z.string().optional(),
 });
+
+function normalizeBackupCode(raw: string | null | undefined): string {
+  const cleaned = String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (cleaned.length !== 8) return "";
+  return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
+}
 
 /**
  * POST /api/auth/login
@@ -32,7 +41,7 @@ export async function POST(request: Request) {
   const emailLower = input.email.toLowerCase().trim();
 
   const rows = await sql`
-    SELECT id, password_hash, status, display_name, email
+    SELECT id, password_hash, status, display_name, email, totp_enabled, totp_secret, totp_backup_codes
     FROM app_user
     WHERE email = ${emailLower}
     LIMIT 1
@@ -84,6 +93,80 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
+  // 2FA gate for accounts with TOTP enabled
+  if (user.totp_enabled && user.totp_secret) {
+    const totpCode = String(input.totp_code ?? "").trim();
+    const backupCode = normalizeBackupCode(input.backup_code);
+
+    let passed2fa = false;
+    let usedBackupCode = false;
+
+    if (/^\d{6}$/.test(totpCode) && verifyTOTP(String(user.totp_secret), totpCode)) {
+      passed2fa = true;
+    }
+
+    if (!passed2fa && backupCode) {
+      const consumed = await sql.begin(async (tx) => {
+        const txSql = tx as unknown as typeof sql;
+        const consumeRows = await txSql<{ id: string }[]>`
+          UPDATE app_user
+          SET totp_backup_codes = array_remove(totp_backup_codes, ${backupCode})
+          WHERE id = ${user.id}::uuid
+            AND totp_backup_codes IS NOT NULL
+            AND ${backupCode} = ANY(totp_backup_codes)
+          RETURNING id
+        `;
+        return consumeRows.length > 0;
+      });
+
+      if (consumed) {
+        passed2fa = true;
+        usedBackupCode = true;
+      }
+    }
+
+    if (!passed2fa) {
+      try {
+        await writeAuditLog(sql, {
+          actorId: user.id as string,
+          actorType: "user",
+          action: "auth.login.failed",
+          resourceType: "user",
+          resourceId: user.id as string,
+          ...auditContextFromRequest(request),
+          detail: {
+            reason: totpCode || backupCode ? "invalid_2fa" : "totp_required",
+          },
+        });
+      } catch (auditErr) {
+        console.error("[login] Failed to write audit log:", auditErr instanceof Error ? auditErr.message : auditErr);
+      }
+
+      return NextResponse.json(
+        {
+          error: totpCode || backupCode ? "invalid_totp_code" : "totp_required",
+          totp_required: true,
+        },
+        { status: 401 },
+      );
+    }
+
+    if (usedBackupCode) {
+      try {
+        await writeAuditLog(sql, {
+          actorId: user.id as string,
+          actorType: "user",
+          action: "auth.totp.backup_code.used",
+          resourceType: "user",
+          resourceId: user.id as string,
+          ...auditContextFromRequest(request),
+        });
+      } catch (auditErr) {
+        console.error("[login] Failed to write audit log:", auditErr instanceof Error ? auditErr.message : auditErr);
+      }
+    }
+  }
+
   const secret = process.env.PROOFPACK_SESSION_SECRET ?? "";
   if (!secret) {
     return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
@@ -102,6 +185,9 @@ export async function POST(request: Request) {
       resourceType: "user",
       resourceId: user.id as string,
       ...auditContextFromRequest(request),
+      detail: {
+        totp_enabled: Boolean(user.totp_enabled),
+      },
     });
   } catch (auditErr) {
     console.error("[login] Failed to write audit log:", auditErr instanceof Error ? auditErr.message : auditErr);

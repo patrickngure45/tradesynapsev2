@@ -11,8 +11,16 @@ import ccxt from "ccxt";
 export type CcxtExchange = {
   fetchTicker: (symbol: string) => Promise<any>;
   fetchTickers?: (symbols?: string[]) => Promise<any>;
+  fetchOrderBook?: (symbol: string, limit?: number) => Promise<any>;
   fetchBalance: () => Promise<any>;
   fetchFundingRates?: () => Promise<any>;
+  fetchTradingFee?: (symbol: string, params?: any) => Promise<any>;
+  fetchTradingFees?: (params?: any) => Promise<any>;
+  loadMarkets?: (reload?: boolean, params?: any) => Promise<any>;
+  market?: (symbol: string) => any;
+  markets?: Record<string, any>;
+  amountToPrecision?: (symbol: string, amount: number) => string;
+  priceToPrecision?: (symbol: string, price: number) => string;
   apiKey?: string;
   secret?: string;
   password?: string;
@@ -36,6 +44,140 @@ export type ExchangeTicker = {
   change24hPct: string;
   ts: number;
 };
+
+export type ExchangeOrderBook = {
+  symbol: string;
+  bids: Array<[number, number]>;
+  asks: Array<[number, number]>;
+  ts: number;
+};
+
+export type ExchangeTradingFee = {
+  symbol: string;
+  maker: number | null; // fraction (e.g. 0.001)
+  taker: number | null; // fraction
+  source: string;
+  ts: number;
+};
+
+export type ExchangeMarketConstraints = {
+  exchange: SupportedExchange;
+  symbol: string;
+  ok: boolean;
+  amountMin: number | null;
+  costMin: number | null;
+  amountPrecision: number | null;
+  pricePrecision: number | null;
+  source: string;
+  ts: number;
+  error?: string;
+};
+
+type MarketsCacheEntry = {
+  expiresAt: number;
+  markets: Record<string, any> | null;
+  pending: Promise<Record<string, any> | null> | null;
+};
+
+const MARKETS_CACHE = new Map<string, MarketsCacheEntry>();
+
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const v = raw ? Number(raw) : NaN;
+  return Number.isFinite(v) ? v : fallback;
+}
+
+async function getCcxtMarketsCached(exchange: SupportedExchange): Promise<Record<string, any> | null> {
+  const ttlMs = Math.max(10_000, envNumber("ARB_MARKETS_TTL_MS", 10 * 60 * 1000));
+  const now = Date.now();
+  const key = String(exchange);
+  const existing = MARKETS_CACHE.get(key);
+  if (existing && existing.markets && existing.expiresAt > now) return existing.markets;
+  if (existing?.pending) return existing.pending;
+
+  const ex = createCcxtPublic(exchange) as CcxtExchange;
+  const loadMarkets = ex.loadMarkets;
+  if (typeof loadMarkets !== "function") {
+    MARKETS_CACHE.set(key, { expiresAt: now + ttlMs, markets: null, pending: null });
+    return null;
+  }
+
+  const pending = (async () => {
+    try {
+      await loadMarkets.call(ex, false);
+      const mkts = (ex as any).markets as Record<string, any> | undefined;
+      const markets = mkts && typeof mkts === "object" ? mkts : null;
+      MARKETS_CACHE.set(key, { expiresAt: now + ttlMs, markets, pending: null });
+      return markets;
+    } catch {
+      MARKETS_CACHE.set(key, { expiresAt: now + Math.min(60_000, ttlMs), markets: null, pending: null });
+      return null;
+    }
+  })();
+
+  MARKETS_CACHE.set(key, { expiresAt: now + ttlMs, markets: existing?.markets ?? null, pending });
+  return pending;
+}
+
+export async function getExchangeMarketConstraints(
+  exchange: SupportedExchange,
+  symbol: string,
+): Promise<ExchangeMarketConstraints> {
+  const s = toCcxtSymbol(symbol);
+  try {
+    const markets = await getCcxtMarketsCached(exchange);
+    const m = markets?.[s] ?? null;
+    if (!m) {
+      return {
+        exchange,
+        symbol: symbol.toUpperCase(),
+        ok: false,
+        amountMin: null,
+        costMin: null,
+        amountPrecision: null,
+        pricePrecision: null,
+        source: "ccxt.loadMarkets",
+        ts: Date.now(),
+        error: "symbol_not_found",
+      };
+    }
+
+    const amountMinRaw = m?.limits?.amount?.min;
+    const costMinRaw = m?.limits?.cost?.min;
+    const amountPrecisionRaw = m?.precision?.amount;
+    const pricePrecisionRaw = m?.precision?.price;
+
+    const amountMin = toSafeNumber(amountMinRaw);
+    const costMin = toSafeNumber(costMinRaw);
+    const amountPrecision = toSafeNumber(amountPrecisionRaw);
+    const pricePrecision = toSafeNumber(pricePrecisionRaw);
+
+    return {
+      exchange,
+      symbol: symbol.toUpperCase(),
+      ok: true,
+      amountMin,
+      costMin,
+      amountPrecision: amountPrecision !== null ? Math.max(0, Math.floor(amountPrecision)) : null,
+      pricePrecision: pricePrecision !== null ? Math.max(0, Math.floor(pricePrecision)) : null,
+      source: "ccxt.loadMarkets",
+      ts: Date.now(),
+    };
+  } catch (e) {
+    return {
+      exchange,
+      symbol: symbol.toUpperCase(),
+      ok: false,
+      amountMin: null,
+      costMin: null,
+      amountPrecision: null,
+      pricePrecision: null,
+      source: "ccxt.loadMarkets",
+      ts: Date.now(),
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
 
 function withTimeout(ms: number) {
   const controller = new AbortController();
@@ -89,6 +231,91 @@ export function createCcxtPublic(exchangeId: string): CcxtExchange {
   return new Ctor({ enableRateLimit: true });
 }
 
+function toSafeNumber(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeL2(levels: unknown): Array<[number, number]> {
+  if (!Array.isArray(levels)) return [];
+  const out: Array<[number, number]> = [];
+  for (const lvl of levels) {
+    if (!Array.isArray(lvl) || lvl.length < 2) continue;
+    const p = toSafeNumber(lvl[0]);
+    const a = toSafeNumber(lvl[1]);
+    if (!p || !a || p <= 0 || a <= 0) continue;
+    out.push([p, a]);
+  }
+  return out;
+}
+
+export async function getExchangeOrderBook(
+  exchange: SupportedExchange,
+  symbol: string,
+  opts?: { limit?: number },
+): Promise<ExchangeOrderBook> {
+  const ex = createCcxtPublic(exchange);
+  if (typeof ex.fetchOrderBook !== "function") {
+    throw new Error(`${exchange} does not support fetchOrderBook`);
+  }
+  const s = toCcxtSymbol(symbol);
+  const ob = await ex.fetchOrderBook(s, opts?.limit ?? 50);
+  const bids = normalizeL2(ob?.bids);
+  const asks = normalizeL2(ob?.asks);
+  return {
+    symbol: symbol.toUpperCase(),
+    bids,
+    asks,
+    ts: Date.now(),
+  };
+}
+
+export async function getAuthenticatedTradingFee(
+  exchange: SupportedExchange,
+  creds: ExchangeCredentials,
+  symbol: string,
+): Promise<ExchangeTradingFee> {
+  const ex = createCcxtAuthed(exchange, creds);
+  const s = toCcxtSymbol(symbol);
+
+  // Try symbol-specific fee first.
+  if (typeof ex.fetchTradingFee === "function") {
+    const fee = await ex.fetchTradingFee(s);
+    const maker = toSafeNumber(fee?.maker);
+    const taker = toSafeNumber(fee?.taker);
+    return {
+      symbol: symbol.toUpperCase(),
+      maker: maker ?? null,
+      taker: taker ?? null,
+      source: "ccxt.fetchTradingFee",
+      ts: Date.now(),
+    };
+  }
+
+  // Fall back to all-fees if available.
+  if (typeof ex.fetchTradingFees === "function") {
+    const all = await ex.fetchTradingFees();
+    const entry = all?.[s] ?? all?.[symbol.toUpperCase()] ?? null;
+    const maker = toSafeNumber(entry?.maker);
+    const taker = toSafeNumber(entry?.taker);
+    return {
+      symbol: symbol.toUpperCase(),
+      maker: maker ?? null,
+      taker: taker ?? null,
+      source: "ccxt.fetchTradingFees",
+      ts: Date.now(),
+    };
+  }
+
+  return {
+    symbol: symbol.toUpperCase(),
+    maker: null,
+    taker: null,
+    source: "unavailable",
+    ts: Date.now(),
+  };
+}
+
 export type FundingRate = {
   symbol: string;
   exchange: string;
@@ -102,8 +329,9 @@ export type FundingRate = {
 export async function getExchangeFundingRates(exchangeId: string): Promise<FundingRate[]> {
   const ex = createCcxtPublic(exchangeId);
   // Ensure we are looking at swap markets for funding
-  if (exchangeId === 'binance' || exchangeId === 'bybit') {
-     ex.options = { ...ex.options, defaultType: 'swap' }; 
+  const swapDefaultType = new Set(["binance", "bybit", "okx", "gateio", "bitget", "mexc"]);
+  if (swapDefaultType.has(exchangeId)) {
+    ex.options = { ...ex.options, defaultType: "swap" };
   }
 
   // Some exchanges don't support fetchFundingRates for ALL symbols at once,
@@ -127,15 +355,32 @@ export async function getExchangeFundingRates(exchangeId: string): Promise<Fundi
       }
   }
 
-  return Object.values(rates).map((r: any) => ({
-    symbol: r.symbol, // CCXT symbol (e.g. BTC/USDT:USDT)
-    exchange: exchangeId,
-    fundingRate: r.fundingRate,
-    fundingTimestamp: r.fundingTimestamp,
-    nextFundingRate: r.nextFundingRate,
-    nextFundingTimestamp: r.nextFundingTimestamp,
-    volume24h: volumes[r.symbol] || 0
-  }));
+  const H8_MS = 8 * 60 * 60 * 1000;
+  return Object.values(rates)
+    .map((r: any) => {
+      const fundingRate = Number(r?.fundingRate);
+      const fundingTimestamp = Number(r?.fundingTimestamp);
+      const nextFundingTimestampRaw = r?.nextFundingTimestamp;
+      const nextFundingTimestamp = Number(nextFundingTimestampRaw);
+
+      const fundingTsOk = Number.isFinite(fundingTimestamp) && fundingTimestamp > 0;
+      const nextTsOk = Number.isFinite(nextFundingTimestamp) && nextFundingTimestamp > 0;
+      const safeFundingTimestamp = fundingTsOk ? fundingTimestamp : Date.now();
+      const safeNextFundingTimestamp = nextTsOk
+        ? nextFundingTimestamp
+        : safeFundingTimestamp + H8_MS;
+
+      return {
+        symbol: String(r?.symbol ?? ""), // CCXT symbol (e.g. BTC/USDT:USDT)
+        exchange: exchangeId,
+        fundingRate: Number.isFinite(fundingRate) ? fundingRate : 0,
+        fundingTimestamp: safeFundingTimestamp,
+        nextFundingRate: typeof r?.nextFundingRate === "number" ? r.nextFundingRate : undefined,
+        nextFundingTimestamp: safeNextFundingTimestamp,
+        volume24h: volumes[String(r?.symbol ?? "")] || 0,
+      } as FundingRate;
+    })
+    .filter((r) => !!r.symbol);
 }
 
 function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): CcxtExchange {
@@ -149,6 +394,16 @@ function createCcxtAuthed(exchangeId: string, creds: ExchangeCredentials): CcxtE
 
 export function getAuthenticatedExchangeClient(exchangeId: string, creds: ExchangeCredentials): CcxtExchange {
   return createCcxtAuthed(exchangeId, creds);
+}
+
+export function getAuthenticatedExchangeClientWithType(
+  exchangeId: string,
+  creds: ExchangeCredentials,
+  opts: { defaultType: "spot" | "swap" },
+): CcxtExchange {
+  const ex = createCcxtAuthed(exchangeId, creds);
+  ex.options = { ...ex.options, defaultType: opts.defaultType };
+  return ex;
 }
 
 async function ccxtGetTicker(exchangeId: string, symbol: string): Promise<ExchangeTicker> {

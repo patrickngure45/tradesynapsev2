@@ -18,6 +18,17 @@ export function toBigInt3818(value: string): bigint {
   return intPart * SCALE + fracPart;
 }
 
+// Parses numeric(38,18)-style strings that may be negative.
+// Use only for fields like balances; do NOT use for user-supplied transfer amounts.
+export function toBigInt3818Signed(value: string): bigint {
+  const s = value.trim();
+  if (s.length === 0) throw new Error("empty amount");
+  const neg = s.startsWith("-");
+  const inner = neg ? s.slice(1) : s;
+  const abs = toBigInt3818(inner);
+  return neg ? -abs : abs;
+}
+
 export function fromBigInt3818(value: bigint): string {
   if (value < 0n) throw new Error("negative amount");
 

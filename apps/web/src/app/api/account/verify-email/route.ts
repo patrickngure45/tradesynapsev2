@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       await sql`
         UPDATE app_user
         SET kyc_level = CASE WHEN kyc_level = 'none' THEN 'basic' ELSE kyc_level END,
-            updated_at = now()
+            email_verified = true
         WHERE id = ${result.userId}::uuid
       `;
 
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
 
       const token = await createVerificationToken(sql, actingUserId);
 
-      const baseUrl = request.headers.get("origin") ?? "http://localhost:3010";
+      const baseUrl = request.headers.get("origin") ?? process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3010";
       const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
 
       // Send verification email (falls back to console in demo mode)

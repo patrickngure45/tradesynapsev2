@@ -4,6 +4,7 @@ import {
   type ArbSnapshot,
   captureArbSnapshots,
   detectOpportunities,
+  getArbScannerConfig,
   getRecentSnapshots,
   getLatestPricesBySymbol,
 } from "@/lib/exchange/arbitrage";
@@ -33,6 +34,8 @@ export async function GET(req: NextRequest) {
   const action = url.searchParams.get("action") ?? "latest";
   const symbol = url.searchParams.get("symbol") ?? undefined;
   const debug = url.searchParams.get("debug") === "1";
+
+  const scanner = getArbScannerConfig();
 
   const sql = getSql();
 
@@ -65,6 +68,10 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         scanned: snapshots.length,
+        scannedExchanges: scanner.exchanges,
+        oppExchanges: scanner.oppExchanges,
+        includeInternal: scanner.includeInternal,
+        trackedSymbols: scanner.symbols,
         opportunities,
         minSpreadPctUsed,
         prices: priceMap,
@@ -80,6 +87,10 @@ export async function GET(req: NextRequest) {
       const opportunities = detectOpportunities(latest, { minNetSpread: -1.0 });
       return NextResponse.json({
         prices: latest,
+        scannedExchanges: scanner.exchanges,
+        oppExchanges: scanner.oppExchanges,
+        includeInternal: scanner.includeInternal,
+        trackedSymbols: scanner.symbols,
         opportunities,
         ts: new Date().toISOString(),
       });
@@ -105,6 +116,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       prices: priceMap,
+      scannedExchanges: scanner.exchanges,
+      oppExchanges: scanner.oppExchanges,
+      includeInternal: scanner.includeInternal,
+      trackedSymbols: scanner.symbols,
       opportunities,
       symbols: Object.keys(priceMap),
       ts: new Date().toISOString(),

@@ -15,6 +15,7 @@ import { enqueueOutbox } from "@/lib/outbox";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createNotification } from "@/lib/notifications";
 import { propagateLeaderOrder } from "@/lib/exchange/copyTrading";
+import { chargeGasFee } from "@/lib/exchange/gas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -127,6 +128,13 @@ export async function POST(request: Request) {
 
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
+
+      const gasErr = await chargeGasFee(txSql, {
+        userId: actingUserId,
+        action: "place_order",
+        reference: input.market_id,
+      });
+      if (gasErr) return { status: 409 as const, body: { error: gasErr.code, details: gasErr.details } };
 
       const finalizeHoldIfTerminal = async (orderId: string, holdId: string | null): Promise<void> => {
         if (!holdId) return;
