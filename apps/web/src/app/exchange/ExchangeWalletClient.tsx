@@ -1388,7 +1388,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  </div>
 
  <div ref={convertSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
-   <h3 className="text-sm font-medium">Convert (internal)</h3>
+   <h3 className="text-sm font-medium">Convert</h3>
    <p className="mt-1 text-xs text-[var(--muted)]">
      Convert one asset to another instantly using a quoted rate (updates automatically). Best for turning non-P2P assets into USDT for offloading.
    </p>
