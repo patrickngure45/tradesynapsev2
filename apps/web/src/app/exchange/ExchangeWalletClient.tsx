@@ -8,6 +8,7 @@ import { ApiErrorBanner, type ClientApiError } from"@/components/ApiErrorBanner"
 import { Toast, type ToastKind } from"@/components/Toast";
 import { persistActingUserIdPreference, readActingUserIdPreference } from"@/lib/state/actingUser";
 import { formatTokenAmount, isNonZeroDecimalString } from "@/lib/format/amount";
+import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 
 type Asset = {
  id: string;
@@ -216,6 +217,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [convertQuote, setConvertQuote] = useState<ConvertQuote | null>(null);
  const [convertQuoteLoading, setConvertQuoteLoading] = useState(false);
  const [convertQuoteUpdatedAt, setConvertQuoteUpdatedAt] = useState<number | null>(null);
+ const [convertQuoteNonce, setConvertQuoteNonce] = useState(0);
 
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
@@ -299,11 +301,25 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [assets, convertToSymbol]);
 
  const selectedConvertAvailable = useMemo(() => {
-  if (!selectedConvertFromAsset) return 0;
+  if (!selectedConvertFromAsset) return "0";
   const row = balances.find((b) => b.asset_id === selectedConvertFromAsset.id);
-  const available = Number(row?.available ?? NaN);
-  return Number.isFinite(available) ? available : 0;
+  const available = String(row?.available ?? "0");
+  try {
+    // Validate parseability; treat weird values as 0.
+    void toBigInt3818(available);
+    return available;
+  } catch {
+    return "0";
+  }
  }, [balances, selectedConvertFromAsset]);
+
+ const selectedConvertAvailableBig = useMemo(() => {
+  try {
+    return toBigInt3818(selectedConvertAvailable);
+  } catch {
+    return 0n;
+  }
+ }, [selectedConvertAvailable]);
 
  const selectedTransferAvailable = useMemo(() => {
  if (!selectedTransferAsset) return 0;
@@ -329,9 +345,27 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const isWithdrawAmountTooHigh = isWithdrawAmountValid && withdrawAmountNumber > selectedWithdrawAvailable;
  const isWithdrawDestinationValid = /^0x[a-fA-F0-9]{40}$/.test(withdrawDestination.trim());
 
- const convertAmountNumber = Number(convertAmountIn);
- const isConvertAmountValid = Number.isFinite(convertAmountNumber) && convertAmountNumber > 0;
- const isConvertAmountTooHigh = isConvertAmountValid && convertAmountNumber > selectedConvertAvailable;
+ const convertAmountBig = useMemo(() => {
+  try {
+    return toBigInt3818(convertAmountIn);
+  } catch {
+    return null;
+  }
+ }, [convertAmountIn]);
+
+ const isConvertAmountValid = convertAmountBig !== null && convertAmountBig > 0n;
+ const isConvertAmountTooHigh = isConvertAmountValid && convertAmountBig! > selectedConvertAvailableBig;
+
+ const convertDisableReason = useMemo(() => {
+  const from = convertFromSymbol.trim().toUpperCase();
+  const to = convertToSymbol.trim().toUpperCase();
+  if (!from || !to) return "Select From and To assets.";
+  if (from === to) return "From and To must be different assets.";
+  if (!convertAmountIn) return "Enter an amount.";
+  if (!isConvertAmountValid) return "Enter a valid amount (up to 18 decimals).";
+  if (isConvertAmountTooHigh) return "Amount exceeds available balance.";
+  return null;
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh]);
 
  const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>) => {
   ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -758,7 +792,20 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     cancelled = true;
     window.clearTimeout(timer);
   };
- }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, selectedConvertAvailable]);
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, convertQuoteNonce]);
+
+ // Auto-refresh quote periodically (Binance-style) while inputs stay valid.
+ useEffect(() => {
+  const from = convertFromSymbol.trim().toUpperCase();
+  const to = convertToSymbol.trim().toUpperCase();
+  if (!from || !to || from === to) return;
+  if (!convertAmountIn || !isConvertAmountValid || isConvertAmountTooHigh) return;
+
+  const interval = window.setInterval(() => {
+    setConvertQuoteNonce((n) => n + 1);
+  }, 12_000);
+  return () => window.clearInterval(interval);
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh]);
 
  useEffect(() => {
  if (authMode ==="header"&& !canUseHeader) {
@@ -1338,11 +1385,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <div ref={convertSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
    <h3 className="text-sm font-medium">Convert (internal)</h3>
    <p className="mt-1 text-xs text-[var(--muted)]">
-     Convert one asset to another instantly using a quoted rate. Best for turning non-P2P assets into USDT for offloading.
+     Convert one asset to another instantly using a quoted rate (updates automatically). Best for turning non-P2P assets into USDT for offloading.
    </p>
 
    <div className="mt-3 grid gap-2">
-     <div className="grid gap-2 sm:grid-cols-2">
+    <div className="grid gap-2 sm:grid-cols-2">
        <label className="grid gap-1">
          <span className="text-[11px] text-[var(--muted)]">From</span>
          <select
@@ -1356,8 +1403,13 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
              .sort((a, b) => a.symbol.localeCompare(b.symbol))
              .map((a) => {
                const row = balances.find((b) => b.asset_id === a.id);
-               const avail = Number(row?.available ?? NaN);
-               const has = Number.isFinite(avail) && avail > 0;
+              let has = false;
+              try {
+                const avail = String(row?.available ?? "0");
+                has = toBigInt3818(avail) > 0n;
+              } catch {
+                has = false;
+              }
                return (
                  <option key={a.id} value={a.symbol.toUpperCase()} disabled={!has}>
                    {a.symbol.toUpperCase()} ({a.chain}){has ? "" : " — 0"}
@@ -1369,7 +1421,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            <span className="break-words text-[11px] text-[var(--muted)]">
              Available:{" "}
              <span className="break-all font-mono text-[var(--foreground)]">
-               {fmtAmount(String(selectedConvertAvailable), selectedConvertFromAsset.decimals)} {selectedConvertFromAsset.symbol.toUpperCase()}
+              {fmtAmount(selectedConvertAvailable, selectedConvertFromAsset.decimals)} {selectedConvertFromAsset.symbol.toUpperCase()}
              </span>
            </span>
          ) : null}
@@ -1382,10 +1434,45 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            value={convertToSymbol}
            onChange={(e) => setConvertToSymbol(e.target.value)}
          >
-           <option value="USDT">USDT (BSC)</option>
+          {assets
+            .slice()
+            .sort((a, b) => a.symbol.localeCompare(b.symbol))
+            .map((a) => (
+              <option key={a.id} value={a.symbol.toUpperCase()}>
+                {a.symbol.toUpperCase()} ({a.chain})
+              </option>
+            ))}
          </select>
        </label>
      </div>
+
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+        disabled={!convertFromSymbol || !convertToSymbol}
+        onClick={() => {
+          const from = convertFromSymbol;
+          const to = convertToSymbol;
+          setConvertFromSymbol(to);
+          setConvertToSymbol(from);
+          setConvertQuote(null);
+          setConvertQuoteUpdatedAt(null);
+          setConvertQuoteNonce((n) => n + 1);
+        }}
+      >
+        Swap
+      </button>
+
+      <button
+        type="button"
+        className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+        disabled={!!convertDisableReason}
+        onClick={() => setConvertQuoteNonce((n) => n + 1)}
+      >
+        Refresh quote
+      </button>
+    </div>
 
      <label className="grid gap-1">
        <span className="text-[11px] text-[var(--muted)]">Amount</span>
@@ -1400,15 +1487,15 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          <button
            type="button"
            className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-           disabled={!selectedConvertFromAsset || selectedConvertAvailable <= 0}
-           onClick={() => setConvertAmountIn(String(selectedConvertAvailable))}
+          disabled={!selectedConvertFromAsset || selectedConvertAvailableBig <= 0n}
+          onClick={() => setConvertAmountIn(selectedConvertAvailable)}
          >
            Max
          </button>
        </div>
-       {isConvertAmountTooHigh ? (
-         <span className="text-[11px] text-[var(--down)]">Amount exceeds available balance.</span>
-       ) : null}
+      {convertDisableReason ? (
+        <span className="text-[11px] text-[var(--down)]">{convertDisableReason}</span>
+      ) : null}
      </label>
 
      <label className="grid gap-1">
@@ -1439,12 +1526,15 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
              ) : null}
            </div>
            <div className="mt-1 break-words">
-             You receive:{" "}
+            You receive:{" "}
              <span className="break-all font-mono text-[var(--foreground)]">
                {fmtAmount(convertQuote.amountOut, selectedConvertToAsset?.decimals ?? 6)} {convertQuote.toSymbol}
              </span>
-             <span className="ml-1">(fee {fmtAmount(convertQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {convertQuote.fromSymbol})</span>
+            <span className="ml-1">(fee {fmtAmount(convertQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {convertQuote.fromSymbol})</span>
            </div>
+          <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
+            Price source: {convertQuote.priceSource.kind}
+          </div>
          </>
        ) : (
          <>Quote: <span className="font-mono">—</span></>
