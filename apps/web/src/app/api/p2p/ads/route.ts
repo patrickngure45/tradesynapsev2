@@ -22,7 +22,7 @@ const searchSchema = z.object({
 const createAdSchema = z
   .object({
     side: z.enum(["BUY", "SELL"]),
-    asset: z.enum(["USDT", "BNB"]).default("USDT"),
+    asset: z.string().min(2).max(12).transform((s) => s.trim().toUpperCase()),
     fiat: z.string().min(2).max(5),
     price_type: z.enum(["fixed", "floating"]).default("fixed"),
     fixed_price: z.number().positive(),
@@ -65,6 +65,11 @@ function uniqStrings(list: string[]): string[] {
     out.push(v);
   }
   return out;
+}
+
+function clamp(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, n));
 }
 
 function computeFloatingMultiplier(raw: unknown): number | null {
@@ -238,6 +243,36 @@ export async function POST(req: NextRequest) {
 
     const fiatUpper = data.fiat.toUpperCase();
 
+    // Global limits (Binance-style): enforce a USD-based minimum/maximum per trade.
+    // Defaults: min=$5, max=$2000. Can be overridden by env.
+    const minUsd = clamp(Number(process.env.P2P_MIN_TRADE_USD ?? "5"), 0.5, 10_000);
+    const maxUsd = clamp(Number(process.env.P2P_MAX_TRADE_USD ?? "2000"), minUsd, 100_000);
+
+    // Compute the fiat conversion for USDT (USDT≈USD). If unavailable, we can't safely enforce limits.
+    const usdtFiat = await getOrComputeFxReferenceRate(sql as any, "USDT", fiatUpper);
+    if (!usdtFiat?.mid) {
+      return apiError("fx_unavailable", { status: 503, details: { base: "USDT", quote: fiatUpper } });
+    }
+
+    const minFiat = Math.ceil(minUsd * usdtFiat.mid);
+    const maxFiat = Math.floor(maxUsd * usdtFiat.mid);
+    if (!(Number.isFinite(minFiat) && Number.isFinite(maxFiat) && minFiat > 0 && maxFiat >= minFiat)) {
+      return apiError("fx_unavailable", { status: 503, details: { base: "USDT", quote: fiatUpper } });
+    }
+
+    if (data.min_limit < minFiat) {
+      return apiError("min_limit_too_low", {
+        status: 409,
+        details: { min_limit: data.min_limit, required_min: minFiat, fiat: fiatUpper, min_usd: minUsd },
+      });
+    }
+    if (data.max_limit > maxFiat) {
+      return apiError("max_limit_too_high", {
+        status: 409,
+        details: { max_limit: data.max_limit, allowed_max: maxFiat, fiat: fiatUpper, max_usd: maxUsd },
+      });
+    }
+
     // Validate payment method ownership for SELL ads.
     let paymentMethodIds: string[] = [];
     if (data.side === "SELL") {
@@ -270,7 +305,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Identify the asset being traded
-    const [targetAsset] = await sql`SELECT id FROM ex_asset WHERE symbol = ${data.asset} AND chain = 'bsc' LIMIT 1`;
+    const [targetAsset] = await sql`
+      SELECT id
+      FROM ex_asset
+      WHERE chain = 'bsc'
+        AND is_enabled = true
+        AND symbol = ${data.asset}
+      LIMIT 1
+    `;
     if (!targetAsset) return apiError("invalid_asset");
 
     // 3. For SELL ads, verify inventory via authoritative availability check:
@@ -317,6 +359,17 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Create the Ad
+    // Extra sanity: ensure max_limit is compatible with the ad's total liquidity.
+    // max_limit (fiat) must not exceed total_amount(asset) * fixed_price(fiat/asset).
+    const maxByLiquidity = Math.floor(data.total_amount * data.fixed_price);
+    if (maxByLiquidity <= 0) {
+      return apiError("invalid_input", { details: { message: "Ad liquidity is too low." } });
+    }
+    const finalMaxLimit = Math.min(data.max_limit, maxByLiquidity);
+    if (data.min_limit > finalMaxLimit) {
+      return apiError("invalid_input", { details: { message: "min_limit must be <= max_limit." } });
+    }
+
     const [newAd] = await sql`
       INSERT INTO p2p_ad (
         user_id, side, asset_id, fiat_currency,
@@ -327,7 +380,7 @@ export async function POST(req: NextRequest) {
       ) VALUES (
         ${actingUserId}, ${data.side}, ${targetAsset.id}, ${fiatUpper},
         ${data.price_type}, ${data.fixed_price}, ${data.total_amount}, ${data.total_amount},
-        ${data.min_limit}, ${data.max_limit}, ${data.payment_window_minutes}, ${data.terms || ""},
+        ${data.min_limit}, ${finalMaxLimit}, ${data.payment_window_minutes}, ${data.terms || ""},
         'online', ${JSON.stringify(paymentMethodIds)}::jsonb,
         ${refMid}, ${refSources ? JSON.stringify(refSources) : "{}"}::jsonb, ${refComputedAt ? refComputedAt.toISOString() : null},
         ${refMid ? getBandPctForFiat(data.fiat) : null}

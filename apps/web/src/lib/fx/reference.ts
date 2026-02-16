@@ -1,5 +1,7 @@
 import type { Sql } from "postgres";
 
+import { getExternalIndexUsdt } from "@/lib/market/indexPrice";
+
 export type FxQuote = {
   base: string;
   quote: string;
@@ -42,6 +44,14 @@ async function getLiveUsdToFiatRate(fiat: string): Promise<number | null> {
   if (!/^[A-Z]{2,5}$/.test(to)) return null;
   if (to === "USD" || to === "USDT") return 1;
 
+  // Operator override (reliable for prod if outbound FX APIs are blocked).
+  // Example: FX_USD_FIAT_OVERRIDE_KES=160.25
+  const override = process.env[`FX_USD_FIAT_OVERRIDE_${to}`] ?? process.env.FX_USD_FIAT_OVERRIDE;
+  if (override) {
+    const n = Number(override);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
   const timeoutMs = clamp(Number(process.env.FX_LIVE_TIMEOUT_MS ?? "2500"), 500, 10_000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -79,6 +89,15 @@ async function getLiveUsdToFiatRate(fiat: string): Promise<number | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function getExternalUsdtPerAsset(sym: string): Promise<number | null> {
+  const s = sym.trim().toUpperCase();
+  if (!s) return null;
+  if (s === "USDT" || s === "USD") return 1;
+  const q = await getExternalIndexUsdt(s);
+  const mid = q?.mid;
+  return mid && Number.isFinite(mid) && mid > 0 ? mid : null;
 }
 
 async function getAssetId(sql: Sql, symbol: string): Promise<string | null> {
@@ -311,36 +330,70 @@ export async function getOrComputeFxReferenceRate(
   // Compute.
   let computed: { bid: number; ask: number; mid: number; sources: Record<string, unknown> } | null = null;
 
-  if (baseSym === "USDT" && quoteSym.length >= 2) {
+  if (quoteSym.length < 2) return null;
+
+  // 1) Compute USDT/fiat reference (used by many flows: min/max limits, indices).
+  // Prefer P2P top-of-book for USDT when available, else fall back to live USD->fiat.
+  const usdtFiat = await (async () => {
     const p2p = await getP2pFiatPerAssetFixedTop(sql, "USDT", quoteSym);
-    if (p2p) {
-      computed = p2p;
-    } else {
-      const usdFiat = await getLiveUsdToFiatRate(quoteSym);
-      if (!usdFiat) return null;
+    if (p2p) return p2p;
 
-      const spreadBps = clamp(Number(process.env.FX_USDT_FIAT_FALLBACK_SPREAD_BPS ?? "10"), 0, 500);
-      const half = spreadBps / 2 / 10_000;
-      const bid = usdFiat * (1 - half);
-      const ask = usdFiat * (1 + half);
-      const mid = (bid + ask) / 2;
+    const usdFiat = await getLiveUsdToFiatRate(quoteSym);
+    if (!usdFiat) return null;
 
-      computed = {
-        bid,
-        ask,
-        mid,
-        sources: {
-          kind: "live_usd_fiat_fallback",
-          base: "USDT",
-          quote: quoteSym,
-          usd_fiat_mid: usdFiat,
-          spread_bps: spreadBps,
-          note: "USDT pegged to USD for fallback conversion",
-        },
-      };
-    }
+    const spreadBps = clamp(Number(process.env.FX_USDT_FIAT_FALLBACK_SPREAD_BPS ?? "10"), 0, 500);
+    const half = spreadBps / 2 / 10_000;
+    const bid = usdFiat * (1 - half);
+    const ask = usdFiat * (1 + half);
+    const mid = (bid + ask) / 2;
+    return {
+      bid,
+      ask,
+      mid,
+      sources: {
+        kind: "live_usd_fiat_fallback",
+        base: "USDT",
+        quote: quoteSym,
+        usd_fiat_mid: usdFiat,
+        spread_bps: spreadBps,
+        note: "USDT pegged to USD for fallback conversion",
+      },
+    };
+  })();
+
+  if (!usdtFiat) return null;
+
+  // Base=USDT is a direct quote.
+  if (baseSym === "USDT") {
+    computed = usdtFiat;
   } else {
-    return null;
+    // 2) Compute asset/fiat via asset/USDT external index and USDT/fiat.
+    const baseUsdtMid = await getExternalUsdtPerAsset(baseSym);
+    if (!baseUsdtMid) return null;
+
+    const mid = baseUsdtMid * usdtFiat.mid;
+    if (!Number.isFinite(mid) || mid <= 0) return null;
+
+    // Conservative reference spread for guardrails.
+    const spreadBps = clamp(Number(process.env.FX_ASSET_FIAT_SPREAD_BPS ?? "20"), 0, 500);
+    const half = spreadBps / 2 / 10_000;
+    const bid = mid * (1 - half);
+    const ask = mid * (1 + half);
+
+    computed = {
+      bid,
+      ask,
+      mid,
+      sources: {
+        kind: "chained_external_index_usdt",
+        base: baseSym,
+        quote: quoteSym,
+        base_usdt_mid: baseUsdtMid,
+        usdt_fiat_mid: usdtFiat.mid,
+        usdt_fiat_sources: usdtFiat.sources,
+        spread_bps: spreadBps,
+      },
+    };
   }
 
   const computedAt = new Date();
