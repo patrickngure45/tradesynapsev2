@@ -14,6 +14,10 @@ import { recordInternalChainTx } from "@/lib/exchange/internalChain";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// System users for strict accounting:
+// - Liquidity pool: holds inventory used to fulfill conversions.
+// - Treasury: collects conversion fees.
+const SYSTEM_LIQUIDITY_USER_ID = "00000000-0000-0000-0000-000000000002";
 const SYSTEM_TREASURY_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 const requestSchema = z.object({
@@ -46,6 +50,24 @@ async function ensureSystemUser(sql: ReturnType<typeof getSql>, userId: string):
     VALUES (${userId}::uuid, 'active', 'none', NULL)
     ON CONFLICT (id) DO NOTHING
   `;
+}
+
+async function availableForAccount(sql: ReturnType<typeof getSql>, accountId: string): Promise<string> {
+  const rows = await sql<{ available: string }[]>`
+    WITH posted AS (
+      SELECT coalesce(sum(amount), 0)::numeric AS posted
+      FROM ex_journal_line
+      WHERE account_id = ${accountId}::uuid
+    ),
+    held AS (
+      SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
+      FROM ex_hold
+      WHERE account_id = ${accountId}::uuid AND status = 'active'
+    )
+    SELECT (posted.posted - held.held)::text AS available
+    FROM posted, held
+  `;
+  return rows[0]?.available ?? "0";
 }
 
 export async function POST(request: Request) {
@@ -128,21 +150,7 @@ export async function POST(request: Request) {
       // Available check in FROM asset.
       const userFromAcct = await ensureLedgerAccount(txSql, actingUserId, fromAsset.id);
 
-      const balRows = await txSql<{ available: string }[]>`
-        WITH posted AS (
-          SELECT coalesce(sum(amount), 0)::numeric AS posted
-          FROM ex_journal_line
-          WHERE account_id = ${userFromAcct}::uuid
-        ),
-        held AS (
-          SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
-          FROM ex_hold
-          WHERE account_id = ${userFromAcct}::uuid AND status = 'active'
-        )
-        SELECT (posted.posted - held.held)::text AS available
-        FROM posted, held
-      `;
-      const available = balRows[0]?.available ?? "0";
+      const available = await availableForAccount(txSql, userFromAcct);
       if (toBigInt3818(available) < toBigInt3818(quote.amountIn)) {
         return {
           status: 409 as const,
@@ -153,14 +161,33 @@ export async function POST(request: Request) {
         };
       }
 
-      await ensureSystemUser(txSql, SYSTEM_TREASURY_USER_ID);
+      await Promise.all([
+        ensureSystemUser(txSql, SYSTEM_LIQUIDITY_USER_ID),
+        ensureSystemUser(txSql, SYSTEM_TREASURY_USER_ID),
+      ]);
 
       const [userToAcct, systemFromAcct, systemToAcct, treasuryFromAcct] = await Promise.all([
         ensureLedgerAccount(txSql, actingUserId, toAsset.id),
-        ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, fromAsset.id),
-        ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, toAsset.id),
+        ensureLedgerAccount(txSql, SYSTEM_LIQUIDITY_USER_ID, fromAsset.id),
+        ensureLedgerAccount(txSql, SYSTEM_LIQUIDITY_USER_ID, toAsset.id),
         ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, fromAsset.id),
       ]);
+
+      // Liquidity check (strict accounting): the pool must have enough TO asset to deliver.
+      const systemToAvailable = await availableForAccount(txSql, systemToAcct);
+      if (toBigInt3818(systemToAvailable) < toBigInt3818(quote.amountOut)) {
+        return {
+          status: 409 as const,
+          body: {
+            error: "liquidity_unavailable",
+            details: {
+              available: systemToAvailable,
+              required: quote.amountOut,
+              asset: toSym,
+            },
+          },
+        };
+      }
 
       const entryRows = await txSql<{ id: string; created_at: string }[]>`
         INSERT INTO ex_journal_entry (type, reference, metadata_json)

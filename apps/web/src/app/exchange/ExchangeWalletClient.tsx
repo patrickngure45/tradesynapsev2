@@ -1720,6 +1720,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                  setConvertLockedQuoteUpdatedAt(null);
                  return;
                }
+               if (e.code === "liquidity_unavailable") {
+                 setToastKind("info");
+                 setToastMessage("Insufficient liquidity to fill this conversion right now — try a smaller amount or try again later.");
+                 setConvertLockedQuote(null);
+                 setConvertLockedQuoteUpdatedAt(null);
+                 setError({ code: e.code, details: e.details });
+                 return;
+               }
                setConvertLockedQuote(null);
                setConvertLockedQuoteUpdatedAt(null);
                setError({ code: e.code, details: e.details });
