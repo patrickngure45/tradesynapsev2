@@ -1655,6 +1655,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                  from: fromAsset.symbol.toUpperCase(),
                  to: toAsset.symbol.toUpperCase(),
                  amount_in: convertAmountIn,
+                 ...(locked
+                   ? {
+                       client_quote: {
+                         amount_out: locked.amountOut,
+                         rate_to_per_from: locked.rateToPerFrom,
+                       },
+                     }
+                   : {}),
                  ...(convertTotpCode.length === 6 ? { totp_code: convertTotpCode } : {}),
                }),
              });
@@ -1678,11 +1686,25 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
             setConvertLockedQuote(null);
             setConvertLockedQuoteUpdatedAt(null);
            } catch (e) {
-           setConvertLockedQuote(null);
-           setConvertLockedQuoteUpdatedAt(null);
              if (e instanceof ApiError) {
+               if (e.code === "price_changed") {
+                 const serverQuote = (e.details as any)?.server_quote as ConvertQuote | undefined;
+                 if (serverQuote) {
+                   setConvertQuote(serverQuote);
+                   setConvertQuoteUpdatedAt(Date.now());
+                 }
+                 setToastKind("info");
+                 setToastMessage("Price updated — review the new quote and tap Convert again.");
+                 setConvertLockedQuote(null);
+                 setConvertLockedQuoteUpdatedAt(null);
+                 return;
+               }
+               setConvertLockedQuote(null);
+               setConvertLockedQuoteUpdatedAt(null);
                setError({ code: e.code, details: e.details });
              } else {
+               setConvertLockedQuote(null);
+               setConvertLockedQuoteUpdatedAt(null);
                setError({ code: e instanceof Error ? e.message : String(e) });
              }
            } finally {

@@ -22,6 +22,12 @@ const requestSchema = z.object({
   amount_in: amount3818PositiveSchema,
   reference: z.string().min(1).max(200).optional(),
   totp_code: z.string().length(6).regex(/^\d{6}$/).optional(),
+  client_quote: z
+    .object({
+      amount_out: amount3818PositiveSchema,
+      rate_to_per_from: amount3818PositiveSchema,
+    })
+    .optional(),
 });
 
 async function ensureLedgerAccount(sql: ReturnType<typeof getSql>, userId: string, assetId: string): Promise<string> {
@@ -95,6 +101,28 @@ export async function POST(request: Request) {
       });
       if (!quote) {
         return { status: 409 as const, body: { error: "quote_unavailable" } };
+      }
+
+      // Professional UX guard: ensure we execute against the locked client quote.
+      // If price moved between quote and execute, force user to review the new quote.
+      if (input.client_quote) {
+        const clientAmountOut = toBigInt3818(input.client_quote.amount_out);
+        const serverAmountOut = toBigInt3818(quote.amountOut);
+        const clientRate = toBigInt3818(input.client_quote.rate_to_per_from);
+        const serverRate = toBigInt3818(quote.rateToPerFrom);
+
+        if (clientAmountOut !== serverAmountOut || clientRate !== serverRate) {
+          return {
+            status: 409 as const,
+            body: {
+              error: "price_changed",
+              details: {
+                client_quote: input.client_quote,
+                server_quote: quote,
+              },
+            },
+          };
+        }
       }
 
       // Available check in FROM asset.
