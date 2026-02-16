@@ -1,18 +1,33 @@
 #!/bin/sh
 set -e
 
-# 1. Run Migrations
-echo "📦 Running Database Migrations..."
-npm run db:migrate
+# Railway (and many PaaS) expects the app to bind quickly to $PORT.
+# Doing heavy work (seeding) on every boot can cause "Application failed to respond".
 
-# 2. Seed Production Data (Assets/Markets)
-echo "🌱 Seeding Assets..."
-npx tsx scripts/seed-prod.ts
+: "${RUN_MIGRATIONS:=1}"
+: "${RUN_SEED_PROD:=0}"
+: "${RUN_SEED_ADMIN:=0}"
 
-# 3. Ensure Admin User (optional)
-echo "👤 Ensuring Admin User..."
-npx tsx scripts/seed-admin-prod.ts
+if [ "$RUN_MIGRATIONS" = "1" ]; then
+	echo "📦 Running Database Migrations..."
+	npm run db:migrate
+else
+	echo "↪️  Skipping migrations (RUN_MIGRATIONS=$RUN_MIGRATIONS)"
+fi
 
-# 4. Start Application
+if [ "$RUN_SEED_PROD" = "1" ]; then
+	echo "🌱 Seeding production assets/markets..."
+	npx tsx scripts/seed-prod.ts
+else
+	echo "↪️  Skipping seed-prod (RUN_SEED_PROD=$RUN_SEED_PROD)"
+fi
+
+if [ "$RUN_SEED_ADMIN" = "1" ]; then
+	echo "👤 Ensuring admin user..."
+	npx tsx scripts/seed-admin-prod.ts
+else
+	echo "↪️  Skipping seed-admin-prod (RUN_SEED_ADMIN=$RUN_SEED_ADMIN)"
+fi
+
 echo "🚀 Starting Production Server..."
-npm run start:prod
+exec npm run start:prod

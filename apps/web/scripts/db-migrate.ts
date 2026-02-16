@@ -12,6 +12,16 @@ async function main() {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) throw new Error("DATABASE_URL must be set");
 
+  const isIgnorableDriftForFile = (file: string, err: unknown) => {
+    // Narrowly scoped compatibility: some deployments may restore/seed a DB
+    // that already includes columns/indexes but lacks corresponding _migrations rows.
+    if (file !== "026_fee_preference_deprecated.sql") return false;
+    const anyErr = err as any;
+    const code = anyErr?.code as string | undefined;
+    // 42701: duplicate_column, 42P07: duplicate_table (also used for relations like indexes)
+    return code === "42701" || code === "42P07";
+  };
+
   let dbHost = "unknown";
   let dbName = "unknown";
   let ssl: false | "require" | undefined;
@@ -86,9 +96,18 @@ async function main() {
       const content = fs.readFileSync(filePath, "utf8");
 
       await sql.begin(async (tx) => {
-        // Run the SQL
-        await tx.unsafe(content);
-        // Record it
+        try {
+          // Run the SQL
+          await tx.unsafe(content);
+        } catch (err) {
+          if (isIgnorableDriftForFile(file, err)) {
+            console.warn(`⚠️  Migration ${file} hit an "already exists" drift; marking as applied.`);
+          } else {
+            throw err;
+          }
+        }
+
+        // Record it (even if we no-opped due to drift)
         // @ts-ignore
         await tx`INSERT INTO _migrations (name) VALUES (${file})`;
       });

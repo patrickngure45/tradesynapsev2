@@ -28,7 +28,7 @@ import {
 } from "./src/lib/ws/channels";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? "localhost";
+const hostname = process.env.HOSTNAME ?? (dev ? "localhost" : "0.0.0.0");
 const port = parseInt(process.env.PORT ?? "3000", 10);
 
 const app = next({ dev, hostname, port });
@@ -38,7 +38,9 @@ const handle = app.getRequestHandler();
 // sockets can leak/hang and dev can crash.
 let handleUpgrade: undefined | ((req: any, socket: any, head: any) => void);
 
-app.prepare().then(() => {
+app
+  .prepare()
+  .then(() => {
   handleUpgrade = (app as any).getUpgradeHandler ? (app as any).getUpgradeHandler() : undefined;
   const sql = createSql();
 
@@ -115,7 +117,7 @@ app.prepare().then(() => {
   // Start the shared market-data poll loop
   startPolling(sql);
 
-  server.listen(port, () => {
+  server.listen(port, hostname, () => {
     console.log(`  ▲ TradeSynapse ready on http://${hostname}:${port}`);
     console.log(`  ⚡ WebSocket endpoint: ws://${hostname}:${port}/ws`);
   });
@@ -138,4 +140,8 @@ app.prepare().then(() => {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-});
+  })
+  .catch((err) => {
+    console.error("[server] Failed to start:", err);
+    process.exit(1);
+  });
