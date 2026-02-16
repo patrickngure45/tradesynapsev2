@@ -395,6 +395,21 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   return fiatAmount >= 1 ? String(fiatAmount) : "";
  }, [balances, assetLocalRates, localValueReady]);
 
+ const sellConvertP2pAmountParam = useMemo(() => {
+  if (!convertQuote) return "";
+  if (!localValueReady) return "";
+  const sym = convertQuote.toSymbol.trim().toUpperCase();
+  if (!sym) return "";
+
+  // P2P "amount" is a fiat amount filter (see /p2p deep-link behavior).
+  const out = Number(convertQuote.amountOut);
+  const rate = assetLocalRates[sym];
+  if (!Number.isFinite(out) || out <= 0) return "";
+  if (!Number.isFinite(rate) || rate <= 0) return "";
+  const fiatAmount = Math.floor(out * rate);
+  return fiatAmount >= 1 ? String(fiatAmount) : "";
+ }, [convertQuote, localValueReady, assetLocalRates]);
+
  const balancesToDisplay = useMemo(() => {
   return nonZeroBalances.length > 0 ? nonZeroBalances : balances;
  }, [nonZeroBalances, balances]);
@@ -1610,12 +1625,21 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          {loadingAction === "convert:execute" ? "Converting…" : "Convert"}
        </button>
 
-       <Link
-         className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
-         href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
-       >
-         Sell USDT (P2P)
-       </Link>
+      {convertQuote && (convertQuote.toSymbol === "USDT" || convertQuote.toSymbol === "BNB") ? (
+        <Link
+          className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
+          href={`/p2p?side=SELL&asset=${encodeURIComponent(convertQuote.toSymbol)}&fiat=${encodeURIComponent(localFiat)}${sellConvertP2pAmountParam ? `&amount=${encodeURIComponent(sellConvertP2pAmountParam)}` : ""}`}
+        >
+          Sell {convertQuote.toSymbol} (P2P)
+        </Link>
+      ) : (
+        <Link
+          className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
+          href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
+        >
+          Sell USDT (P2P)
+        </Link>
+      )}
      </div>
    </div>
  </div>
