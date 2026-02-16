@@ -1609,7 +1609,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          const displayQuote = convertLockedQuote ?? convertQuote;
          const displayUpdatedAt = convertLockedQuote ? convertLockedQuoteUpdatedAt : convertQuoteUpdatedAt;
          if (!displayQuote) return <>Quote: <span className="font-mono">—</span></>;
-         <>
+         return (
+           <>
            <div className="break-words">
              Rate:{" "}
              <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(displayQuote.rateToPerFrom, 8)}</span>
@@ -1628,7 +1629,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
           <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
             Price source: {displayQuote.priceSource.kind}
           </div>
-         </>
+           </>
+         );
        })()}
      </div>
 
