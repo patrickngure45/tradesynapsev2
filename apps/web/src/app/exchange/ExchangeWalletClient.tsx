@@ -224,6 +224,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [convertLastReceiptQuote, setConvertLastReceiptQuote] = useState<ConvertQuote | null>(null);
  const [convertLastReceiptAt, setConvertLastReceiptAt] = useState<number | null>(null);
  const [convertJustConverted, setConvertJustConverted] = useState(false);
+ const [freezeWalletSortUntil, setFreezeWalletSortUntil] = useState<number | null>(null);
 
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
@@ -435,7 +436,26 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   return nonZeroBalances.length > 0 ? nonZeroBalances : balances;
  }, [nonZeroBalances, balances]);
 
+ const lastSortedAssetOrderRef = useRef<string[] | null>(null);
+
  const sortedBalances = useMemo(() => {
+  const now = Date.now();
+  if (freezeWalletSortUntil && now < freezeWalletSortUntil && lastSortedAssetOrderRef.current) {
+    const order = lastSortedAssetOrderRef.current;
+    const indexById = new Map<string, number>();
+    order.forEach((id, i) => indexById.set(id, i));
+    const rows = [...balancesToDisplay];
+    rows.sort((a, b) => {
+      const ai = indexById.get(a.asset_id);
+      const bi = indexById.get(b.asset_id);
+      if (ai == null && bi == null) return a.symbol.localeCompare(b.symbol);
+      if (ai == null) return 1;
+      if (bi == null) return -1;
+      return ai - bi;
+    });
+    return rows;
+  }
+
  const rows = [...balancesToDisplay];
  const localVal = (b: BalanceRow): number | null => {
  if (!localValueReady) return null;
@@ -456,8 +476,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  if (av == null && bv != null) return 1;
  return a.symbol.localeCompare(b.symbol);
  });
+  lastSortedAssetOrderRef.current = rows.map((r) => r.asset_id);
  return rows;
- }, [balancesToDisplay, localValueReady, assetLocalRates]);
+ }, [balancesToDisplay, localValueReady, assetLocalRates, freezeWalletSortUntil]);
 
  const balancesSummary = useMemo(() => {
  const activeHolds = holds.filter((h) => String(h.status ?? "").toLowerCase() === "active").length;
@@ -805,40 +826,37 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   }
 
   let cancelled = false;
-  const timer = window.setTimeout(() => {
-    void (async () => {
-      setConvertQuoteLoading(true);
-      try {
-        const qs = new URLSearchParams({
-          from,
-          to,
-          amount_in: convertAmountIn,
-        });
-        const json = await fetchJsonOrThrow<{ ok: boolean; quote: ConvertQuote }>(
-          `/api/exchange/convert/quote?${qs.toString()}`,
-          { cache: "no-store" },
-        );
-        if (!cancelled) {
-          setConvertQuote(json.quote ?? null);
-          setConvertQuoteUpdatedAt(Date.now());
-        }
-      } catch {
-        if (!cancelled) setConvertQuote(null);
-      } finally {
-        if (!cancelled) setConvertQuoteLoading(false);
-      }
-    })();
-  }, 250);
+  const controller = new AbortController();
+  const timer = window.setTimeout(async () => {
+    setConvertQuoteLoading(true);
+    try {
+      const qs = new URLSearchParams({ from, to, amount_in: convertAmountIn });
+      const json = await fetchJsonOrThrow<{ ok: boolean; quote: ConvertQuote }>(
+        `/api/exchange/convert/quote?${qs.toString()}`,
+        { cache: "no-store", signal: controller.signal },
+      );
+      if (cancelled) return;
+      setConvertQuote(json.quote);
+      setConvertQuoteUpdatedAt(Date.now());
+    } catch (e) {
+      if (cancelled) return;
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      // Keep stale quote in place; just mark as not loading.
+    } finally {
+      if (cancelled) return;
+      setConvertQuoteLoading(false);
+    }
+  }, 450);
 
   return () => {
     cancelled = true;
+    controller.abort();
     window.clearTimeout(timer);
   };
  }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, convertQuoteNonce, isConverting]);
 
  // Auto-refresh quote periodically (Binance-style) while inputs stay valid.
  useEffect(() => {
-  if (isConverting) return;
   const from = convertFromSymbol.trim().toUpperCase();
   const to = convertToSymbol.trim().toUpperCase();
   if (!from || !to || from === to) return;
@@ -1679,6 +1697,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
               setConvertLastReceiptQuote(receiptQ);
               setConvertLastReceiptAt(Date.now());
               setConvertJustConverted(true);
+              setFreezeWalletSortUntil(Date.now() + 3_000);
             }
              setConvertAmountIn("");
              setConvertTotpCode("");
