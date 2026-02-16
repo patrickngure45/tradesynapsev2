@@ -13,10 +13,9 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build the Next.js application
-# Note: If your build process relies on environment variables (NEXT_PUBLIC_...), 
-# you should pass them as build args or ensuring .env exists.
-RUN npm run build
+# Build the Next.js application + compile the custom server for production.
+# This avoids running `tsx` in production (lower memory footprint on small containers).
+RUN npm run build && npm run build:server
 
 # Expose the listening port
 EXPOSE 3000

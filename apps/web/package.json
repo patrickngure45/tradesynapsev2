@@ -9,6 +9,7 @@
     "dev:all": "tsx scripts/dev-all.ts",
     "dev:signed": "tsx scripts/dev-signed.ts",
     "build": "next build",
+    "build:server": "tsc -p tsconfig.server.build.json",
     "start": "npm run db:migrate && npm run start:prod",
     "lint": "eslint",
     "test": "vitest run",
@@ -82,7 +83,7 @@
     "test:exchange-fees": "tsx scripts/test-exchange-fees.ts",
     "reconcile": "tsx scripts/reconciliation.ts",
     "reconcile:json": "tsx scripts/reconciliation.ts --json",
-    "start:prod": "cross-env NODE_ENV=production tsx server.ts"
+    "start:prod": "cross-env NODE_ENV=production node .server/server.js"
   },
   "dependencies": {
     "@types/yazl": "^3.3.0",

@@ -28,13 +28,24 @@ export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const NLink = ({ href, label, onClick }: { href: string; label: string; onClick?: () => void }) => {
+  const NLink = ({
+    href,
+    label,
+    onClick,
+    className,
+  }: {
+    href: string;
+    label: string;
+    onClick?: () => void;
+    className?: string;
+  }) => {
     const active = pathname === href || (href !== "/" && pathname?.startsWith(href + "/"));
     return (
       <Link
         href={href}
         onClick={onClick}
         className={
+          (className ? className + " " : "") +
           "text-sm font-medium transition-colors hover:text-[var(--foreground)] " +
           (active ? "text-[var(--foreground)]" : "text-[var(--muted)]")
         }
@@ -46,8 +57,8 @@ export function SiteChrome({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col font-sans text-[var(--foreground)]">
-      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-6 px-6">
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md overflow-x-clip">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:gap-x-6 lg:px-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-white shadow-sm">
@@ -55,22 +66,40 @@ export function SiteChrome({ children }: { children: ReactNode }) {
                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
               </svg>
             </div>
-            <span className="hidden text-lg font-bold tracking-tight md:block">TradeSynapse</span>
+            <span className="hidden text-lg font-bold tracking-tight lg:block">TradeSynapse</span>
           </Link>
 
           {/* Desktop Product Nav */}
-          <nav className="hidden items-center gap-6 md:flex">
+          <nav className="hidden items-center gap-3 lg:gap-6 md:flex">
             {products.map((p) => (
-              <NLink key={p.href} {...p} />
+              <NLink
+                key={p.href}
+                {...p}
+                className={
+                  p.href === "/copy-trading"
+                    ? "hidden xl:inline"
+                    : p.href === "/arbitrage" || p.href === "/express"
+                      ? "hidden lg:inline"
+                      : ""
+                }
+              />
             ))}
           </nav>
 
-          <div className="flex-1" />
-
           {/* Desktop User Nav */}
-          <nav className="hidden items-center gap-5 md:flex">
+          <nav className="hidden ml-auto items-center gap-3 lg:gap-5 md:flex">
             {tools.map((t) => (
-              <NLink key={t.href} {...t} />
+              <NLink
+                key={t.href}
+                {...t}
+                className={
+                  t.href === "/ai"
+                    ? "hidden xl:inline"
+                    : t.href === "/connections"
+                      ? "hidden lg:inline"
+                      : ""
+                }
+              />
             ))}
             <div className="h-4 w-px bg-[var(--border)]" />
             <NotificationBell />
@@ -84,7 +113,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </nav>
 
           {/* Mobile Toggle */}
-          <div className="flex flex-1 justify-end items-center gap-4 md:hidden">
+          <div className="ml-auto flex items-center gap-4 md:hidden">
             <NotificationBell />
             <ThemeToggle />
             <button

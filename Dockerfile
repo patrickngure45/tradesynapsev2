@@ -15,8 +15,8 @@ WORKDIR /app/apps/web
 # Install dependencies
 RUN npm install
 
-# Build the application
-RUN npm run build
+# Build the application + compile the custom server for production.
+RUN npm run build && npm run build:server
 
 # Make the entrypoint script executable
 RUN chmod +x scripts/entrypoint.sh
