@@ -1,5 +1,6 @@
 export const SUPPORTED_P2P_COUNTRIES = {
   Africa: [
+    "Kenya",
     "Tanzania",
     "Uganda",
     "Rwanda",
@@ -61,6 +62,21 @@ function normalizeCountry(value: string): string {
 }
 
 const COUNTRY_ALIASES: Record<string, string> = {
+  // Common ISO-ish country codes (we store either codes or names depending on provider)
+  ke: "kenya",
+  tz: "tanzania",
+  ug: "uganda",
+  rw: "rwanda",
+  bi: "burundi",
+  cd: "democraticrepublicofthecongo",
+  za: "southafrica",
+  ng: "nigeria",
+  gh: "ghana",
+  et: "ethiopia",
+  so: "somalia",
+  sd: "sudan",
+  eg: "egypt",
+
   uk: "unitedkingdom",
   uae: "unitedarabemirates",
   usa: "unitedstates",

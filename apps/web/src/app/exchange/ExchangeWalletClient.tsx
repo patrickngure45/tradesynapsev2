@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 import { ApiErrorBanner, type ClientApiError } from"@/components/ApiErrorBanner";
 import { Toast, type ToastKind } from"@/components/Toast";
 import { persistActingUserIdPreference, readActingUserIdPreference } from"@/lib/state/actingUser";
+import { formatTokenAmount, isNonZeroDecimalString } from "@/lib/format/amount";
 
 type Asset = {
  id: string;
@@ -77,6 +78,21 @@ type GasQuote = {
  details?: Record<string, unknown>;
 };
 
+type ConvertQuote = {
+  fromSymbol: string;
+  toSymbol: string;
+  amountIn: string;
+  feeIn: string;
+  netIn: string;
+  rateToPerFrom: string;
+  amountOut: string;
+  priceSource: {
+    kind: "external_index_usdt" | "internal_fx" | "anchor";
+    fromUsdt: number;
+    toUsdt: number;
+  };
+};
+
 type AdminWithdrawalRow = {
   id: string;
   user_id: string;
@@ -107,10 +123,7 @@ function isUuid(value: string): boolean {
 }
 
 function fmtAmount(value: string, decimals: number): string {
- const n = Number(value);
- if (!Number.isFinite(n)) return value;
- const places = Math.min(Math.max(decimals, 0), 8);
- return n.toLocaleString(undefined, { maximumFractionDigits: places });
+ return formatTokenAmount(value, decimals);
 }
 
 function toNumberSafe(value: unknown): number {
@@ -144,6 +157,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [error, setError] = useState<ClientApiError | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+
+  const depositSectionRef = useRef<HTMLDivElement | null>(null);
+  const sendSectionRef = useRef<HTMLDivElement | null>(null);
+  const withdrawSectionRef = useRef<HTMLDivElement | null>(null);
+  const convertSectionRef = useRef<HTMLDivElement | null>(null);
 
  const [balances, setBalances] = useState<BalanceRow[]>([]);
  const [holds, setHolds] = useState<Hold[]>([]);
@@ -191,6 +209,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [depositAddressLoading, setDepositAddressLoading] = useState(false);
  const [depositAddressCopied, setDepositAddressCopied] = useState(false);
 
+ const [convertFromSymbol, setConvertFromSymbol] = useState<string>("");
+ const [convertToSymbol, setConvertToSymbol] = useState<string>("USDT");
+ const [convertAmountIn, setConvertAmountIn] = useState<string>("");
+ const [convertTotpCode, setConvertTotpCode] = useState<string>("");
+ const [convertQuote, setConvertQuote] = useState<ConvertQuote | null>(null);
+ const [convertQuoteLoading, setConvertQuoteLoading] = useState(false);
+ const [convertQuoteUpdatedAt, setConvertQuoteUpdatedAt] = useState<number | null>(null);
+
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
  const [adminRequested, setAdminRequested] = useState<AdminWithdrawalRow[]>([]);
@@ -223,6 +249,12 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  const withdrawableAssets = useMemo(() => assets, [assets]);
 
+ const assetById = useMemo(() => {
+  const out = new Map<string, Asset>();
+  for (const a of assets) out.set(a.id, a);
+  return out;
+ }, [assets]);
+
  const availableByAssetId = useMemo(() => {
  const out = new Map<string, number>();
  for (const b of balances) {
@@ -240,6 +272,10 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  [assets, availableByAssetId]
  );
 
+ const transferableAssetIds = useMemo(() => {
+  return new Set(transferableAssets.map((a) => a.id));
+ }, [transferableAssets]);
+
  const selectedWithdrawAsset = useMemo(
  () => withdrawableAssets.find((asset) => asset.id === withdrawAssetId) ?? null,
  [withdrawableAssets, withdrawAssetId]
@@ -250,6 +286,25 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  [transferableAssets, transferAssetId]
  );
 
+ const selectedConvertFromAsset = useMemo(() => {
+  const sym = convertFromSymbol.trim().toUpperCase();
+  if (!sym) return null;
+  return assets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
+ }, [assets, convertFromSymbol]);
+
+ const selectedConvertToAsset = useMemo(() => {
+  const sym = convertToSymbol.trim().toUpperCase();
+  if (!sym) return null;
+  return assets.find((a) => a.symbol.toUpperCase() === sym) ?? null;
+ }, [assets, convertToSymbol]);
+
+ const selectedConvertAvailable = useMemo(() => {
+  if (!selectedConvertFromAsset) return 0;
+  const row = balances.find((b) => b.asset_id === selectedConvertFromAsset.id);
+  const available = Number(row?.available ?? NaN);
+  return Number.isFinite(available) ? available : 0;
+ }, [balances, selectedConvertFromAsset]);
+
  const selectedTransferAvailable = useMemo(() => {
  if (!selectedTransferAsset) return 0;
  const row = balances.find((b) => b.asset_id === selectedTransferAsset.id);
@@ -257,24 +312,56 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return Number.isFinite(available) ? available : 0;
  }, [balances, selectedTransferAsset]);
 
+ const selectedWithdrawAvailable = useMemo(() => {
+  if (!selectedWithdrawAsset) return 0;
+  const row = balances.find((b) => b.asset_id === selectedWithdrawAsset.id);
+  const available = Number(row?.available ?? NaN);
+  return Number.isFinite(available) ? available : 0;
+ }, [balances, selectedWithdrawAsset]);
+
  const transferAmountNumber = Number(transferAmount);
  const isTransferAmountValid = Number.isFinite(transferAmountNumber) && transferAmountNumber > 0;
  const isTransferAmountTooHigh = isTransferAmountValid && transferAmountNumber > selectedTransferAvailable;
  const isRecipientEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(transferRecipientEmail.trim());
 
- const visibleBalances = useMemo(
+ const withdrawAmountNumber = Number(withdrawAmount);
+ const isWithdrawAmountValid = Number.isFinite(withdrawAmountNumber) && withdrawAmountNumber > 0;
+ const isWithdrawAmountTooHigh = isWithdrawAmountValid && withdrawAmountNumber > selectedWithdrawAvailable;
+ const isWithdrawDestinationValid = /^0x[a-fA-F0-9]{40}$/.test(withdrawDestination.trim());
+
+ const convertAmountNumber = Number(convertAmountIn);
+ const isConvertAmountValid = Number.isFinite(convertAmountNumber) && convertAmountNumber > 0;
+ const isConvertAmountTooHigh = isConvertAmountValid && convertAmountNumber > selectedConvertAvailable;
+
+ const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>) => {
+  ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+ };
+
+ const nonZeroBalances = useMemo(
  () =>
  balances.filter((b) => {
- const posted = Number(b.posted);
- const held = Number(b.held);
- const available = Number(b.available);
- return posted > 0 || held > 0 || available > 0;
+ return isNonZeroDecimalString(b.posted) || isNonZeroDecimalString(b.held) || isNonZeroDecimalString(b.available);
  }),
  [balances]
  );
 
- const sortedVisibleBalances = useMemo(() => {
- const rows = [...visibleBalances];
+ const sellUsdtP2pAmountParam = useMemo(() => {
+  if (!localValueReady) return "";
+  const row = balances.find((b) => b.symbol.toUpperCase() === "USDT");
+  const available = Number(row?.available ?? NaN);
+  const rate = assetLocalRates["USDT"];
+  if (!Number.isFinite(available) || available <= 0) return "";
+  if (!Number.isFinite(rate) || rate <= 0) return "";
+  const fiatAmount = Math.floor(available * rate);
+  return fiatAmount >= 1 ? String(fiatAmount) : "";
+ }, [balances, assetLocalRates, localValueReady]);
+
+ const balancesToDisplay = useMemo(() => {
+  return nonZeroBalances.length > 0 ? nonZeroBalances : balances;
+ }, [nonZeroBalances, balances]);
+
+ const sortedBalances = useMemo(() => {
+ const rows = [...balancesToDisplay];
  const localVal = (b: BalanceRow): number | null => {
  if (!localValueReady) return null;
  const available = Number(b.available);
@@ -284,6 +371,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  };
 
  rows.sort((a, b) => {
+ const aNonZero = isNonZeroDecimalString(a.posted) || isNonZeroDecimalString(a.held) || isNonZeroDecimalString(a.available);
+ const bNonZero = isNonZeroDecimalString(b.posted) || isNonZeroDecimalString(b.held) || isNonZeroDecimalString(b.available);
+ if (aNonZero !== bNonZero) return aNonZero ? -1 : 1;
  const av = localVal(a);
  const bv = localVal(b);
  if (av != null && bv != null && av !== bv) return bv - av;
@@ -292,24 +382,24 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return a.symbol.localeCompare(b.symbol);
  });
  return rows;
- }, [visibleBalances, localValueReady, assetLocalRates]);
+ }, [balancesToDisplay, localValueReady, assetLocalRates]);
 
  const balancesSummary = useMemo(() => {
  const activeHolds = holds.filter((h) => String(h.status ?? "").toLowerCase() === "active").length;
  if (!localValueReady) {
- return { assetCount: visibleBalances.length, activeHolds, totalLocal: null as number | null };
+  return { assetCount: balancesToDisplay.length, activeHolds, totalLocal: null as number | null };
  }
  let total = 0;
  let hasAny = false;
- for (const b of visibleBalances) {
+  for (const b of balancesToDisplay) {
  const available = Number(b.available);
  const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
  if (!(Number.isFinite(available) && rate != null && Number.isFinite(rate) && rate > 0)) continue;
  total += available * rate;
  hasAny = true;
  }
- return { assetCount: visibleBalances.length, activeHolds, totalLocal: hasAny ? total : null };
- }, [holds, visibleBalances, localValueReady, assetLocalRates]);
+  return { assetCount: balancesToDisplay.length, activeHolds, totalLocal: hasAny ? total : null };
+  }, [holds, balancesToDisplay, localValueReady, assetLocalRates]);
 
  async function loadAssetLocalRates(fiat: string) {
  const fetchWithTimeout = async <T,>(url: string, timeoutMs = 4000): Promise<T> => {
@@ -622,6 +712,55 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [authMode, canUseHeader, requestHeaders, selectedWithdrawAsset?.chain, selectedWithdrawAsset?.symbol]);
 
  useEffect(() => {
+  const from = convertFromSymbol.trim().toUpperCase();
+  const to = convertToSymbol.trim().toUpperCase();
+  if (!from || !to || from === to) {
+    setConvertQuote(null);
+    setConvertQuoteLoading(false);
+    setConvertQuoteUpdatedAt(null);
+    return;
+  }
+
+  if (!convertAmountIn || !isConvertAmountValid || isConvertAmountTooHigh) {
+    setConvertQuote(null);
+    setConvertQuoteLoading(false);
+    setConvertQuoteUpdatedAt(null);
+    return;
+  }
+
+  let cancelled = false;
+  const timer = window.setTimeout(() => {
+    void (async () => {
+      setConvertQuoteLoading(true);
+      try {
+        const qs = new URLSearchParams({
+          from,
+          to,
+          amount_in: convertAmountIn,
+        });
+        const json = await fetchJsonOrThrow<{ ok: boolean; quote: ConvertQuote }>(
+          `/api/exchange/convert/quote?${qs.toString()}`,
+          { cache: "no-store" },
+        );
+        if (!cancelled) {
+          setConvertQuote(json.quote ?? null);
+          setConvertQuoteUpdatedAt(Date.now());
+        }
+      } catch {
+        if (!cancelled) setConvertQuote(null);
+      } finally {
+        if (!cancelled) setConvertQuoteLoading(false);
+      }
+    })();
+  }, 250);
+
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timer);
+  };
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, selectedConvertAvailable]);
+
+ useEffect(() => {
  if (authMode ==="header"&& !canUseHeader) {
  setTransferGasQuote(null);
   setTransferGasQuoteLoading(false);
@@ -755,7 +894,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <ApiErrorBanner error={error} className="p-3"onRetry={() => void refreshAll()} />
 
  {/* ── Deposit Address ─────────────────────────────── */}
- <div className="mt-2 rounded border border-[var(--border)] bg-[var(--card)]/50 p-4 hidden">
+ <div ref={depositSectionRef} className="mt-2 rounded border border-[var(--border)] bg-[var(--card)]/50 p-4">
  <h3 className="text-sm font-medium">Deposit (BSC)</h3>
  <p className="mt-1 text-[11px] text-[var(--muted)]">
  Send supported BEP-20 tokens or native BNB to your unique deposit address. The deposit watcher credits your ledger automatically.
@@ -816,136 +955,169 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <div className="mt-2 min-w-0">
  <h3 className="text-sm font-medium">Balances</h3>
 
+ {nonZeroBalances.length === 0 ? (
+   <div className="mt-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/50 px-4 py-4 text-xs">
+     <div className="font-medium text-[var(--foreground)]">No funds yet</div>
+     <div className="mt-1 text-[var(--muted)]">
+       Your wallet supports {balances.length} assets. Generate a deposit address above and send tokens to get started.
+     </div>
+   </div>
+ ) : null}
+
  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
  <span className="rounded border border-[var(--border)] px-2 py-1">Assets: {balancesSummary.assetCount}</span>
  <span className="rounded border border-[var(--border)] px-2 py-1">Active holds: {balancesSummary.activeHolds}</span>
  <span className="rounded border border-[var(--border)] px-2 py-1">
- Total (available): {!localValueReady ? "Updating…" : balancesSummary.totalLocal == null ? `— ${localFiat}` : fmtFiat(balancesSummary.totalLocal, localFiat)}
+ Est. total (available): {!localValueReady ? "Updating…" : balancesSummary.totalLocal == null ? `— ${localFiat}` : fmtFiat(balancesSummary.totalLocal, localFiat)}
  </span>
  </div>
 
  {/* Mobile layout (no horizontal scrolling) */}
- <div className="mt-2 grid gap-2 md:hidden">
-   {sortedVisibleBalances.length === 0 ? (
+ {/* Wallet-style card grid (all breakpoints) */}
+ <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+   {sortedBalances.length === 0 ? (
      <div className="rounded border border-[var(--border)] px-3 py-3 text-xs text-[var(--muted)]">
-       No non-zero balances yet.
+       No balances available.
      </div>
    ) : (
-     sortedVisibleBalances.map((b) => {
-       const available = Number(b.available);
-       const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+     sortedBalances.map((b) => {
+       const meta = assetById.get(b.asset_id) ?? null;
+       const symbol = String(b.symbol ?? "").toUpperCase();
+       const displayName = String(meta?.name ?? "").trim() || symbol;
+       const chain = String(b.chain ?? meta?.chain ?? "").toUpperCase();
+
+       const availableNum = Number(b.available);
+       const rate = assetLocalRates[symbol] ?? null;
        const rowLocalEquivalent =
-         Number.isFinite(available) && rate != null ? available * rate : null;
+         Number.isFinite(availableNum) && rate != null ? availableNum * rate : null;
+
+       const canSend = transferableAssetIds.has(b.asset_id);
+       const canWithdraw = Number.isFinite(availableNum) && availableNum > 0;
+      const canSellP2p = canWithdraw && (symbol === "USDT" || symbol === "BNB");
+      const canConvertToUsdt = canWithdraw && symbol !== "USDT";
+
+      const sellP2pAmountParam = (() => {
+        if (!localValueReady) return "";
+        if (rowLocalEquivalent == null || !Number.isFinite(rowLocalEquivalent) || rowLocalEquivalent <= 0) return "";
+        const fiatAmount = Math.floor(rowLocalEquivalent);
+        return fiatAmount >= 1 ? String(fiatAmount) : "";
+      })();
 
        return (
-         <div key={b.asset_id} className="rounded border border-[var(--border)] bg-[var(--card)]/50 p-3">
-           <div className="flex min-w-0 items-start justify-between gap-3">
+        <div key={b.asset_id} className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--card)]/50 p-4">
+           <div className="flex min-w-0 items-start justify-between gap-4">
              <div className="min-w-0">
-               <div className="font-medium">{b.symbol.toUpperCase()}</div>
-               <div className="mt-0.5 break-words text-[11px] text-[var(--muted)]">
-                 Local: { !localValueReady ? "Updating…" : rowLocalEquivalent == null ? `— ${localFiat}` : fmtFiat(rowLocalEquivalent, localFiat) }
+               <div className="flex min-w-0 flex-wrap items-center gap-2">
+                 <div className="min-w-0 truncate text-sm font-semibold text-[var(--foreground)]">{displayName}</div>
+                 <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                   {symbol}
+                 </span>
+                 {chain ? (
+                   <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                     {chain}
+                   </span>
+                 ) : null}
                </div>
-               {localValueReady && assetLocalRateSource[b.symbol.toUpperCase()] ? (
-                 <div className="mt-0.5 break-words text-[10px] text-[var(--muted)]">
-                   {assetLocalRateSource[b.symbol.toUpperCase()]}
+               {localValueReady && assetLocalRateSource[symbol] ? (
+                 <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
+                   {assetLocalRateSource[symbol]}
                  </div>
                ) : null}
              </div>
+
              <div className="shrink-0 text-right">
                <div className="text-[10px] text-[var(--muted)]">Available</div>
-               <div className="break-all font-mono text-xs font-bold text-[var(--foreground)]">
-                 {fmtAmount(b.available, b.decimals)}
+               <div className="mt-0.5 break-all font-mono text-sm font-bold text-[var(--foreground)]">
+                 {fmtAmount(b.available, b.decimals)} {symbol}
+               </div>
+               <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+                 ≈ {!localValueReady
+                   ? "Updating…"
+                   : rowLocalEquivalent == null
+                     ? `— ${localFiat}`
+                     : fmtFiat(rowLocalEquivalent, localFiat)}
                </div>
              </div>
            </div>
 
-           <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+           <div className="mt-3 flex flex-wrap gap-2">
+             <button
+               type="button"
+               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
+               onClick={() => scrollToSection(depositSectionRef)}
+             >
+               Deposit
+             </button>
+
+             {canSellP2p ? (
+               <Link
+                 className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
+                 href={`/p2p?side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}${sellP2pAmountParam ? `&amount=${encodeURIComponent(sellP2pAmountParam)}` : ""}`}
+               >
+                 Sell (P2P)
+               </Link>
+             ) : null}
+
+             {canConvertToUsdt ? (
+               <button
+                 type="button"
+                 className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
+                 onClick={() => {
+                   setConvertFromSymbol(symbol);
+                   setConvertToSymbol("USDT");
+                   setConvertAmountIn(String(b.available));
+                   scrollToSection(convertSectionRef);
+                 }}
+               >
+                 Convert to USDT
+               </button>
+             ) : null}
+
+             <button
+               type="button"
+               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-50"
+               disabled={!canSend}
+               onClick={() => {
+                 if (!canSend) return;
+                 setTransferAssetId(b.asset_id);
+                 scrollToSection(sendSectionRef);
+               }}
+             >
+               Send
+             </button>
+             <button
+               type="button"
+               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-50"
+               disabled={!canWithdraw}
+               onClick={() => {
+                 if (!canWithdraw) return;
+                 setWithdrawAssetId(b.asset_id);
+                 scrollToSection(withdrawSectionRef);
+               }}
+             >
+               Withdraw
+             </button>
+           </div>
+
+           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
              <div className="min-w-0">
-               <div className="text-[10px] text-[var(--muted)]">Posted</div>
+               <div className="text-[10px] text-[var(--muted)]">Total</div>
                <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.posted, b.decimals)}</div>
              </div>
              <div className="min-w-0 text-right">
-               <div className="text-[10px] text-[var(--muted)]">Held</div>
+               <div className="text-[10px] text-[var(--muted)]">Locked</div>
                <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.held, b.decimals)}</div>
              </div>
-           </div>
-
-           <div className="mt-2 flex flex-wrap justify-end gap-2">
-             <span className="text-[var(--muted)]">—</span>
            </div>
          </div>
        );
      })
    )}
  </div>
-
- {/* Desktop/tablet layout */}
- <div className="mt-2 hidden rounded border border-[var(--border)] md:block">
-   <table className="w-full table-fixed text-left text-xs">
-     <thead className="bg-[var(--card)] text-[var(--muted)]">
-       <tr>
-         <th className="px-3 py-2">Token</th>
-         <th className="hidden px-3 py-2 lg:table-cell">Posted</th>
-         <th className="hidden px-3 py-2 lg:table-cell">Held</th>
-         <th className="px-3 py-2">Available</th>
-         <th className="px-3 py-2">Local Value</th>
-         <th className="px-3 py-2 text-right">Actions</th>
-       </tr>
-     </thead>
-     <tbody>
-       {sortedVisibleBalances.length === 0 ? (
-         <tr>
-           <td className="px-3 py-3 text-[var(--muted)]" colSpan={6}>
-             No non-zero balances yet.
-           </td>
-         </tr>
-       ) : (
-         sortedVisibleBalances.map((b) => {
-           const available = Number(b.available);
-           const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
-           const rowLocalEquivalent =
-             Number.isFinite(available) && rate != null ? available * rate : null;
-
-           return (
-             <tr key={b.asset_id} className="border-t border-[var(--border)]">
-               <td className="px-3 py-2">
-                 <div className="font-medium">{b.symbol.toUpperCase()}</div>
-               </td>
-               <td className="hidden px-3 py-2 font-mono text-[var(--muted)] lg:table-cell">
-                 <span className="block break-all">{fmtAmount(b.posted, b.decimals)}</span>
-               </td>
-               <td className="hidden px-3 py-2 font-mono text-[var(--muted)] lg:table-cell">
-                 <span className="block break-all">{fmtAmount(b.held, b.decimals)}</span>
-               </td>
-               <td className="px-3 py-2 font-mono font-bold text-[var(--foreground)]">
-                 <span className="block break-all">{fmtAmount(b.available, b.decimals)}</span>
-               </td>
-               <td className="px-3 py-2 font-mono">
-                 {!localValueReady
-                   ? "Updating…"
-                   : rowLocalEquivalent == null
-                     ? `— ${localFiat}`
-                     : fmtFiat(rowLocalEquivalent, localFiat)}
-                 {localValueReady && assetLocalRateSource[b.symbol.toUpperCase()] ? (
-                   <div className="break-words text-[10px] text-[var(--muted)]">
-                     {assetLocalRateSource[b.symbol.toUpperCase()]}
-                   </div>
-                 ) : null}
-               </td>
-               <td className="px-3 py-2 text-right">
-                 <span className="text-[var(--muted)]">—</span>
-               </td>
-             </tr>
-           );
-         })
-       )}
-     </tbody>
-   </table>
- </div>
  </div>
 
  <div className="mt-2 grid min-w-0 gap-3 md:grid-cols-2">
- <div className="min-w-0 rounded-xl border border-[var(--border)] p-4">
+ <div ref={sendSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
  <h3 className="text-sm font-medium">Send funds to another user</h3>
  <p className="mt-1 text-xs text-[var(--muted)]">
  Instant internal transfer by recipient email. Network fee is estimated in BNB and may be charged in the asset you send.
@@ -1161,6 +1333,413 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  {loadingAction === "transfer:request" ? "Sending…" : "Send transfer"}
  </button>
  </div>
+ </div>
+
+ <div ref={convertSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
+   <h3 className="text-sm font-medium">Convert (internal)</h3>
+   <p className="mt-1 text-xs text-[var(--muted)]">
+     Convert one asset to another instantly using a quoted rate. Best for turning non-P2P assets into USDT for offloading.
+   </p>
+
+   <div className="mt-3 grid gap-2">
+     <div className="grid gap-2 sm:grid-cols-2">
+       <label className="grid gap-1">
+         <span className="text-[11px] text-[var(--muted)]">From</span>
+         <select
+           className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+           value={convertFromSymbol}
+           onChange={(e) => setConvertFromSymbol(e.target.value)}
+         >
+           <option value="">(select)</option>
+           {assets
+             .slice()
+             .sort((a, b) => a.symbol.localeCompare(b.symbol))
+             .map((a) => {
+               const row = balances.find((b) => b.asset_id === a.id);
+               const avail = Number(row?.available ?? NaN);
+               const has = Number.isFinite(avail) && avail > 0;
+               return (
+                 <option key={a.id} value={a.symbol.toUpperCase()} disabled={!has}>
+                   {a.symbol.toUpperCase()} ({a.chain}){has ? "" : " — 0"}
+                 </option>
+               );
+             })}
+         </select>
+         {selectedConvertFromAsset ? (
+           <span className="break-words text-[11px] text-[var(--muted)]">
+             Available:{" "}
+             <span className="break-all font-mono text-[var(--foreground)]">
+               {fmtAmount(String(selectedConvertAvailable), selectedConvertFromAsset.decimals)} {selectedConvertFromAsset.symbol.toUpperCase()}
+             </span>
+           </span>
+         ) : null}
+       </label>
+
+       <label className="grid gap-1">
+         <span className="text-[11px] text-[var(--muted)]">To</span>
+         <select
+           className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+           value={convertToSymbol}
+           onChange={(e) => setConvertToSymbol(e.target.value)}
+         >
+           <option value="USDT">USDT (BSC)</option>
+         </select>
+       </label>
+     </div>
+
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">Amount</span>
+       <div className="flex items-center gap-2">
+         <input
+           className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+           value={convertAmountIn}
+           onChange={(e) => setConvertAmountIn(e.target.value)}
+           placeholder="e.g. 10"
+           inputMode="decimal"
+         />
+         <button
+           type="button"
+           className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+           disabled={!selectedConvertFromAsset || selectedConvertAvailable <= 0}
+           onClick={() => setConvertAmountIn(String(selectedConvertAvailable))}
+         >
+           Max
+         </button>
+       </div>
+       {isConvertAmountTooHigh ? (
+         <span className="text-[11px] text-[var(--down)]">Amount exceeds available balance.</span>
+       ) : null}
+     </label>
+
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
+       <input
+         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+         value={convertTotpCode}
+         onChange={(e) => setConvertTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+         placeholder="6-digit code"
+         inputMode="numeric"
+         maxLength={6}
+         autoComplete="one-time-code"
+       />
+     </label>
+
+     <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+       {convertQuoteLoading ? (
+         <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating quote…</div>
+       ) : null}
+       {convertQuote ? (
+         <>
+           <div className="break-words">
+             Rate:{" "}
+             <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(convertQuote.rateToPerFrom, 8)}</span>
+             <span className="ml-1">{convertQuote.toSymbol} per {convertQuote.fromSymbol}</span>
+             {typeof convertQuoteUpdatedAt === "number" ? (
+               <span className="ml-1">• updated {new Date(convertQuoteUpdatedAt).toLocaleTimeString()}</span>
+             ) : null}
+           </div>
+           <div className="mt-1 break-words">
+             You receive:{" "}
+             <span className="break-all font-mono text-[var(--foreground)]">
+               {fmtAmount(convertQuote.amountOut, selectedConvertToAsset?.decimals ?? 6)} {convertQuote.toSymbol}
+             </span>
+             <span className="ml-1">(fee {fmtAmount(convertQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {convertQuote.fromSymbol})</span>
+           </div>
+         </>
+       ) : (
+         <>Quote: <span className="font-mono">—</span></>
+       )}
+     </div>
+
+     <div className="flex flex-wrap gap-2">
+       <button
+         type="button"
+         className="w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+         disabled={
+           loadingAction === "convert:execute" ||
+           !selectedConvertFromAsset ||
+           !selectedConvertToAsset ||
+           !convertAmountIn ||
+           !isConvertAmountValid ||
+           isConvertAmountTooHigh ||
+           (authMode === "header" && !canUseHeader)
+         }
+         onClick={async () => {
+           setLoadingAction("convert:execute");
+           setError(null);
+           try {
+             const fromAsset = selectedConvertFromAsset;
+             const toAsset = selectedConvertToAsset;
+             if (!fromAsset || !toAsset) {
+               throw new Error("convert_missing_asset");
+             }
+
+             const res = await fetchJsonOrThrow<{
+               ok: true;
+               convert?: { quote?: ConvertQuote };
+             }>("/api/exchange/convert/execute", {
+               method: "POST",
+               headers: {
+                 "content-type": "application/json",
+                 ...(requestHeaders ?? {}),
+               },
+               body: JSON.stringify({
+                 from: fromAsset.symbol.toUpperCase(),
+                 to: toAsset.symbol.toUpperCase(),
+                 amount_in: convertAmountIn,
+                 ...(convertTotpCode.length === 6 ? { totp_code: convertTotpCode } : {}),
+               }),
+             });
+
+             const q = res.convert?.quote;
+             setToastKind("success");
+             setToastMessage(
+               q
+                 ? `Converted ${q.amountIn} ${q.fromSymbol} → ${q.amountOut} ${q.toSymbol}.`
+                 : "Conversion completed.",
+             );
+             setConvertAmountIn("");
+             setConvertTotpCode("");
+             await refreshAll();
+           } catch (e) {
+             if (e instanceof ApiError) {
+               setError({ code: e.code, details: e.details });
+             } else {
+               setError({ code: e instanceof Error ? e.message : String(e) });
+             }
+           } finally {
+             setLoadingAction(null);
+           }
+         }}
+       >
+         {loadingAction === "convert:execute" ? "Converting…" : "Convert"}
+       </button>
+
+       <Link
+         className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
+         href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
+       >
+         Sell USDT (P2P)
+       </Link>
+     </div>
+   </div>
+ </div>
+
+ <div ref={withdrawSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
+   <h3 className="text-sm font-medium">Withdraw to external address</h3>
+   <p className="mt-1 text-xs text-[var(--muted)]">
+     Withdrawals require an allowlisted destination address (BSC). Network fee is estimated in BNB and may be charged in the asset you withdraw.
+   </p>
+
+   <div className="mt-3 grid gap-2">
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">Asset</span>
+       <select
+         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+         value={withdrawAssetId}
+         onChange={(e) => setWithdrawAssetId(e.target.value)}
+       >
+         <option value="">(select)</option>
+         {withdrawableAssets.map((a) => (
+           <option key={a.id} value={a.id}>
+             {a.symbol} ({a.chain})
+           </option>
+         ))}
+       </select>
+       {selectedWithdrawAsset ? (
+         <span className="break-words text-[11px] text-[var(--muted)]">
+           Available:{" "}
+           <span className="break-all font-mono text-[var(--foreground)]">
+             {fmtAmount(String(selectedWithdrawAvailable), selectedWithdrawAsset.decimals)} {selectedWithdrawAsset.symbol.toUpperCase()}
+           </span>
+         </span>
+       ) : null}
+     </label>
+
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">Amount</span>
+       <div className="flex items-center gap-2">
+         <input
+           className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+           value={withdrawAmount}
+           onChange={(e) => setWithdrawAmount(e.target.value)}
+           placeholder="e.g. 25"
+           inputMode="decimal"
+         />
+         <button
+           type="button"
+           className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+           disabled={!selectedWithdrawAsset || selectedWithdrawAvailable <= 0}
+           onClick={() => setWithdrawAmount(String(selectedWithdrawAvailable))}
+         >
+           Max
+         </button>
+       </div>
+       {isWithdrawAmountTooHigh ? (
+         <span className="text-[11px] text-[var(--down)]">Amount exceeds available balance.</span>
+       ) : null}
+     </label>
+
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">Destination address (BSC)</span>
+       <input
+         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+         value={withdrawDestination}
+         onChange={(e) => setWithdrawDestination(e.target.value)}
+         placeholder="0x…"
+         autoCapitalize="none"
+         autoCorrect="off"
+         spellCheck={false}
+       />
+       {withdrawDestination && !isWithdrawDestinationValid ? (
+         <span className="text-[11px] text-[var(--down)]">Enter a valid 0x address.</span>
+       ) : null}
+
+       {allowlist.filter((a) => String(a.status ?? "").toLowerCase() === "active").length > 0 ? (
+         <div className="mt-1 text-[11px] text-[var(--muted)]">
+           Allowlisted:{" "}
+           {allowlist
+             .filter((a) => String(a.status ?? "").toLowerCase() === "active")
+             .slice(0, 3)
+             .map((a) => a.address)
+             .join(" • ")}
+           {allowlist.filter((a) => String(a.status ?? "").toLowerCase() === "active").length > 3 ? " …" : ""}
+         </div>
+       ) : isProd ? (
+         <div className="mt-1 text-[11px] text-[var(--muted)]">No allowlisted addresses found. Ask support/admin to add one.</div>
+       ) : (
+         <div className="mt-1 text-[11px] text-[var(--muted)]">No allowlisted addresses found (dev). Add one via the withdrawals allowlist API.</div>
+       )}
+     </label>
+
+     <label className="grid gap-1">
+       <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
+       <input
+         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+         value={withdrawTotpCode}
+         onChange={(e) => setWithdrawTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+         placeholder="6-digit code"
+         inputMode="numeric"
+         maxLength={6}
+         autoComplete="one-time-code"
+       />
+     </label>
+
+     <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+       {gasQuoteLoading ? (
+         <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
+       ) : null}
+       {gasQuote && !gasQuote.enabled ? (
+         <div className="break-words">
+           {Number(gasQuote.amount) > 0 ? (
+             <>
+               Estimated network fee:{" "}
+               <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
+               <span className="ml-1">(waived)</span>
+             </>
+           ) : (
+             <>
+               Network fee: <span className="font-mono text-[var(--foreground)]">off</span>
+               <span className="ml-1">({gasQuote.gasSymbol})</span>
+             </>
+           )}
+         </div>
+       ) : gasQuote?.enabled && Number(gasQuote.amount) > 0 ? (
+         <>
+           <div className="break-words">
+             Estimated network fee:{" "}
+             <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
+             <span className="ml-1">({gasQuote.mode === "realtime" ? "live" : "fixed"})</span>
+             {typeof gasQuoteUpdatedAt === "number" ? (
+               <span className="ml-1">• updated {new Date(gasQuoteUpdatedAt).toLocaleTimeString()}</span>
+             ) : null}
+           </div>
+           {gasQuote.chargeAmount && gasQuote.chargeSymbol && selectedWithdrawAsset ? (
+             <div className="break-words text-[11px] text-[var(--muted)]">
+               Charged as{" "}
+               <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.chargeAmount, selectedWithdrawAsset.decimals)} {gasQuote.chargeSymbol.toUpperCase()}</span>
+             </div>
+           ) : (
+             <div className="break-words text-[11px] text-[var(--up)]">Covered by the platform (conversion unavailable)</div>
+           )}
+         </>
+       ) : (
+         <>Network fee: <span className="font-mono">—</span></>
+       )}
+     </div>
+
+     <button
+       type="button"
+       className="mt-1 w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+       disabled={
+         loadingAction === "withdraw:request" ||
+         !withdrawAssetId ||
+         !withdrawableAssets.some((asset) => asset.id === withdrawAssetId) ||
+         !withdrawAmount ||
+         !isWithdrawAmountValid ||
+         isWithdrawAmountTooHigh ||
+         !withdrawDestination ||
+         !isWithdrawDestinationValid ||
+         (authMode === "header" && !canUseHeader)
+       }
+       onClick={async () => {
+         setLoadingAction("withdraw:request");
+         setError(null);
+         try {
+           const res = await fetchJsonOrThrow<{
+             withdrawal?: {
+               id: string;
+               symbol?: string;
+               amount?: string;
+               fees?: {
+                 network_fee_display_amount?: string;
+                 network_fee_display_symbol?: string;
+                 fee_charged_in_asset_amount?: string;
+                 fee_charged_in_asset_symbol?: string;
+               };
+             };
+           }>("/api/exchange/withdrawals/request", {
+             method: "POST",
+             headers: {
+               "content-type": "application/json",
+               ...(requestHeaders ?? {}),
+             },
+             body: JSON.stringify({
+               asset_id: withdrawAssetId,
+               amount: withdrawAmount,
+               destination_address: withdrawDestination.trim(),
+               ...(withdrawTotpCode.length === 6 ? { totp_code: withdrawTotpCode } : {}),
+             }),
+           });
+
+           setToastKind("success");
+           const sym = (res.withdrawal?.symbol ?? selectedWithdrawAsset?.symbol ?? "").toUpperCase();
+           const amt = res.withdrawal?.amount ?? withdrawAmount;
+           const feeAmt = res.withdrawal?.fees?.network_fee_display_amount;
+           const feeSym = res.withdrawal?.fees?.network_fee_display_symbol;
+           setToastMessage(
+             feeAmt && feeSym
+               ? `Withdrawal requested: ${amt} ${sym} • network ${feeAmt} ${feeSym}.`
+               : `Withdrawal requested: ${amt} ${sym}.`,
+           );
+           setWithdrawAmount("");
+           setWithdrawDestination("");
+           setWithdrawTotpCode("");
+           await refreshAll();
+         } catch (e) {
+           if (e instanceof ApiError) {
+             setError({ code: e.code, details: e.details });
+           } else {
+             setError({ code: e instanceof Error ? e.message : String(e) });
+           }
+         } finally {
+           setLoadingAction(null);
+         }
+       }}
+     >
+       {loadingAction === "withdraw:request" ? "Requesting…" : "Request withdrawal"}
+     </button>
+   </div>
  </div>
 
  <div className="rounded-xl border border-[var(--border)] p-4 hidden">

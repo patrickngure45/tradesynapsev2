@@ -9,6 +9,7 @@ describe("isSupportedP2PCountry", () => {
   });
 
   it("accepts supported countries with normalization", () => {
+    expect(isSupportedP2PCountry("Kenya")).toBe(true);
     expect(isSupportedP2PCountry("Nigeria")).toBe(true);
     expect(isSupportedP2PCountry("  Nigeria ")).toBe(true);
     expect(isSupportedP2PCountry("South-Africa")).toBe(true);
@@ -16,6 +17,7 @@ describe("isSupportedP2PCountry", () => {
   });
 
   it("accepts common aliases", () => {
+    expect(isSupportedP2PCountry("KE")).toBe(true);
     expect(isSupportedP2PCountry("UK")).toBe(true);
     expect(isSupportedP2PCountry("UAE")).toBe(true);
     expect(isSupportedP2PCountry("USA")).toBe(true);

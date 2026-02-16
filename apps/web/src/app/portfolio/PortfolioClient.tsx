@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { formatDecimalString, isNonZeroDecimalString } from "@/lib/format/amount";
 
 type Balance = {
   assetId: string;
@@ -128,9 +129,7 @@ export function PortfolioClient() {
   const pnlColor = pnlValue > 0 ? "text-[var(--up)]" : pnlValue < 0 ? "text-[var(--down)]" : "text-[var(--muted)]";
 
   const balancesWithActivity = data.balances.filter((b) => {
-    const posted = Number(b.posted);
-    const held = Number(b.held);
-    return (Number.isFinite(posted) && posted !== 0) || (Number.isFinite(held) && held !== 0);
+    return isNonZeroDecimalString(b.posted) || isNonZeroDecimalString(b.held);
   });
 
   const balancesToShow = balancesWithActivity.length > 0 ? balancesWithActivity : data.balances;
@@ -199,15 +198,15 @@ export function PortfolioClient() {
               </thead>
               <tbody>
                 {balancesToShow.map((b) => {
-                  const available = Number(b.available);
-                  const held = Number(b.held);
+                  const availableText = formatDecimalString(b.available, 8);
+                  const heldText = formatDecimalString(b.held, 8);
                   const localEquivalent = null;
 
                   return (
                     <tr key={b.assetId} className="border-b border-[var(--border)]/50">
                       <td className="py-2 font-medium">{b.symbol.toUpperCase()}</td>
-                      <td className="py-2 text-right font-mono">{Number.isFinite(available) ? available.toFixed(8).replace(/0+$/, "").replace(/\.$/, "") : b.available}</td>
-                      <td className="py-2 text-right font-mono text-[var(--muted)]">{Number.isFinite(held) ? held.toFixed(8).replace(/0+$/, "").replace(/\.$/, "") : b.held}</td>
+                      <td className="py-2 text-right font-mono">{availableText}</td>
+                      <td className="py-2 text-right font-mono text-[var(--muted)]">{heldText}</td>
                       <td className="py-2 text-right font-mono text-[var(--muted)]">
                         {localEquivalent == null ? `— ${localFiat}` : fmtFiat(localEquivalent, localFiat)}
                       </td>
