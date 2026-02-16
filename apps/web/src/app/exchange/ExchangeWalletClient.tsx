@@ -219,6 +219,12 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [convertQuoteUpdatedAt, setConvertQuoteUpdatedAt] = useState<number | null>(null);
  const [convertQuoteNonce, setConvertQuoteNonce] = useState(0);
 
+ const [convertLockedQuote, setConvertLockedQuote] = useState<ConvertQuote | null>(null);
+ const [convertLockedQuoteUpdatedAt, setConvertLockedQuoteUpdatedAt] = useState<number | null>(null);
+ const [convertLastReceiptQuote, setConvertLastReceiptQuote] = useState<ConvertQuote | null>(null);
+ const [convertLastReceiptAt, setConvertLastReceiptAt] = useState<number | null>(null);
+ const [convertJustConverted, setConvertJustConverted] = useState(false);
+
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
  const [adminRequested, setAdminRequested] = useState<AdminWithdrawalRow[]>([]);
@@ -239,6 +245,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [toastKind, setToastKind] = useState<ToastKind>("info");
 
  const isProd = process.env.NODE_ENV ==="production";
+
+ const isConverting = loadingAction === "convert:execute";
 
  const requestHeaders = useMemo(() => {
  if (authMode !=="header") return undefined;
@@ -371,6 +379,19 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   if (isConvertAmountTooHigh) return "Amount exceeds available balance.";
   return null;
  }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh]);
+
+ useEffect(() => {
+  if (!convertJustConverted) return;
+  const t = window.setTimeout(() => setConvertJustConverted(false), 1750);
+  return () => window.clearTimeout(t);
+ }, [convertJustConverted]);
+
+ // If the user edits inputs after a conversion attempt, clear any locked quote.
+ useEffect(() => {
+  if (isConverting) return;
+  setConvertLockedQuote(null);
+  setConvertLockedQuoteUpdatedAt(null);
+ }, [isConverting, convertFromSymbol, convertToSymbol, convertAmountIn]);
 
  const scrollToSection = (ref: React.RefObject<HTMLDivElement | null>) => {
   ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -766,6 +787,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [authMode, canUseHeader, requestHeaders, selectedWithdrawAsset?.chain, selectedWithdrawAsset?.symbol]);
 
  useEffect(() => {
+  if (isConverting) return;
   const from = convertFromSymbol.trim().toUpperCase();
   const to = convertToSymbol.trim().toUpperCase();
   if (!from || !to || from === to) {
@@ -812,10 +834,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     cancelled = true;
     window.clearTimeout(timer);
   };
- }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, convertQuoteNonce]);
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, convertQuoteNonce, isConverting]);
 
  // Auto-refresh quote periodically (Binance-style) while inputs stay valid.
  useEffect(() => {
+  if (isConverting) return;
   const from = convertFromSymbol.trim().toUpperCase();
   const to = convertToSymbol.trim().toUpperCase();
   if (!from || !to || from === to) return;
@@ -825,7 +848,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     setConvertQuoteNonce((n) => n + 1);
   }, 12_000);
   return () => window.clearInterval(interval);
- }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh]);
+ }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, isConverting]);
 
  useEffect(() => {
  if (authMode ==="header"&& !canUseHeader) {
@@ -1408,6 +1431,28 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      Convert one asset to another instantly using a quoted rate (updates automatically). Best for turning non-P2P assets into USDT for offloading.
    </p>
 
+   {(() => {
+     const q = convertLockedQuote ?? convertLastReceiptQuote;
+     if (!q) return null;
+     return (
+       <div className="mt-3 rounded border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-[11px] text-[var(--muted)]">
+         <div className="break-words">
+           Last conversion:{" "}
+           <span className="break-all font-mono text-[var(--foreground)]">
+             {q.amountIn} {q.fromSymbol}
+           </span>
+           <span className="mx-1">→</span>
+           <span className="break-all font-mono text-[var(--foreground)]">
+             {q.amountOut} {q.toSymbol}
+           </span>
+           {typeof convertLastReceiptAt === "number" ? (
+             <span className="ml-1">• {new Date(convertLastReceiptAt).toLocaleTimeString()}</span>
+           ) : null}
+         </div>
+       </div>
+     );
+   })()}
+
    <div className="mt-3 grid gap-2">
     <div className="grid gap-2 sm:grid-cols-2">
        <label className="grid gap-1">
@@ -1415,6 +1460,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          <select
            className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
            value={convertFromSymbol}
+           disabled={isConverting}
            onChange={(e) => setConvertFromSymbol(e.target.value)}
          >
            <option value="">(select)</option>
@@ -1452,6 +1498,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          <select
            className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
            value={convertToSymbol}
+           disabled={isConverting}
            onChange={(e) => setConvertToSymbol(e.target.value)}
          >
           {convertAssets
@@ -1470,7 +1517,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
       <button
         type="button"
         className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-        disabled={!convertFromSymbol || !convertToSymbol}
+        disabled={isConverting || !convertFromSymbol || !convertToSymbol}
         onClick={() => {
           const from = convertFromSymbol;
           const to = convertToSymbol;
@@ -1487,7 +1534,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
       <button
         type="button"
         className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-        disabled={!!convertDisableReason}
+        disabled={isConverting || !!convertDisableReason}
         onClick={() => setConvertQuoteNonce((n) => n + 1)}
       >
         Refresh quote
@@ -1500,6 +1547,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          <input
            className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
            value={convertAmountIn}
+           disabled={isConverting}
            onChange={(e) => setConvertAmountIn(e.target.value)}
            placeholder="e.g. 10"
            inputMode="decimal"
@@ -1507,7 +1555,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          <button
            type="button"
            className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-          disabled={!selectedConvertFromAsset || selectedConvertAvailableBig <= 0n}
+           disabled={isConverting || !selectedConvertFromAsset || selectedConvertAvailableBig <= 0n}
           onClick={() => setConvertAmountIn(selectedConvertAvailable)}
          >
            Max
@@ -1523,6 +1571,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
        <input
          className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
          value={convertTotpCode}
+         disabled={isConverting}
          onChange={(e) => setConvertTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
          placeholder="6-digit code"
          inputMode="numeric"
@@ -1532,33 +1581,37 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      </label>
 
      <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
-       {convertQuoteLoading ? (
+       {convertLockedQuote ? (
+         <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Locked quote • executing…</div>
+       ) : convertQuoteLoading ? (
          <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating quote…</div>
        ) : null}
-       {convertQuote ? (
+
+       {(() => {
+         const displayQuote = convertLockedQuote ?? convertQuote;
+         const displayUpdatedAt = convertLockedQuote ? convertLockedQuoteUpdatedAt : convertQuoteUpdatedAt;
+         if (!displayQuote) return <>Quote: <span className="font-mono">—</span></>;
          <>
            <div className="break-words">
              Rate:{" "}
-             <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(convertQuote.rateToPerFrom, 8)}</span>
-             <span className="ml-1">{convertQuote.toSymbol} per {convertQuote.fromSymbol}</span>
-             {typeof convertQuoteUpdatedAt === "number" ? (
-               <span className="ml-1">• updated {new Date(convertQuoteUpdatedAt).toLocaleTimeString()}</span>
+             <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(displayQuote.rateToPerFrom, 8)}</span>
+             <span className="ml-1">{displayQuote.toSymbol} per {displayQuote.fromSymbol}</span>
+             {typeof displayUpdatedAt === "number" ? (
+               <span className="ml-1">• updated {new Date(displayUpdatedAt).toLocaleTimeString()}</span>
              ) : null}
            </div>
            <div className="mt-1 break-words">
             You receive:{" "}
              <span className="break-all font-mono text-[var(--foreground)]">
-               {fmtAmount(convertQuote.amountOut, selectedConvertToAsset?.decimals ?? 6)} {convertQuote.toSymbol}
+               {fmtAmount(displayQuote.amountOut, selectedConvertToAsset?.decimals ?? 6)} {displayQuote.toSymbol}
              </span>
-            <span className="ml-1">(fee {fmtAmount(convertQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {convertQuote.fromSymbol})</span>
+             <span className="ml-1">(fee {fmtAmount(displayQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {displayQuote.fromSymbol})</span>
            </div>
           <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
-            Price source: {convertQuote.priceSource.kind}
+            Price source: {displayQuote.priceSource.kind}
           </div>
          </>
-       ) : (
-         <>Quote: <span className="font-mono">—</span></>
-       )}
+       })()}
      </div>
 
      <div className="flex flex-wrap gap-2">
@@ -1575,6 +1628,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            (authMode === "header" && !canUseHeader)
          }
          onClick={async () => {
+           const locked = convertQuote;
+           if (locked) {
+             setConvertLockedQuote(locked);
+             setConvertLockedQuoteUpdatedAt(convertQuoteUpdatedAt ?? Date.now());
+           }
            setLoadingAction("convert:execute");
            setError(null);
            try {
@@ -1602,16 +1660,26 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
              });
 
              const q = res.convert?.quote;
+           const receiptQ = q ?? locked ?? null;
              setToastKind("success");
              setToastMessage(
                q
                  ? `Converted ${q.amountIn} ${q.fromSymbol} → ${q.amountOut} ${q.toSymbol}.`
                  : "Conversion completed.",
              );
+            if (receiptQ) {
+              setConvertLastReceiptQuote(receiptQ);
+              setConvertLastReceiptAt(Date.now());
+              setConvertJustConverted(true);
+            }
              setConvertAmountIn("");
              setConvertTotpCode("");
              await refreshAll();
+            setConvertLockedQuote(null);
+            setConvertLockedQuoteUpdatedAt(null);
            } catch (e) {
+           setConvertLockedQuote(null);
+           setConvertLockedQuoteUpdatedAt(null);
              if (e instanceof ApiError) {
                setError({ code: e.code, details: e.details });
              } else {
@@ -1622,7 +1690,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
            }
          }}
        >
-         {loadingAction === "convert:execute" ? "Converting…" : "Convert"}
+       {loadingAction === "convert:execute" ? "Converting…" : convertJustConverted ? "Converted" : "Convert"}
        </button>
 
       {convertQuote && (convertQuote.toSymbol === "USDT" || convertQuote.toSymbol === "BNB") ? (
