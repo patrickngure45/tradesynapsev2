@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ALL_CURRENCIES, PAYMENT_METHODS } from "@/lib/p2p/constants"; // Import constants
+import { countryToDefaultFiat, fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
 
 type UserPaymentMethod = {
   id: string;
@@ -35,10 +36,10 @@ function AddMethodForm({ onCancel, onSuccess }: { onCancel: () => void, onSucces
       if (res.ok) {
         onSuccess();
       } else {
-        alert("Failed to save method");
+        // Keep UI minimal: surface errors in parent modal instead of alert().
       }
     } catch (e) {
-      alert("Error saving method");
+      // Keep UI minimal: parent modal shows generic network errors.
     } finally {
       setLoading(false);
     }
@@ -111,9 +112,38 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
   const [showAddMethod, setShowAddMethod] = useState(false);
 
   // Form State
-  const [side, setSide] = useState<"BUY" | "SELL">("SELL");
+  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [asset, setAsset] = useState("USDT");
-  const [fiat, setFiat] = useState("KES"); // Default to KES
+  const [fiat, setFiat] = useState("USD"); // Default; refine via whoami
+
+  const [assetOptions, setAssetOptions] = useState<string[]>(["USDT"]);
+
+  useEffect(() => {
+    fetch("/api/p2p/assets")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const list = Array.isArray(data?.assets) ? (data.assets as any[]).map((x) => String(x).toUpperCase()) : [];
+        const uniq = Array.from(new Set(list.filter(Boolean)));
+        if (uniq.length) {
+          setAssetOptions(uniq);
+          if (!uniq.includes(asset)) setAsset(uniq[0]!);
+        }
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/whoami")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const country = (data?.user?.country as string | null | undefined) ?? null;
+        const preferred = countryToDefaultFiat(country);
+        if (preferred && fiat === "USD") setFiat(preferred);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [priceType, setPriceType] = useState<"fixed" | "floating">("fixed");
   const [fixedPrice, setFixedPrice] = useState("");
@@ -122,6 +152,22 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
   const [maxLimit, setMaxLimit] = useState("");
   const [terms, setTerms] = useState("");
   const [selectedMethods, setSelectedMethods] = useState<string[]>([]); // New State
+
+  const [refMid, setRefMid] = useState<number | null>(null);
+  const [refLoading, setRefLoading] = useState(false);
+
+  useEffect(() => {
+    // Best-effort reference (for user guidance only).
+    setRefLoading(true);
+    fetch(`/api/p2p/reference?asset=${encodeURIComponent(asset)}&fiat=${encodeURIComponent(fiat)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const mid = typeof data?.mid === "number" ? data.mid : Number(data?.mid);
+        setRefMid(Number.isFinite(mid) && mid > 0 ? mid : null);
+      })
+      .catch(() => setRefMid(null))
+      .finally(() => setRefLoading(false));
+  }, [asset, fiat]);
 
   const fetchMethods = async () => {
     setFetchingMethods(true);
@@ -186,7 +232,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
       if (!res.ok) {
         console.error("Ad creation failed:", data); // Log to client console
         if (res.status === 401 || data.error === "unauthorized" || data.error === "missing_x_user_id") {
-            setError("unauthorized");
+            setError("You are not logged in.");
         } else {
             // Show detailed error if available, otherwise fallback
             const detail = data.details ? JSON.stringify(data.details) : "";
@@ -196,10 +242,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
       }
 
       // Success
-      router.refresh(); // Refresh server components if any
-      // Since P2PMarketplace uses client-side fetch, we might want to trigger a reload there,
-      // but closing the modal usually is enough signal to user to refresh or we can callback.
-      window.location.reload(); // Brute force refresh for now to see the ad
+      router.refresh();
       onClose();
 
     } catch (err) {
@@ -235,24 +278,8 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
           {error && (
             <div className="mb-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500 border border-red-500/20">
               <p className="font-semibold">Creation Failed</p>
-              
-              {error === "unauthorized" ? (
-                <div className="flex flex-col gap-2 mt-1">
-                  <p>You are not logged in.</p>
-                  <a 
-                    href="/api/dev/login" 
-                    target="_blank"
-                    className="w-fit rounded bg-red-100 px-3 py-1 font-bold text-red-700 hover:bg-red-200"
-                  >
-                    🛠️ Click here for Dev Login
-                  </a>
-                  <p className="text-[10px] opacity-70">After logging in, close the new tab and try again.</p>
-                </div>
-              ) : (
-                <>
-                  <p>{error}</p>
-                </>
-              )}
+
+              <p className="mt-1">{error}</p>
             </div>
           )}
 
@@ -286,8 +313,11 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setAsset(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
                 >
-                  <option value="USDT">USDT</option>
-                  <option value="BNB">BNB</option>
+                  {assetOptions.map((sym) => (
+                    <option key={sym} value={sym}>
+                      {sym}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -303,27 +333,34 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                 >
                   {ALL_CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>
-                      {c.code} - {c.name}
+                      {fiatFlag(c.code) ? `${fiatFlag(c.code)} ` : ""}{c.code} - {c.name}
                     </option>
                   ))}
                 </select>
                </div>
                <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Price per unit ({fiat})</label>
+                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Price ({fiat} per 1 {asset})</label>
                 <input
                   type="number"
-                  placeholder="0.00"
+                  placeholder={`e.g. ${fiat === "KES" ? "129" : "1"}`}
                   step="0.01"
                   value={fixedPrice}
                   onChange={(e) => setFixedPrice(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
                 />
+                  <div className="mt-1 text-[10px] text-[var(--muted)]">
+                    {refLoading
+                      ? "Fetching reference price…"
+                      : refMid
+                        ? `Reference: ~${refMid.toLocaleString()} ${fiat}/${asset}`
+                        : "Reference: unavailable"}
+                  </div>
                </div>
             </div>
 
             {/* Amount & Limits */}
              <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Total Amount to Trade ({asset})</label>
+                <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Total amount ({asset})</label>
                 <input
                   type="number"
                   placeholder="0.00"
@@ -335,7 +372,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
 
              <div className="grid grid-cols-2 gap-4">
                  <div>
-                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Min Limit ({fiat})</label>
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Min trade ({fiat})</label>
                     <input
                       type="number"
                       placeholder="e.g 100"
@@ -345,7 +382,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                     />
                  </div>
                  <div>
-                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Max Limit ({fiat})</label>
+                    <label className="mb-1 block text-xs font-medium text-[var(--muted)]">Max trade ({fiat})</label>
                     <input
                       type="number"
                       placeholder="e.g. 5000"
@@ -358,7 +395,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
              
              <div>
                 <label className="mb-1 block text-xs font-medium text-[var(--muted)]">
-                   {side === 'SELL' ? "Receive Payment To (Select Accounts)" : "I will pay via (Select Types)"}
+                 {side === 'SELL' ? "Receive payment to" : "Payment method"}
                 </label>
                 
                 {side === 'SELL' ? (
@@ -372,13 +409,14 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                                key={m.id}
                                type="button"
                                onClick={() => toggleMethod(m.id)}
-                               className={`rounded-full px-3 py-1 text-xs border transition ${
+                               className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border transition ${
                                  selectedMethods.includes(m.id)
                                    ? "border-[var(--accent)] bg-[var(--accent)] text-white"
                                    : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:border-[var(--fg)]"
                                }`}
                              >
-                               {m.name}
+                               <span className={paymentMethodBadge(m.identifier).className}>{paymentMethodBadge(m.identifier).label}</span>
+                               <span className="font-semibold">{m.name}</span>
                              </button>
                           ))}
                         </div>
@@ -409,22 +447,9 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                       )}
                    </div>
                 ) : (
-                   <div className="flex flex-wrap gap-2 mt-1">
-                      {PAYMENT_METHODS.map((method) => (
-                        <button
-                          key={method.id}
-                          type="button"
-                          onClick={() => toggleMethod(method.id)}
-                          className={`rounded-full px-3 py-1 text-xs border transition ${
-                            selectedMethods.includes(method.id)
-                              ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:border-[var(--fg)]"
-                          }`}
-                        >
-                          {method.name}
-                        </button>
-                      ))}
-                   </div>
+                  <div className="text-xs text-[var(--muted)] p-2 border border-[var(--border)] rounded-lg bg-[var(--bg)]">
+                    You’ll choose the seller’s payment method when you take a SELL ad. (Only SELL ads require you to set payout accounts.)
+                  </div>
                 )}
              </div>
 

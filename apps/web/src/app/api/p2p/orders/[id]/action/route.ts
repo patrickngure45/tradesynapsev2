@@ -132,6 +132,14 @@ export async function POST(
           metadata: { order_id: orderId },
         });
 
+        await createNotification(tx, {
+          userId: order.buyer_id,
+          type: "p2p_payment_confirmed",
+          title: "Marked as Paid",
+          body: `You marked order ${orderId.slice(0, 8)} as paid. Waiting for seller verification and release.`,
+          metadata: { order_id: orderId },
+        });
+
         return NextResponse.json(updatedOrder);
       }
 
@@ -206,6 +214,14 @@ export async function POST(
             type: "p2p_order_completed",
             title: "Order Completed",
             body: `Seller released ${order.amount_asset} ${order.asset_symbol} to your wallet.`,
+            metadata: { order_id: orderId },
+          });
+
+          await createNotification(tx, {
+            userId: order.seller_id,
+            type: "p2p_order_completed",
+            title: "Order Completed",
+            body: `You released ${order.amount_asset} ${order.asset_symbol}. Order ${orderId.slice(0, 8)} is complete.`,
             metadata: { order_id: orderId },
           });
 
@@ -369,6 +385,14 @@ export async function POST(
           type: "p2p_order_cancelled",
           title: "Order Cancelled",
           body: `Order ${orderId.slice(0, 8)} was cancelled. Funds returned to your available balance.`,
+          metadata: { order_id: orderId },
+        });
+
+        await createNotification(tx, {
+          userId: order.buyer_id,
+          type: "p2p_order_cancelled",
+          title: "Order Cancelled",
+          body: `Order ${orderId.slice(0, 8)} was cancelled. If you sent funds, contact support and the counterparty immediately.`,
           metadata: { order_id: orderId },
         });
 

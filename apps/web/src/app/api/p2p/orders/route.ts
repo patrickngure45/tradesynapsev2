@@ -8,8 +8,55 @@ import { createNotification } from "@/lib/notifications";
 import { hasUsablePaymentDetails, normalizePaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
 import { getOrComputeFxReferenceRate } from "@/lib/fx/reference";
 import { isSupportedP2PCountry } from "@/lib/p2p/supportedCountries";
+import { createPgRateLimiter, type PgRateLimiter } from "@/lib/rateLimitPg";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+let p2pOrderCreateLimiter: PgRateLimiter | null = null;
+function getP2POrderCreateLimiter(): PgRateLimiter {
+  if (p2pOrderCreateLimiter) return p2pOrderCreateLimiter;
+  const sql = getSql();
+  p2pOrderCreateLimiter = createPgRateLimiter(sql, {
+    name: "p2p-order-create",
+    windowMs: 60_000,
+    max: 6,
+  });
+  return p2pOrderCreateLimiter;
+}
+
+function getClientIp(req: NextRequest): string | null {
+  const xfwd = req.headers.get("x-forwarded-for");
+  if (xfwd) return xfwd.split(",")[0]?.trim() || null;
+  return req.headers.get("x-real-ip");
+}
+
+function parseJsonbTextArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map((x) => String(x)).filter(Boolean);
+
+  // Some JSONB columns have legacy string-encoded JSON arrays.
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return [];
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.map((x) => String(x)).filter(Boolean);
+
+      // Legacy: jsonb string that itself contains a JSON array, e.g. "[\"uuid\"]".
+      if (typeof parsed === "string") {
+        const nested = parsed.trim();
+        if (nested.startsWith("[") && nested.endsWith("]")) {
+          const parsed2 = JSON.parse(nested);
+          if (Array.isArray(parsed2)) return parsed2.map((x) => String(x)).filter(Boolean);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return [];
+}
 
 const createOrderSchema = z.object({
   ad_id: z.string().uuid(),
@@ -97,17 +144,168 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const body = await req.json();
+    // ── Abuse prevention: rate limit order creation (per-user + per-IP) ──
+    // Keeps the marketplace usable under spam/automation.
+    const limiter = getP2POrderCreateLimiter();
+    const ip = getClientIp(req);
+    const [rlUser, rlIp] = await Promise.all([
+      limiter.consume(`user:${actingUserId}`),
+      ip ? limiter.consume(`ip:${ip}`) : Promise.resolve(null),
+    ]);
+    const rl = !rlUser.allowed ? rlUser : rlIp && !rlIp.allowed ? rlIp : null;
+    if (rl && !rl.allowed) {
+      return apiError("rate_limit_exceeded", {
+        status: 429,
+        details: { limit: rl.limit, remaining: rl.remaining, resetMs: rl.resetMs },
+      });
+    }
+
+    const body = await req.json().catch(() => null);
     const payload = createOrderSchema.safeParse(body);
     if (!payload.success) return apiZodError(payload.error) ?? apiError("invalid_input");
     const { ad_id, amount_fiat, payment_method_id } = payload.data;
+
+    // ── Abuse prevention: open-order cap + cooldown for repeat timeouts ──
+    // 1) Cap how many "awaiting payment" orders a buyer can keep open.
+    const maxOpenCreated = Number(process.env.P2P_MAX_OPEN_CREATED_ORDERS ?? "3");
+    if (Number.isFinite(maxOpenCreated) && maxOpenCreated > 0) {
+      const rows = await sql<{ open_created: number }[]>`
+        SELECT count(*)::int AS open_created
+        FROM p2p_order
+        WHERE buyer_id = ${actingUserId}::uuid
+          AND status = 'created'
+          AND (expires_at IS NULL OR expires_at > now())
+      `;
+      const openCreated = rows[0]?.open_created ?? 0;
+      if (openCreated >= maxOpenCreated) {
+        return apiError("p2p_open_orders_limit", {
+          status: 409,
+          details: { max: maxOpenCreated, open: openCreated },
+        });
+      }
+    }
+
+    // 2) Block creating multiple simultaneous orders against the same ad.
+    const existingForAd = await sql<{ id: string }[]>`
+      SELECT id::text
+      FROM p2p_order
+      WHERE buyer_id = ${actingUserId}::uuid
+        AND ad_id = ${ad_id}::uuid
+        AND status IN ('created', 'paid_confirmed', 'disputed')
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    if (existingForAd.length > 0) {
+      return apiError("p2p_order_duplicate_open", {
+        status: 409,
+        details: { order_id: existingForAd[0]!.id },
+      });
+    }
+
+    // 3) Cooldown for buyers who repeatedly let orders expire (payment timeout).
+    // Heuristic: treat cancelled orders where cancelled_at >= expires_at as timeouts.
+    const windowHours = Number(process.env.P2P_TIMEOUT_WINDOW_HOURS ?? "24");
+    const minTimeouts = Number(process.env.P2P_TIMEOUT_MIN_COUNT ?? "5");
+    const ratioThreshold = Number(process.env.P2P_TIMEOUT_RATIO_THRESHOLD ?? "0.6");
+    const cooldownMinutes = Number(process.env.P2P_TIMEOUT_COOLDOWN_MINUTES ?? "60");
+
+    if (
+      Number.isFinite(windowHours) &&
+      Number.isFinite(minTimeouts) &&
+      Number.isFinite(ratioThreshold) &&
+      Number.isFinite(cooldownMinutes) &&
+      windowHours > 0 &&
+      minTimeouts > 0 &&
+      ratioThreshold > 0 &&
+      cooldownMinutes > 0
+    ) {
+      const rows = await sql<
+        {
+          total_created: number;
+          timeout_count: number;
+          last_timeout_at: Date | null;
+        }[]
+      >`
+        WITH recent AS (
+          SELECT
+            status,
+            created_at,
+            cancelled_at,
+            expires_at
+          FROM p2p_order
+          WHERE buyer_id = ${actingUserId}::uuid
+            AND created_at >= now() - make_interval(hours => ${windowHours})
+        ),
+        timeouts AS (
+          SELECT cancelled_at
+          FROM recent
+          WHERE status = 'cancelled'
+            AND cancelled_at IS NOT NULL
+            AND expires_at IS NOT NULL
+            AND cancelled_at >= expires_at
+        )
+        SELECT
+          (SELECT count(*)::int FROM recent) AS total_created,
+          (SELECT count(*)::int FROM timeouts) AS timeout_count,
+          (SELECT max(cancelled_at) FROM timeouts) AS last_timeout_at
+      `;
+
+      const totalCreated = rows[0]?.total_created ?? 0;
+      const timeoutCount = rows[0]?.timeout_count ?? 0;
+      const lastTimeoutAt = rows[0]?.last_timeout_at ?? null;
+
+      const ratio = totalCreated > 0 ? timeoutCount / totalCreated : 0;
+      if (timeoutCount >= minTimeouts && ratio >= ratioThreshold && lastTimeoutAt) {
+        const cooldownEndsAt = new Date(lastTimeoutAt.getTime() + cooldownMinutes * 60_000);
+        if (cooldownEndsAt.getTime() > Date.now()) {
+          return apiError("p2p_order_create_cooldown", {
+            status: 429,
+            details: {
+              cooldown_ends_at: cooldownEndsAt.toISOString(),
+              window_hours: windowHours,
+              timeout_count: timeoutCount,
+              total_created: totalCreated,
+            },
+          });
+        }
+      }
+    }
 
     const orderId = await sql.begin(async (txArg) => {
       const tx = txArg as any;
 
       // 1. Fetch & lock the ad
+      // NOTE: payment_method_ids can be a legacy JSONB string containing a JSON array.
+      // Compute a stable JSON array view in SQL so we don't depend on driver array decoding.
       const [ad] = await tx`
-        SELECT * FROM p2p_ad WHERE id = ${ad_id} FOR UPDATE
+        SELECT
+          ad.*,
+          to_json(
+            (
+              CASE
+                WHEN jsonb_typeof(
+                  CASE
+                    WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                    WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                    ELSE '[]'::jsonb
+                  END
+                ) = 'array' THEN (
+                  SELECT array_agg(x)
+                  FROM jsonb_array_elements_text(
+                    CASE
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                      ELSE '[]'::jsonb
+                    END
+                  ) AS x
+                )
+                ELSE ARRAY[]::text[]
+              END
+            )
+          )::jsonb AS payment_method_ids_json
+        FROM p2p_ad ad
+        WHERE ad.id = ${ad_id}
+        FOR UPDATE
       `;
          
       if (!ad) throw new Error("ad_not_found");
@@ -186,7 +384,7 @@ export async function POST(req: NextRequest) {
         name: string;
         details: Record<string, unknown> | null;
       }> = [];
-      const adMethodIds = Array.isArray(ad.payment_method_ids) ? (ad.payment_method_ids as string[]) : [];
+      const adMethodIds = parseJsonbTextArray((ad as any).payment_method_ids_json);
 
       // If maker is seller, buyer should receive seller's ad payment methods.
       if (makerId === sellerId) {
@@ -198,7 +396,7 @@ export async function POST(req: NextRequest) {
           SELECT id, identifier, name, details
           FROM p2p_payment_method
           WHERE id::text = ANY(${adMethodIds})
-            AND user_id = ${sellerId}
+            AND user_id = ${sellerId}::uuid
         `;
 
         if (!methods.length) {
@@ -219,8 +417,8 @@ export async function POST(req: NextRequest) {
         const [method] = await tx`
           SELECT id, identifier, name, details
           FROM p2p_payment_method
-          WHERE id = ${payment_method_id}
-            AND user_id = ${sellerId}
+          WHERE id = ${payment_method_id}::uuid
+            AND user_id = ${sellerId}::uuid
         `;
 
         if (!method) {
@@ -334,6 +532,15 @@ export async function POST(req: NextRequest) {
         title: "New P2P Order",
         body: ` Someone started a trade on your ad for ${amount_fiat} ${ad.fiat_currency}.`,
         metadata: { order_id: newOrder.id }
+      });
+
+      // g. Notify Taker
+      await createNotification(tx, {
+        userId: takerId,
+        type: "p2p_order_created",
+        title: "P2P Order Created",
+        body: `Your order was created for ${amount_fiat} ${ad.fiat_currency}. Await payment / release steps in the order chat.`,
+        metadata: { order_id: newOrder.id },
       });
 
       return newOrder.id;

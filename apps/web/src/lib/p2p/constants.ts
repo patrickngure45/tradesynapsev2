@@ -95,18 +95,35 @@ export const ALL_CURRENCIES: FiatCurrency[] = uniqCurrencies([
 ]);
 
 export const PAYMENT_METHODS = [
-  { id: "mpesa", name: "M-Pesa (Safaricom)" },
+  // Receiving-country metadata is best-effort (used for display and safer UX).
+  // If a rail is truly multi-country, omit country here.
+  { id: "mpesa", name: "M-Pesa (Safaricom)", country: "KE" },
   { id: "airtel_money", name: "Airtel Money" },
   { id: "mtn_mobile", name: "MTN Mobile Money" },
-  { id: "tigo_pesa", name: "Tigo Pesa" },
-  { id: "equity_bank", name: "Equity Bank" },
+  { id: "tigo_pesa", name: "Tigo Pesa", country: "TZ" },
+  { id: "equity_bank", name: "Equity Bank", country: "KE" },
   { id: "bank_transfer", name: "Bank Transfer" },
   { id: "chipper", name: "Chipper Cash" },
-  { id: "coop_bank", name: "Co-operative Bank" },
-  { id: "kcb_bank", name: "KCB Bank" },
-  { id: "halopesa", name: "Halopesa" },
+  { id: "coop_bank", name: "Co-operative Bank", country: "KE" },
+  { id: "kcb_bank", name: "KCB Bank", country: "KE" },
+  { id: "halopesa", name: "Halopesa", country: "TZ" },
 ];
 
+function appendCountrySuffix(name: string, country: string): string {
+  const n = String(name ?? "");
+  const c = String(country ?? "").trim().toUpperCase();
+  if (!c) return n;
+  // If the name already has (...) then inject before the closing paren.
+  if (n.includes("(") && n.endsWith(")")) {
+    return n.replace(/\)\s*$/, `, ${c})`);
+  }
+  return `${n} (${c})`;
+}
+
 export const getPaymentMethodName = (id: string) => {
-  return PAYMENT_METHODS.find((p) => p.id === id)?.name || id;
+  const pid = String(id ?? "").toLowerCase();
+  const p = (PAYMENT_METHODS as any[]).find((x) => String(x.id).toLowerCase() === pid);
+  if (!p) return id;
+  if (p.country) return appendCountrySuffix(String(p.name), String(p.country));
+  return String(p.name);
 };

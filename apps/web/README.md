@@ -106,6 +106,19 @@ Optional tuning:
 - `P2P_SEED_ADS_PER_SIDE` (default `2`)
 - `P2P_SEED_CLOSE_EXISTING` (`1` to replace old bot ads, `0` to append)
 
+## P2P abuse-protection tuning
+
+Order creation includes server-side anti-abuse guards (rate limit + caps + timeout cooldown).
+
+- `P2P_MAX_OPEN_CREATED_ORDERS` (default `3`) — max open orders in `created` (awaiting payment) per buyer.
+- `P2P_TIMEOUT_WINDOW_HOURS` (default `24`) — lookback window for timeout/cooldown logic.
+- `P2P_TIMEOUT_MIN_COUNT` (default `5`) — minimum timeouts in window before cooldown can apply.
+- `P2P_TIMEOUT_RATIO_THRESHOLD` (default `0.6`) — timeout ratio threshold (timeouts / total created) to trigger cooldown.
+- `P2P_TIMEOUT_COOLDOWN_MINUTES` (default `60`) — how long the buyer is blocked after the most recent timeout.
+
+P2P order reminders:
+- `P2P_EXPIRY_WARNING_MINUTES` (default `5`) — send a one-time "payment window ending soon" notification when an order is close to expiring.
+
 ## Demo
 
 See `project/DEMO_CHECKLIST.md` for a guided walkthrough.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Avatar } from "@/components/Avatar";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -508,9 +509,12 @@ export function CopyTradingClient() {
                   <div className="flex items-start gap-4">
                     {/* Avatar + rank */}
                     <div className="relative shrink-0">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/15 text-lg font-bold text-[var(--accent)]">
-                        {leader.display_name[0]?.toUpperCase() ?? "?"}
-                      </div>
+                      <Avatar
+                        seed={leader.id}
+                        label={leader.display_name}
+                        size={48}
+                        fallbackText={leader.display_name[0]?.toUpperCase() ?? "?"}
+                      />
                       {sortKey === "pnl" && (
                         <div className="absolute -right-1 -top-1">{rankBadge(idx)}</div>
                       )}

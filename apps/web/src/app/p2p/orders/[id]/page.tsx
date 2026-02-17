@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getPaymentMethodName } from "@/lib/p2p/constants";
 import type { PaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
+import { fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
+import { Avatar } from "@/components/Avatar";
 
 // Types matching API response
 type Order = {
@@ -15,6 +17,8 @@ type Order = {
   amount_fiat: string;
   fiat_currency: string;
   price: string;
+    expires_at?: string | null;
+    paid_at?: string | null;
   buyer_id: string;
   seller_id: string;
   buyer_email: string; // generic
@@ -36,6 +40,13 @@ type Message = {
   is_image: boolean;
 };
 
+type P2POrderAction = "PAY_CONFIRMED" | "RELEASE" | "CANCEL";
+
+type OrderDialogState =
+    | null
+    | { kind: "order_action"; action: P2POrderAction }
+    | { kind: "open_dispute" };
+
 // Simple hook to get current user ID (pseudo) - actually we need to know "Am I buyer or seller?"
 // But the API returns everything. We can infer my role by comparing session.
 // For now, I'll fetch /api/auth/me to get my ID, or just store it.
@@ -54,6 +65,10 @@ export default function OrderPage() {
   const [msgInput, setMsgInput] = useState("");
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const [actionNotice, setActionNotice] = useState<string | null>(null);
+    const [actionDialog, setActionDialog] = useState<OrderDialogState>(null);
+    const [cancelSafetyChecked, setCancelSafetyChecked] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
     const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
@@ -68,8 +83,34 @@ export default function OrderPage() {
     const [reputation, setReputation] = useState<null | {
         counts: { positive: number; negative: number; total: number };
     }>(null);
+
+    const [refMid, setRefMid] = useState<number | null>(null);
+    const [nowTick, setNowTick] = useState(() => Date.now());
   
   const bottomRef = useRef<HTMLDivElement>(null);
+
+    // 1s clock tick for countdowns (payment window, etc.)
+    useEffect(() => {
+        const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+        return () => window.clearInterval(t);
+    }, []);
+
+    useEffect(() => {
+        if (!order?.asset_symbol || !order?.fiat_currency) {
+            setRefMid(null);
+            return;
+        }
+
+        fetch(
+            `/api/p2p/reference?asset=${encodeURIComponent(order.asset_symbol)}&fiat=${encodeURIComponent(order.fiat_currency)}`,
+        )
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+                const mid = typeof data?.mid === "number" ? data.mid : Number(data?.mid);
+                setRefMid(Number.isFinite(mid) && mid > 0 ? mid : null);
+            })
+            .catch(() => setRefMid(null));
+    }, [order?.asset_symbol, order?.fiat_currency]);
 
   // 1. Fetch User & Data
   useEffect(() => {
@@ -232,48 +273,128 @@ export default function OrderPage() {
         CANCEL: "cancel this order",
     };
 
-  const doAction = async (action: string) => {
-    const confirmationText = actionLabel[action] ?? "continue";
-    if (!confirm(`Are you sure you want to ${confirmationText}?`)) return;
-    setActionLoading(true);
-    try {
-        const res = await fetch(`/api/p2p/orders/${id}/action`, {
-            method: 'POST',
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ action }),
-        });
-        if (!res.ok) {
-            const err = await res.json();
-                        const code = err.error as string | undefined;
-                        if (code === "payment_details_not_ready") {
-                            alert("Seller payment details are missing. Do not mark as paid until details are shown.");
-                        } else if (code === "order_state_conflict") {
-                            alert("Order state changed. Please refresh and try again.");
-                                                } else if (code === "order_not_found") {
-                                                        alert("Order not found (or access denied).");
-                        } else {
-                            alert(code || "Action failed");
-                        }
-        } else {
-             // Success - polling will update status
+    const openActionDialog = (action: P2POrderAction) => {
+        setActionError(null);
+        setActionNotice(null);
+        setCancelSafetyChecked(false);
+        setActionDialog({ kind: "order_action", action });
+    };
+
+    const runOrderAction = async (action: P2POrderAction) => {
+        setActionError(null);
+        setActionLoading(true);
+        try {
+            const res = await fetch(`/api/p2p/orders/${id}/action`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ action }),
+            });
+            if (!res.ok) {
+                let code: string | undefined;
+                let msg: string | undefined;
+                try {
+                    const body = await res.json();
+                    code = body?.error;
+                    msg = body?.details?.message;
+                } catch {
+                    // ignore
+                }
+                if (code === "order_state_conflict") {
+                    setActionError(msg || "Order state changed. Please refresh and try again.");
+                } else if (code === "order_not_found") {
+                    setActionError(msg || "Order not found (or access denied).");
+                } else if (code === "actor_not_allowed") {
+                    setActionError(msg || "You are not allowed to do that.");
+                } else {
+                    setActionError(msg || code || "Action failed");
+                }
+                return;
+            }
+
+            // Update local order immediately (avoid waiting for poll)
+            try {
+                const updated = (await res.json()) as Partial<Order> | null;
+                if (updated && typeof updated === "object") {
+                    setOrder((prev) => (prev ? ({ ...prev, ...(updated as any) } as Order) : prev));
+                }
+            } catch {
+                // ignore
+            }
+
+            if (action === "PAY_CONFIRMED") {
+                setActionNotice("Payment marked as sent. Waiting for the seller to release crypto…");
+            } else if (action === "RELEASE") {
+                setActionNotice("Release submitted. Finalizing order…");
+            } else if (action === "CANCEL") {
+                setActionNotice("Cancellation submitted. Updating order…");
+            }
+        } catch {
+            setActionError("Network error. Please try again.");
+        } finally {
+            setActionLoading(false);
         }
-    } catch (e) {
-        alert("Error");
-    } finally {
-        setActionLoading(false);
-    }
-  };
+    };
+
+    useEffect(() => {
+        if (!order) return;
+        if (order.status === "completed" || order.status === "cancelled" || order.status === "disputed") setActionNotice(null);
+    }, [order]);
+
+    const getDialogCopy = (action: P2POrderAction) => {
+        const amountLine = order ? `${order.amount_fiat} ${order.fiat_currency}` : "the exact amount";
+        if (action === "PAY_CONFIRMED") {
+            return {
+                title: "Confirm payment sent",
+                body: `Only confirm after you have sent exactly ${amountLine} to the seller using the payout details shown on this page.`,
+                confirmLabel: "I have paid",
+                tone: "amber" as const,
+            };
+        }
+        if (action === "RELEASE") {
+            return {
+                title: "Release crypto",
+                body: "Only release after you have confirmed you received the fiat payment in your account. This completes the order.",
+                confirmLabel: "Release now",
+                tone: "green" as const,
+            };
+        }
+
+        const roleBuyer = !!currentUser && !!order && currentUser.id === order.buyer_id;
+        const roleSeller = !!currentUser && !!order && currentUser.id === order.seller_id;
+        const cancelBody = roleBuyer
+            ? "Canceling stops this trade and releases escrow. Only cancel if you have NOT sent payment."
+            : roleSeller
+                ? "Canceling stops this trade and releases escrow back to you. Only cancel if you have NOT received payment."
+                : "Canceling stops this trade and releases escrow. Only cancel if no payment was sent.";
+        return {
+            title: "Cancel order",
+            body: cancelBody,
+            confirmLabel: "Cancel order",
+            tone: "neutral" as const,
+        };
+    };
 
     const openDispute = async () => {
         if (!order) return;
         const reason = disputeReason.trim();
         if (reason.length < 5) {
-            alert("Please enter at least 5 characters explaining the issue.");
+            setActionError("Please enter at least 5 characters explaining the issue.");
             return;
         }
-        if (!confirm("Open a dispute for this order? Support will review.")) return;
+        setActionError(null);
+        setActionNotice(null);
+        setActionDialog({ kind: "open_dispute" });
+    };
+
+    const runOpenDispute = async () => {
+        if (!order) return;
+        const reason = disputeReason.trim();
+        if (reason.length < 5) {
+            setActionError("Please enter at least 5 characters explaining the issue.");
+            return;
+        }
         setDisputeLoading(true);
         try {
             const res = await fetch(`/api/p2p/orders/${id}/dispute`, {
@@ -291,12 +412,13 @@ export default function OrderPage() {
                 } catch {
                     // ignore
                 }
-                alert(msg || code || "Failed to open dispute");
+                setActionError(msg || code || "Failed to open dispute");
                 return;
             }
             setDisputeReason("");
+            setActionNotice("Dispute opened. Support will review — keep communication in chat.");
         } catch {
-            alert("Network error");
+            setActionError("Network error. Please try again.");
         } finally {
             setDisputeLoading(false);
         }
@@ -305,9 +427,11 @@ export default function OrderPage() {
     const submitFeedback = async () => {
         if (!order) return;
         if (!feedbackRating) {
-            alert("Please select a rating.");
+            setActionError("Please select a rating.");
             return;
         }
+        setActionError(null);
+        setActionNotice(null);
         setFeedbackLoading(true);
         try {
             const res = await fetch(`/api/p2p/orders/${id}/feedback`, {
@@ -328,12 +452,12 @@ export default function OrderPage() {
                 } catch {
                     // ignore
                 }
-                alert(msg || code || "Failed to submit feedback");
+                setActionError(msg || code || "Failed to submit feedback");
                 return;
             }
             setFeedbackDone(true);
         } catch {
-            alert("Network error");
+            setActionError("Network error. Please try again.");
         } finally {
             setFeedbackLoading(false);
         }
@@ -382,14 +506,53 @@ export default function OrderPage() {
     const isSeller = !!currentUser && currentUser.id === order.seller_id;
     const displayRole = isBuyer ? "BUYER" : isSeller ? "SELLER" : "";
     const paymentDetailsReady = Boolean(order.payment_details_ready);
+        const isTerminal = order.status === "completed" || order.status === "cancelled";
+        const canChat = (isBuyer || isSeller) && !isTerminal;
+        const myLabel = isBuyer ? order.buyer_email : isSeller ? order.seller_email : "";
+
+    const cancelMeta = (() => {
+        const recentSystem = [...messages]
+            .reverse()
+            .find((m) => m.sender_id === null && typeof m.content === "string" && /System:/i.test(m.content) && /(cancel|expired)/i.test(m.content));
+        const text = recentSystem?.content || "";
+        const source = /cancelled by buyer\./i.test(text)
+            ? ("buyer" as const)
+            : /expired due to payment timeout|cancelled due to timeout/i.test(text)
+                ? ("timeout" as const)
+                : /cancelled by support/i.test(text)
+                    ? ("support" as const)
+                    : ("unknown" as const);
+        return { source, text };
+    })();
+
+    const cancelSafetyLabel = isBuyer
+        ? "I confirm I have NOT sent payment for this order."
+        : isSeller
+            ? "I confirm I have NOT received payment for this order."
+            : "I confirm no payment was sent/received for this order.";
+
+    const createdAtMs = Number.isFinite(new Date(order.created_at).getTime()) ? new Date(order.created_at).getTime() : nowTick;
+    const expiresAtMs = order.expires_at ? new Date(order.expires_at).getTime() : null;
+    const fallbackExpiresAtMs = createdAtMs + Math.max(1, order.payment_window_minutes) * 60_000;
+    const deadlineMs = Number.isFinite(expiresAtMs ?? NaN) ? (expiresAtMs as number) : fallbackExpiresAtMs;
+    const remainingMs = deadlineMs - nowTick;
+    const hasDeadline = Number.isFinite(deadlineMs) && deadlineMs > 0;
+    const isExpired = order.status === "created" && remainingMs <= 0;
+    const formatRemaining = (ms: number) => {
+        const clamped = Math.max(0, ms);
+        const totalSeconds = Math.floor(clamped / 1000);
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return `${m}:${String(s).padStart(2, "0")}`;
+    };
   
   // Calculations
   const statusColors = {
-      created: "text-blue-400",
-      paid_confirmed: "text-amber-400",
-      disputed: "text-red-400",
-      completed: "text-green-400",
-      cancelled: "text-gray-400"
+      created: "text-[var(--accent)]",
+      paid_confirmed: "text-[var(--warn)]",
+      disputed: "text-[var(--warn)]",
+      completed: "text-[var(--up)]",
+      cancelled: "text-[var(--muted)]"
   };
 
     const orderTitle =
@@ -399,38 +562,278 @@ export default function OrderPage() {
                 ? `Sell ${order.asset_symbol}`
                 : "P2P Order";
 
+    const statusLabel = order.status.replace(/_/g, " ");
+
+    const stepIndex = (() => {
+        if (order.status === "created") return 1;
+        if (order.status === "paid_confirmed") return 2;
+        if (order.status === "disputed") return 2;
+        if (order.status === "completed") return 3;
+        return 0;
+    })();
+
+    const stepLabel = (i: number) => {
+        if (i === 1) return isBuyer ? "Send payment" : "Await payment";
+        if (i === 2) return isBuyer ? "Marked as paid" : "Verify + release";
+        if (i === 3) return "Completed";
+        return "";
+    };
+    const nextStepText = (() => {
+        if (!isBuyer && !isSeller) return "Log in to view your role for this order.";
+        if (order.status === "disputed") return "This order is in dispute. Keep communication in chat while support reviews.";
+        if (order.status === "completed") return "Order completed. Crypto has been released to the buyer.";
+        if (order.status === "cancelled") return "Order cancelled. No further actions are available.";
+
+        if (isBuyer && order.status === "created") {
+            return `Pay the seller ${order.amount_fiat} ${order.fiat_currency} using the payout details on this page, then mark as paid.`;
+        }
+        if (isBuyer && order.status === "paid_confirmed") {
+            return "You marked payment as sent. Wait for the seller to verify and release crypto.";
+        }
+        if (isSeller && order.status === "created") {
+            return "Wait for the buyer to pay. Do not release crypto until you have received funds.";
+        }
+        if (isSeller && order.status === "paid_confirmed") {
+            return "Buyer marked as paid. Verify you received funds, then release crypto to complete the order.";
+        }
+        return "";
+    })();
+
   return (
-    <div className="min-h-screen bg-[var(--background)] p-4 md:p-8">
-      <div className="mx-auto max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="min-h-screen bg-[var(--background)] p-4 md:p-8">
+            <div className="mx-auto max-w-6xl">
+                {/* Synapse header */}
+                <div className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+                    <div className="relative p-5 md:p-6">
+                        <div className="pointer-events-none absolute inset-0 opacity-60"
+                            style={{
+                                background:
+                                    "radial-gradient(600px 220px at 20% 0%, color-mix(in oklab, var(--accent) 25%, transparent) 0%, transparent 60%), radial-gradient(420px 220px at 80% 10%, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 55%)",
+                            }}
+                        />
+
+                        <div className="relative flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <div className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+                                    <h1 className="text-lg md:text-xl font-extrabold tracking-tight text-[var(--foreground)] truncate">
+                                        {orderTitle}
+                                    </h1>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                    {displayRole && (
+                                        <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 font-bold tracking-wide text-[var(--foreground)]">
+                                            {displayRole}
+                                        </span>
+                                    )}
+                                    <span className={`rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 font-bold uppercase ${statusColors[order.status] || "text-[var(--foreground)]"}`}>
+                                        {statusLabel}
+                                    </span>
+                                    <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 font-semibold text-[var(--muted)]">
+                                        ID {order.id.slice(0, 8)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                                    <div className="text-[10px] font-semibold text-[var(--muted)]">Fiat</div>
+                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">
+                                        {Number(order.amount_fiat).toLocaleString()} {order.fiat_currency}
+                                    </div>
+                                </div>
+                                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                                    <div className="text-[10px] font-semibold text-[var(--muted)]">Crypto</div>
+                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">
+                                        {Number(order.amount_asset).toLocaleString()} {order.asset_symbol}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Stepper */}
+                        <div className="relative mt-5 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 overflow-hidden">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                    {[1, 2, 3].map((i) => {
+                                        const active = stepIndex === i;
+                                        const done = stepIndex > i;
+                                        return (
+                                            <div key={i} className="flex items-center gap-2">
+                                                <div
+                                                    className={
+                                                        "h-7 w-7 rounded-full border flex items-center justify-center text-[11px] font-extrabold " +
+                                                        (done
+                                                            ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                                                            : active
+                                                                ? "border-[var(--accent)] bg-transparent text-[var(--foreground)]"
+                                                                : "border-[var(--border)] bg-transparent text-[var(--muted)]")
+                                                    }
+                                                >
+                                                    {i}
+                                                </div>
+                                                <div className={"max-w-[140px] truncate text-xs font-semibold sm:max-w-none " + (active || done ? "text-[var(--foreground)]" : "text-[var(--muted)]")}>
+                                                    {stepLabel(i)}
+                                                </div>
+                                                {i !== 3 && <div className="hidden sm:block h-px w-8 bg-[var(--border)]" />}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {hasDeadline && order.status === "created" && (
+                                    <div
+                                        className={
+                                            "rounded-lg border px-3 py-2 text-xs font-semibold tabular-nums " +
+                                            (remainingMs <= 0
+                                                ? "border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                                : remainingMs < 5 * 60_000
+                                                    ? "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                                    : "border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] text-[var(--foreground)]")
+                                        }
+                                    >
+                                        {remainingMs <= 0 ? "Payment window ended" : `Time left ${formatRemaining(remainingMs)}`}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="mt-2 text-[10px] text-[var(--muted)]">
+                                Signal rule: pay only to the payout details shown on this page. Ignore any different details sent via chat.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {(order.status === "completed" || order.status === "cancelled" || order.status === "disputed" || (order.status === "created" && isExpired)) && (
+                    <div
+                        className={
+                            "mb-6 rounded-2xl border p-4 md:p-5 overflow-hidden relative " +
+                            (order.status === "completed"
+                                ? "border-[color-mix(in_srgb,var(--up)_25%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--card))]"
+                                : order.status === "disputed"
+                                    ? "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--card))]"
+                                    : order.status === "cancelled"
+                                        ? cancelMeta.source === "buyer"
+                                            ? "border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--card))]"
+                                            : "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--card))]"
+                                        : "border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--card))]")
+                        }
+                    >
+                        <div
+                            className="pointer-events-none absolute inset-0 opacity-55"
+                            style={{
+                                background:
+                                    "radial-gradient(620px 220px at 20% 0%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 60%), radial-gradient(420px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 8%, transparent) 0%, transparent 55%)",
+                            }}
+                        />
+                        <div className="relative flex flex-col gap-1">
+                            <div className="text-sm font-extrabold text-[var(--foreground)]">
+                                {order.status === "completed"
+                                    ? "Trade completed"
+                                    : order.status === "disputed"
+                                        ? "Trade in dispute"
+                                        : order.status === "cancelled"
+                                            ? "Trade cancelled"
+                                            : "Payment window ended"}
+                            </div>
+                            <div className="text-xs text-[var(--muted)]">
+                                {order.status === "completed"
+                                    ? "Crypto has been released to the buyer. Chat is closed."
+                                    : order.status === "disputed"
+                                        ? "Keep communication in chat while support reviews."
+                                        : order.status === "cancelled"
+                                            ? cancelMeta.source === "timeout"
+                                                ? "Order expired due to payment timeout. Escrow released."
+                                                : cancelMeta.source === "buyer"
+                                                    ? "Cancelled by buyer. Escrow released."
+                                                    : cancelMeta.source === "support"
+                                                        ? "Support cancelled this order."
+                                                        : "This order was cancelled."
+                                            : isBuyer
+                                                ? "Do not send funds. If you already paid, open a dispute immediately and include proof in chat."
+                                                : "Do not release crypto. You may cancel due to timeout to release escrow."}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left Column: Chat */}
-        <div className="lg:col-span-2 flex flex-col h-[80vh] bg-[var(--card)] rounded-xl border border-[var(--border)] overflow-hidden">
-            <div className="p-4 border-b border-[var(--border)] bg-[var(--card-2)]">
-                <h2 className="font-bold text-[var(--foreground)]">Order Chat</h2>
-                                <div className="flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
-                                    <p>Do not pay outside the platform. Keep conversations here.</p>
-                                    {lastRefreshedAt && <span>Updated {lastRefreshedAt.toLocaleTimeString()}</span>}
+                <div className="lg:col-span-2 flex flex-col h-[78vh] md:h-[80vh] bg-[var(--card)] rounded-2xl border border-[var(--border)] overflow-hidden">
+                        <div className="relative p-4 border-b border-[var(--border)] bg-[var(--card-2)]">
+                            <div
+                                className="pointer-events-none absolute inset-0 opacity-50"
+                                style={{
+                                    background:
+                                        "radial-gradient(500px 240px at 15% 0%, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 60%)",
+                                }}
+                            />
+
+                            <div className="relative flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <h2 className="font-extrabold text-[var(--foreground)]">Synapse Chat</h2>
+                                    <div className="mt-1 text-xs text-[var(--muted)]">
+                                        Keep it factual: timestamps, references, and confirmations.
+                                    </div>
                                 </div>
-            </div>
+                                <div className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[10px]">
+                                    <div className="font-bold text-[var(--foreground)]">Safety rail</div>
+                                    <div className="mt-0.5 text-[var(--muted)]">Never pay to details sent in chat.</div>
+                                </div>
+                            </div>
+                        </div>
             
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.map((m) => {
                     const isMe = !!m.sender_id && !!currentUser && m.sender_id === currentUser.id;
                     const isSystem = m.sender_id === null;
                     if (isSystem) {
                         return (
                             <div key={m.id} className="flex justify-center my-4">
-                                <span className="text-xs bg-gray-800 text-gray-300 px-3 py-1 rounded-full">{m.content}</span>
+                                <span className="text-xs rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-[var(--muted)]">
+                                    {m.content}
+                                </span>
                             </div>
                         )
                     }
+
+                    const senderLabel =
+                        m.sender_email ||
+                        (m.sender_id === order.buyer_id
+                            ? order.buyer_email
+                            : m.sender_id === order.seller_id
+                                ? order.seller_email
+                                : "User");
+
                     return (
-                        <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[80%] rounded-lg p-3 text-sm ${
-                                isMe ? 'bg-[var(--accent)] text-white' : 'bg-[var(--muted-bg)] text-[var(--foreground)]'
-                            }`}>
-                                <p>{m.content}</p>
-                                <div className="text-[10px] opacity-70 mt-1 text-right">
+                        <div key={m.id} className={`flex gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                            {!isMe && (
+                                <div className="pt-1">
+                                    <Avatar
+                                        seed={senderLabel}
+                                        label={senderLabel}
+                                        size={26}
+                                        fallbackText={senderLabel.slice(0, 2).toUpperCase()}
+                                    />
+                                </div>
+                            )}
+                            <div className={`max-w-[82%] ${isMe ? "text-right" : "text-left"}`}>
+                                {!isMe && (
+                                    <div className="mb-1 text-[10px] font-semibold text-[var(--muted)] truncate">
+                                        {senderLabel}
+                                    </div>
+                                )}
+                                <div
+                                    className={
+                                        "rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words " +
+                                        (isMe
+                                            ? "bg-[var(--accent)] text-white"
+                                            : "border border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)]")
+                                    }
+                                >
+                                    {m.content}
+                                </div>
+                                <div className={`mt-1 text-[10px] text-[var(--muted)] ${isMe ? "text-right" : "text-left"}`}>
                                     {new Date(m.created_at).toLocaleTimeString()}
                                 </div>
                             </div>
@@ -442,15 +845,23 @@ export default function OrderPage() {
 
             <div className="p-4 border-t border-[var(--border)] bg-[var(--card-2)] flex gap-2">
                 <input 
-                    className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)]"
-                    placeholder="Type a message..."
+                    disabled={!canChat}
+                    className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-60"
+                    placeholder={
+                        !isBuyer && !isSeller
+                            ? "Log in to chat"
+                            : isTerminal
+                                ? "Chat is closed for finished orders"
+                                : "Type a message…"
+                    }
                     value={msgInput}
                     onChange={e => setMsgInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    onKeyDown={e => (e.key === 'Enter' && canChat ? sendMessage() : null)}
                 />
                 <button 
+                    disabled={!canChat || !msgInput.trim()}
                     onClick={sendMessage}
-                    className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg font-bold text-sm hover:brightness-110"
+                    className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg font-bold text-sm hover:brightness-110 disabled:opacity-50"
                 >
                     Send
                 </button>
@@ -459,16 +870,56 @@ export default function OrderPage() {
 
         {/* Right Column: Order Info */}
         <div className="space-y-6">
-            
+
+            {/* Next step (role-aware) */}
+            <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6">
+                <div className="flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-sm font-extrabold text-[var(--foreground)]">Next step</h3>
+                        <p className="mt-1 text-xs text-[var(--muted)]">A clean checklist tailored to your role.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {displayRole && (
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[10px] font-bold tracking-wide text-[var(--foreground)]">
+                                {displayRole}
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                <div
+                    className={
+                        "mt-4 rounded-xl border px-4 py-3 text-xs " +
+                        (order.status === "disputed"
+                            ? "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                            : order.status === "paid_confirmed"
+                                ? "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                : order.status === "created"
+                                    ? "border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] text-[var(--foreground)]"
+                                    : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)]")
+                    }
+                >
+                    <div className="font-semibold">{nextStepText}</div>
+                    {isBuyer && order.status === "created" && (
+                        <div className="mt-2 text-[10px] opacity-90">
+                            Tip: copy payout details from “Seller Payment Details” below. If details are missing, do not pay.
+                        </div>
+                    )}
+                    {isSeller && order.status === "paid_confirmed" && (
+                        <div className="mt-2 text-[10px] opacity-90">
+                            Tip: verify your incoming payment first. Release is final for this order.
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Order Details Card */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 space-y-4">
-                <div className="flex justify-between items-center">
-                   <h1 className="text-xl font-bold text-[var(--foreground)]">
-                       {orderTitle}
-                   </h1>
-                   <span className={`font-bold uppercase ${statusColors[order.status] || "text-white"}`}>
-                       {order.status.replace('_', ' ')}
-                   </span>
+            <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-extrabold text-[var(--foreground)]">Trade summary</h3>
+                    <span className={`rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[10px] font-bold uppercase ${statusColors[order.status] || "text-[var(--foreground)]"}`}>
+                        {statusLabel}
+                    </span>
                 </div>
 
                 <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs">
@@ -476,8 +927,8 @@ export default function OrderPage() {
                     <span
                         className={`rounded-full border px-2 py-0.5 font-semibold ${
                             paymentDetailsReady
-                                ? "border-green-500/30 bg-green-500/15 text-green-400"
-                                : "border-amber-500/30 bg-amber-500/15 text-amber-400"
+                                ? "border-[color-mix(in_srgb,var(--up)_25%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                : "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]"
                         }`}
                     >
                         {paymentDetailsReady ? "Verified" : "Missing"}
@@ -486,9 +937,19 @@ export default function OrderPage() {
                 
                 <div className="space-y-2 text-sm">
                     {counterparty && (
-                        <div className="flex justify-between">
+                        <div className="flex items-center justify-between gap-3">
                             <span className="text-[var(--muted)]">Counterparty</span>
-                            <span className="text-[var(--foreground)] text-xs font-mono">{counterparty.email || counterparty.id.slice(0, 8)}</span>
+                            <div className="flex items-center gap-2">
+                                <Avatar
+                                    seed={counterparty.email || counterparty.id}
+                                    label={counterparty.email || counterparty.id}
+                                    size={28}
+                                    fallbackText={(counterparty.email || counterparty.id).slice(0, 2).toUpperCase()}
+                                />
+                                <span className="text-[var(--foreground)] text-xs font-mono">
+                                    {counterparty.email || `${counterparty.id.slice(0, 8)}…`}
+                                </span>
+                            </div>
                         </div>
                     )}
                     {reputation?.counts && (
@@ -514,9 +975,28 @@ export default function OrderPage() {
                     <div className="flex justify-between">
                         <span className="text-[var(--muted)]">Price per unit</span>
                         <span className="text-[var(--foreground)]">
-                            {Number(order.price).toLocaleString()} {order.fiat_currency}
+                            {Number(order.price).toLocaleString()} {fiatFlag(order.fiat_currency) ? `${fiatFlag(order.fiat_currency)} ` : ""}{order.fiat_currency}/{order.asset_symbol}
                         </span>
                     </div>
+                    {refMid && (
+                        <div className="flex justify-between">
+                            <span className="text-[var(--muted)]">Reference</span>
+                            <span className="text-[var(--muted)] text-xs">
+                                ~{refMid.toLocaleString()} {order.fiat_currency}/{order.asset_symbol}
+                            </span>
+                        </div>
+                    )}
+                    {hasDeadline && (
+                        <div className="flex justify-between">
+                            <span className="text-[var(--muted)]">Payment window</span>
+                            <span className="text-[var(--foreground)] text-xs tabular-nums">
+                                {order.payment_window_minutes} min
+                                {order.status === "created"
+                                    ? " • " + (remainingMs <= 0 ? "ended" : formatRemaining(remainingMs) + " left")
+                                    : ""}
+                            </span>
+                        </div>
+                    )}
                      <div className="flex justify-between pt-2 border-t border-[var(--border)]">
                         <span className="text-[var(--muted)]">Order ID</span>
                         <span className="text-[var(--muted)] text-xs font-mono">{order.id.slice(0,8)}</span>
@@ -525,10 +1005,23 @@ export default function OrderPage() {
             </div>
 
             {/* Dispute */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 space-y-3">
-                <h3 className="text-sm font-bold text-[var(--muted)]">Dispute</h3>
+            <div className="relative bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 space-y-3 overflow-hidden">
+                <div
+                    className="pointer-events-none absolute inset-0 opacity-55"
+                    style={{
+                        background:
+                            "radial-gradient(520px 220px at 15% 0%, color-mix(in oklab, var(--warn) 16%, transparent) 0%, transparent 60%), radial-gradient(360px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 55%)",
+                    }}
+                />
+                <div className="relative flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="grid h-7 w-7 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-[var(--warn)] text-sm">!</span>
+                        <h3 className="text-sm font-extrabold text-[var(--foreground)]">Dispute</h3>
+                    </div>
+                    <span className="text-[10px] font-semibold text-[var(--muted)]">Escalation rail</span>
+                </div>
                 {order.status === "disputed" ? (
-                    <div className="rounded border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                    <div className="relative rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                         This order is currently in dispute. Keep communication in chat while support reviews.
                     </div>
                 ) : order.status === "completed" || order.status === "cancelled" ? (
@@ -541,31 +1034,42 @@ export default function OrderPage() {
                             value={disputeReason}
                             onChange={(e) => setDisputeReason(e.target.value)}
                             placeholder="Explain the issue (e.g. paid but seller not releasing, wrong payment details, etc.)"
-                            className="min-h-[90px] w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+                            className="relative min-h-[90px] w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                         />
                         <button
                             disabled={disputeLoading}
                             onClick={openDispute}
-                            className="w-full rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white hover:brightness-110 disabled:opacity-50"
+                            className="w-full rounded-xl bg-[color-mix(in_srgb,var(--warn)_85%,black)] px-4 py-2 text-sm font-extrabold text-white hover:brightness-110 disabled:opacity-50"
                         >
                             {disputeLoading ? "Opening dispute..." : "Open Dispute"}
                         </button>
-                        <div className="text-xs text-[var(--muted)]">
-                            Only open a dispute if you can’t resolve via chat.
-                        </div>
+                        <div className="text-xs text-[var(--muted)]">Only open a dispute if you can’t resolve via chat.</div>
                     </>
                 )}
             </div>
 
             {/* Feedback */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 space-y-3">
-                <h3 className="text-sm font-bold text-[var(--muted)]">Feedback</h3>
+            <div className="relative bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 space-y-3 overflow-hidden">
+                <div
+                    className="pointer-events-none absolute inset-0 opacity-55"
+                    style={{
+                        background:
+                            "radial-gradient(520px 220px at 15% 0%, color-mix(in oklab, var(--up) 14%, transparent) 0%, transparent 60%), radial-gradient(360px 220px at 90% 10%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 55%)",
+                    }}
+                />
+                <div className="relative flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="grid h-7 w-7 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-[var(--up)] text-sm">✓</span>
+                        <h3 className="text-sm font-extrabold text-[var(--foreground)]">Feedback</h3>
+                    </div>
+                    <span className="text-[10px] font-semibold text-[var(--muted)]">Reputation signal</span>
+                </div>
                 {order.status !== "completed" ? (
                     <div className="rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
                         Feedback becomes available after the order completes.
                     </div>
                 ) : feedbackDone ? (
-                    <div className="rounded border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-400">
+                    <div className="rounded-xl border border-[color-mix(in_srgb,var(--up)_25%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                         Thanks — your feedback was submitted.
                     </div>
                 ) : (
@@ -574,22 +1078,24 @@ export default function OrderPage() {
                             <button
                                 type="button"
                                 onClick={() => setFeedbackRating("positive")}
-                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
-                                    feedbackRating === "positive"
-                                        ? "border-green-500/30 bg-green-500/15 text-green-400"
-                                        : "border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)]"
-                                }`}
+                                className={
+                                    "flex-1 rounded-xl border px-3 py-2 text-sm font-extrabold transition " +
+                                    (feedbackRating === "positive"
+                                        ? "border-[color-mix(in_srgb,var(--up)_35%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                        : "border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)] hover:bg-[var(--card-2)]")
+                                }
                             >
                                 Positive
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setFeedbackRating("negative")}
-                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
-                                    feedbackRating === "negative"
-                                        ? "border-red-500/30 bg-red-500/15 text-red-300"
-                                        : "border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)]"
-                                }`}
+                                className={
+                                    "flex-1 rounded-xl border px-3 py-2 text-sm font-extrabold transition " +
+                                    (feedbackRating === "negative"
+                                        ? "border-[color-mix(in_srgb,var(--down)_35%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                        : "border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)] hover:bg-[var(--card-2)]")
+                                }
                             >
                                 Negative
                             </button>
@@ -598,12 +1104,12 @@ export default function OrderPage() {
                             value={feedbackComment}
                             onChange={(e) => setFeedbackComment(e.target.value)}
                             placeholder="Optional comment"
-                            className="min-h-[80px] w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+                            className="min-h-[80px] w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
                         />
                         <button
                             disabled={feedbackLoading}
                             onClick={submitFeedback}
-                            className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-bold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-50"
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-extrabold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-50"
                         >
                             {feedbackLoading ? "Submitting..." : "Submit Feedback"}
                         </button>
@@ -612,27 +1118,44 @@ export default function OrderPage() {
             </div>
 
             {/* Terms Card */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6">
-                <h3 className="text-sm font-bold text-[var(--muted)] mb-2">Advertiser Terms</h3>
+            <div className="relative bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 overflow-hidden">
+                <div
+                    className="pointer-events-none absolute inset-0 opacity-55"
+                    style={{
+                        background:
+                            "radial-gradient(520px 220px at 15% 0%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 60%), radial-gradient(360px 220px at 90% 10%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 55%)",
+                    }}
+                />
+                <h3 className="relative text-sm font-extrabold text-[var(--foreground)] mb-2">Advertiser Terms</h3>
                 <p className="text-sm text-[var(--foreground)] whitespace-pre-wrap">{order.ad_terms || "No specific terms."}</p>
             </div>
 
             {/* Payment Methods / Details */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6">
-                <h3 className="text-sm font-bold text-[var(--muted)] mb-3">
+            <div className="relative bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 overflow-hidden">
+                <div
+                    className="pointer-events-none absolute inset-0 opacity-55"
+                    style={{
+                        background:
+                            "radial-gradient(520px 220px at 15% 0%, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 60%), radial-gradient(360px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 12%, transparent) 0%, transparent 55%)",
+                    }}
+                />
+                <div className="relative flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-extrabold text-[var(--foreground)]">
                     {isBuyer
                       ? "Seller Payment Details"
                       : isSeller
                         ? "Your Payment Details Shared With Buyer"
                         : "Payment Details"}
-                </h3>
+                    </h3>
+                    <span className="text-[10px] font-semibold text-[var(--muted)]">Payout rail</span>
+                </div>
 
                 {isBuyer ? (
-                    <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                    <p className="relative mb-3 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                         Pay only to the seller details shown below. Ignore any different account sent in chat.
                     </p>
                 ) : isSeller ? (
-                    <p className="mb-3 rounded border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-300">
+                    <p className="relative mb-3 rounded-xl border border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                         The buyer is instructed to pay only to these details.
                     </p>
                 ) : (
@@ -645,13 +1168,20 @@ export default function OrderPage() {
                 {Array.isArray(order.payment_method_snapshot) && order.payment_method_snapshot.length > 0 ? (
                     <div className="space-y-3">
                         {order.payment_method_snapshot.map((pm, idx: number) => (
-                             <div key={idx} className="p-3 bg-[var(--bg)] rounded border border-[var(--border)]">
+                             <div key={idx} className="relative p-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
+                                 <div
+                                     className="pointer-events-none absolute inset-0 opacity-35"
+                                     style={{
+                                         background:
+                                             "radial-gradient(420px 160px at 20% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%)",
+                                     }}
+                                 />
                                  <div className="flex items-center gap-2 mb-2">
                                      <span className="font-bold text-sm text-[var(--foreground)]">
                                          {pm.name || getPaymentMethodName(pm.identifier)}
                                      </span>
-                                     <span className="text-[10px] bg-[var(--card)] px-2 py-0.5 rounded border border-[var(--border)]">
-                                         {getPaymentMethodName(pm.identifier)}
+                                     <span className={paymentMethodBadge(pm.identifier).className}>
+                                         {paymentMethodBadge(pm.identifier).label}
                                      </span>
                                  </div>
                                  {pm.details ? (
@@ -664,7 +1194,7 @@ export default function OrderPage() {
                                                                                                         <button
                                                                                                             type="button"
                                                                                                             onClick={() => copyToClipboard(`${pm.identifier}-${key}`, String(val ?? ""))}
-                                                                                                            className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted)] hover:text-[var(--foreground)]"
+                                                                                                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]"
                                                                                                         >
                                                                                                             {copiedField === `${pm.identifier}-${key}` ? "Copied" : "Copy"}
                                                                                                         </button>
@@ -681,15 +1211,15 @@ export default function OrderPage() {
                 ) : (
                     /* 2. Fallback to IDs (Legacy) */
                     <div className="space-y-2">
-                        <p className="text-xs text-[var(--muted)]">Available payment methods:</p>
+                                                <p className="text-xs text-[var(--muted)]">Payment method IDs (legacy):</p>
                         <div className="flex flex-wrap gap-2">
                             {order.payment_method_ids?.map(id => (
-                              <span key={id} className="rounded-full bg-[var(--bg)] px-3 py-1 text-xs border border-[var(--border)] font-medium">
-                                {getPaymentMethodName(id)}
+                                                            <span key={id} className="rounded-full bg-[var(--bg)] px-3 py-1 text-xs border border-[var(--border)] font-medium">
+                                                                {String(id).slice(0, 8)}…
                               </span>
                             ))}
                         </div>
-                        <p className="text-xs text-amber-500 mt-2">
+                        <p className="mt-2 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                             Seller account details are missing for this order. Do not transfer funds until exact seller details are visible here.
                         </p>
                     </div>
@@ -697,8 +1227,32 @@ export default function OrderPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 space-y-3">
-                <h3 className="text-sm font-bold text-[var(--muted)] mb-2">Actions</h3>
+            <div className="relative bg-[var(--card)] rounded-2xl border border-[var(--border)] p-6 space-y-3 overflow-hidden">
+                <div
+                    className="pointer-events-none absolute inset-0 opacity-55"
+                    style={{
+                        background:
+                            "radial-gradient(520px 220px at 15% 0%, color-mix(in oklab, var(--up) 12%, transparent) 0%, transparent 60%), radial-gradient(360px 220px at 90% 10%, color-mix(in oklab, var(--warn) 10%, transparent) 0%, transparent 55%)",
+                    }}
+                />
+                <div className="relative flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="grid h-7 w-7 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-[var(--accent)] text-sm">◆</span>
+                        <h3 className="text-sm font-extrabold text-[var(--foreground)]">Actions</h3>
+                    </div>
+                    <span className="text-[10px] font-semibold text-[var(--muted)]">Execution rail</span>
+                </div>
+
+                {actionError && (
+                    <div className="rounded-xl border border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                        {actionError}
+                    </div>
+                )}
+                {actionNotice && (
+                    <div className="rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                        {actionNotice}
+                    </div>
+                )}
 
                 {!isBuyer && !isSeller && (
                     <div className="rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -707,36 +1261,57 @@ export default function OrderPage() {
                 )}
                 
                 {order.status === 'completed' && (
-                    <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-500 rounded text-center font-bold">
+                    <div className="p-3 rounded-xl border border-[color-mix(in_srgb,var(--up)_25%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--bg))] text-[var(--foreground)] text-center font-extrabold">
                         Order Completed Successfully
                     </div>
                 )}
                 
                 {order.status === 'cancelled' && (
-                    <div className="p-3 bg-gray-500/10 border border-gray-500/20 text-gray-500 rounded text-center font-bold">
-                        Order Cancelled
+                    <div
+                        className={
+                            "p-3 rounded-xl border text-center overflow-hidden relative " +
+                            (cancelMeta.source === "buyer"
+                                ? "border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] text-[var(--foreground)]"
+                                : "border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]")
+                        }
+                    >
+                        <div className="font-extrabold">Order Cancelled</div>
+                        <div className="mt-1 text-[10px] font-semibold text-[var(--muted)]">
+                            {cancelMeta.source === "timeout"
+                                ? "Expired due to payment timeout."
+                                : cancelMeta.source === "buyer"
+                                    ? "Cancelled by buyer."
+                                    : cancelMeta.source === "support"
+                                        ? "Cancelled by support."
+                                        : ""}
+                        </div>
                     </div>
                 )}
 
                 {/* BUYER ACTIONS */}
                 {isBuyer && order.status === 'created' && (
                     <>
+                        {isExpired && (
+                            <div className="rounded-xl border border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                                Payment window ended. Do not send funds. This order will expire and escrow will be released.
+                            </div>
+                        )}
                         {!paymentDetailsReady && (
-                            <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                            <div className="rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                                 Seller payout details are not complete yet. Do not transfer funds and do not mark as paid.
                             </div>
                         )}
                         <button 
-                            disabled={actionLoading || !paymentDetailsReady}
-                            onClick={() => doAction('PAY_CONFIRMED')}
-                            className="w-full py-3 bg-[var(--up)] text-white font-bold rounded-lg hover:brightness-110 disabled:opacity-50"
+                            disabled={actionLoading || !paymentDetailsReady || isExpired}
+                            onClick={() => openActionDialog("PAY_CONFIRMED")}
+                            className="w-full py-3 rounded-xl bg-[var(--warn)] text-white font-extrabold hover:brightness-110 disabled:opacity-50"
                         >
-                            Mark as Paid
+                            {isExpired ? "Payment window ended" : "Mark as Paid"}
                         </button>
                         <button 
                             disabled={actionLoading}
-                            onClick={() => doAction('CANCEL')}
-                            className="w-full py-2 bg-transparent text-[var(--muted)] border border-[var(--border)] rounded-lg hover:bg-[var(--card-2)]"
+                            onClick={() => openActionDialog("CANCEL")}
+                            className="w-full py-2 rounded-xl border border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-transparent text-[var(--down)] font-extrabold hover:bg-[color-mix(in_srgb,var(--down-bg)_60%,var(--card-2))]"
                         >
                             Cancel Order
                         </button>
@@ -748,49 +1323,27 @@ export default function OrderPage() {
 
                 {isBuyer && order.status === 'paid_confirmed' && (
                     <div className="space-y-3">
-                        <div className="text-center p-3 bg-amber-500/10 text-amber-500 rounded border border-amber-500/20">
+                        <div className="text-center p-3 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)] font-semibold">
                             Waiting for Seller to Release...
                         </div>
-                        {/* Dev Tool: Simulate Seller Release */}
-                        {process.env.NODE_ENV !== 'production' && (
-                             <button 
-                                onClick={async () => {
-                                    if(!confirm("DEV: Simulate Seller Release?")) return;
-                                    setActionLoading(true);
-                                    try {
-                                        await fetch(`/api/dev/p2p/simulate-release?orderId=${order.id}`, { method: 'POST' });
-                                    } finally { setActionLoading(false); }
-                                }}
-                                className="w-full text-xs py-2 bg-purple-900/50 text-purple-200 border border-purple-500/30 rounded hover:bg-purple-900/80 dashed"
-                            > 
-                             [DEV] Simulate Seller Release 
-                            </button>
-                        )}
                     </div>
                 )}
 
                 {/* SELLER ACTIONS */}
                 {isSeller && order.status === 'created' && (
                     <div className="space-y-3">
-                        <div className="text-center p-3 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20">
-                            Waiting for Buyer to Pay...
+                        <div className="text-center p-3 rounded-xl border border-[color-mix(in_srgb,var(--accent)_25%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] text-[var(--foreground)] font-semibold">
+                            {isExpired ? "Payment window ended" : "Waiting for Buyer to Pay…"}
                         </div>
-                        {/* Dev Tool: Simulate Buyer Paying */}
-                        {process.env.NODE_ENV !== 'production' && (
-                            <button 
-                                onClick={async () => {
-                                    if(!confirm("DEV: Simulate Buyer Payment?")) return;
-                                    setActionLoading(true);
-                                    try {
-                                        await fetch(`/api/dev/p2p/simulate-pay?orderId=${order.id}`, { method: 'POST' });
-                                        // Refresh will happen via poll
-                                    } finally { setActionLoading(false); }
-                                }}
-                                className="w-full text-xs py-2 bg-purple-900/50 text-purple-200 border border-purple-500/30 rounded hover:bg-purple-900/80 dashed"
-                            > 
-                             [DEV] Simulate Buyer Pay 
+                        {isExpired ? (
+                            <button
+                                disabled={actionLoading}
+                                onClick={() => openActionDialog("CANCEL")}
+                                className="w-full py-2 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)] font-extrabold hover:brightness-110 disabled:opacity-50"
+                            >
+                                Cancel (timeout)
                             </button>
-                        )}
+                        ) : null}
                     </div>
                 )}
                 
@@ -799,20 +1352,116 @@ export default function OrderPage() {
                     <>
                         <button 
                            disabled={actionLoading}
-                           onClick={() => doAction('RELEASE')}
-                           className="w-full py-3 bg-[var(--up)] text-white font-bold rounded-lg hover:brightness-110 disabled:opacity-50"
+                                    onClick={() => openActionDialog("RELEASE")}
+                                    className="w-full py-3 rounded-xl bg-[var(--up)] text-white font-extrabold hover:brightness-110 disabled:opacity-50"
                         >
                             Release Crypto ({order.amount_asset} {order.asset_symbol})
                         </button>
-                        <p className="text-xs text-red-400 text-center mt-2">
+                                <p className="text-xs text-[var(--muted)] text-center mt-2">
                            Warning: Only release if you have confirmed receipt of funds in your bank account.
                         </p>
                     </>
                 )}
             </div>
 
+            {actionDialog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/60"
+                        onClick={() => (actionLoading ? null : setActionDialog(null))}
+                    />
+                    <div className="relative w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-2)] overflow-hidden">
+                        <div
+                            className="pointer-events-none absolute inset-0 opacity-60"
+                            style={{
+                                background:
+                                    "radial-gradient(620px 220px at 20% 0%, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 60%), radial-gradient(420px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 55%)",
+                            }}
+                        />
+                        <div className="p-5">
+                            <div className="relative text-sm font-extrabold text-[var(--foreground)]">
+                                {actionDialog.kind === "order_action"
+                                    ? getDialogCopy(actionDialog.action).title
+                                    : "Open dispute"}
+                            </div>
+                            <div className="relative mt-2 text-xs text-[var(--muted)]">
+                                {actionDialog.kind === "order_action"
+                                    ? getDialogCopy(actionDialog.action).body
+                                    : "Support will review this order. Open a dispute only if you can’t resolve the issue in chat."}
+                            </div>
+                            {actionDialog.kind === "order_action" && actionDialog.action === "PAY_CONFIRMED" && (
+                                <div className="relative mt-3 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                                    Next: the seller will verify your payment, then release crypto to your wallet.
+                                </div>
+                            )}
+                            {actionDialog.kind === "open_dispute" && (
+                                <div className="relative mt-3 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                                    Don’t share sensitive info. Keep evidence and payment references in chat.
+                                </div>
+                            )}
+                            {actionDialog.kind === "order_action" && actionDialog.action === "CANCEL" && (
+                                <label className="relative mt-4 flex items-start gap-2 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_55%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
+                                    <input
+                                        type="checkbox"
+                                        checked={cancelSafetyChecked}
+                                        onChange={(e) => setCancelSafetyChecked(e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 accent-[var(--warn)]"
+                                        disabled={actionLoading}
+                                    />
+                                    <span className="font-semibold">{cancelSafetyLabel}</span>
+                                </label>
+                            )}
+                            <div className="relative mt-5 grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => setActionDialog(null)}
+                                    className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-sm font-extrabold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-50"
+                                >
+                                    Back
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={
+                                        actionLoading ||
+                                        (actionDialog.kind === "order_action" &&
+                                            actionDialog.action === "CANCEL" &&
+                                            !cancelSafetyChecked)
+                                    }
+                                    onClick={async () => {
+                                        setActionDialog(null);
+                                        if (actionDialog.kind === "order_action") {
+                                            await runOrderAction(actionDialog.action);
+                                        } else {
+                                            await runOpenDispute();
+                                        }
+                                    }}
+                                    className={
+                                        "w-full rounded-xl px-3 py-2 text-sm font-extrabold text-white hover:brightness-110 disabled:opacity-50 " +
+                                        (actionDialog.kind === "open_dispute"
+                                            ? "bg-[var(--warn)]"
+                                            : actionDialog.action === "RELEASE"
+                                                ? "bg-[var(--up)]"
+                                                : actionDialog.action === "PAY_CONFIRMED"
+                                                    ? "bg-[var(--warn)]"
+                                                    : "bg-[var(--foreground)]")
+                                    }
+                                >
+                                    {actionLoading
+                                        ? "Working…"
+                                        : actionDialog.kind === "open_dispute"
+                                            ? "Open dispute"
+                                            : getDialogCopy(actionDialog.action).confirmLabel}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
       </div>
+        </div>
     </div>
   );
 }

@@ -63,6 +63,8 @@ export function statusForApiError(code: string): number {
     case "market_disabled":
     case "withdrawal_risk_blocked":
     case "ad_is_not_online":
+    case "p2p_open_orders_limit":
+    case "p2p_order_duplicate_open":
       return 409;
 
     // Gas token
@@ -80,6 +82,7 @@ export function statusForApiError(code: string): number {
 
     // Rate limiting
     case "rate_limit_exceeded":
+    case "p2p_order_create_cooldown":
       return 429;
 
     // Validation

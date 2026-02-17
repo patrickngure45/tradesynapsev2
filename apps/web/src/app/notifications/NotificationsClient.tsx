@@ -56,6 +56,8 @@ function iconForType(type: string) {
       return "!";
     case "p2p_order_created":
         return "★";
+    case "p2p_order_expiring":
+      return "!";
     case "p2p_dispute_opened":
     case "p2p_dispute_resolved":
       return "!";
@@ -72,21 +74,22 @@ function colorForType(type: string) {
     case "deposit_credited":
     case "withdrawal_completed":
     case "p2p_order_completed":
-      return "text-emerald-500";
+      return "text-[var(--up)]";
     case "order_partially_filled":
     case "withdrawal_approved":
     case "p2p_payment_confirmed":
     case "p2p_order_created":
-      return "text-blue-500";
+      return "text-[var(--accent)]";
     case "p2p_feedback_received":
-      return "text-emerald-500";
+      return "text-[var(--up)]";
     case "p2p_dispute_opened":
     case "p2p_dispute_resolved":
-      return "text-rose-500";
+    case "p2p_order_expiring":
+      return "text-[var(--warn)]";
     case "order_canceled":
     case "withdrawal_rejected":
     case "p2p_order_cancelled":
-      return "text-rose-500";
+      return "text-[var(--down)]";
     default:
       return "text-[var(--muted)]";
   }
@@ -103,6 +106,23 @@ export function NotificationsClient() {
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState(false);
   const [filter, setFilter] = useState<"all" | "unread">("all");
+
+  const markRead = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setNotifications((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
+    try {
+      await fetch(
+        "/api/notifications",
+        fetchOpts({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids }),
+        }),
+      );
+    } catch {
+      // silent
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -148,24 +168,49 @@ export function NotificationsClient() {
   return (
     <SiteChrome>
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Notifications</h1>
-          <p className="mt-1 text-xs text-[var(--muted)]">
-            {unreadCount > 0 ? `${unreadCount} unread` : "All caught up"}
-          </p>
+      {/* Synapse header */}
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          style={{
+            background:
+              "radial-gradient(700px 260px at 20% 0%, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 60%), radial-gradient(440px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 12%, transparent) 0%, transparent 55%)",
+          }}
+        />
+        <div className="relative flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <h1 className="text-xl font-extrabold tracking-tight">Signals</h1>
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {unreadCount > 0 ? `${unreadCount} unread` : "All caught up"}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={markAllRead}
+                disabled={marking}
+                className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+              >
+                Clear unread
+              </button>
+            )}
+            <Link
+              href="/p2p"
+              className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:brightness-110"
+            >
+              Go to P2P
+            </Link>
+          </div>
         </div>
-        {unreadCount > 0 && (
-          <button
-            type="button"
-            onClick={markAllRead}
-            disabled={marking}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[var(--accent)]/80 disabled:opacity-60"
-          >
-            Mark all read
-          </button>
-        )}
+
+        <div className="relative mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-xs text-[var(--muted)]">
+          You’ll see updates for P2P orders, spot fills, deposits/withdrawals, and security events.
+        </div>
       </div>
 
       {/* Filters */}
@@ -175,11 +220,12 @@ export function NotificationsClient() {
             key={f}
             type="button"
             onClick={() => setFilter(f)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              filter === f
-                ? "bg-[var(--accent)] text-white"
-                : "bg-[var(--card)] text-[var(--muted)] hover:text-[var(--foreground)]"
-            }`}
+            className={
+              "rounded-xl border px-3 py-1.5 text-xs font-semibold transition " +
+              (filter === f
+                ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--card))] text-[var(--foreground)]"
+                : "border-[var(--border)] bg-[var(--card)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]")
+            }
           >
             {f === "all" ? "All" : `Unread (${unreadCount})`}
           </button>
@@ -200,9 +246,9 @@ export function NotificationsClient() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-xl bg-[var(--card)] px-6 py-12 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--border)] text-lg">
-            🔔
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-6 py-12 text-center">
+          <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-lg">
+            ◆
           </div>
           <p className="text-sm text-[var(--muted)]">
             {filter === "unread" ? "No unread notifications" : "No notifications yet"}
@@ -215,13 +261,13 @@ export function NotificationsClient() {
           </Link>
         </div>
       ) : (
-        <div className="divide-y divide-[var(--border)] rounded-xl bg-[var(--card)]">
+        <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
           {filtered.map((n) => {
             const orderId = n.metadata_json?.order_id;
             const content = (
               <>
                 {/* Icon */}
-                <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--border)] text-sm ${colorForType(n.type)}`}>
+                <div className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-sm ${colorForType(n.type)}`}>
                   {iconForType(n.type)}
                 </div>
 
@@ -254,16 +300,30 @@ export function NotificationsClient() {
 
             if (orderId) {
                 return (
-                    <Link key={n.id} href={`/p2p/orders/${orderId}`} className={className}>
+                    <Link
+                      key={n.id}
+                      href={`/p2p/orders/${orderId}`}
+                      className={className}
+                      onClick={() => {
+                        if (!n.read) void markRead([n.id]);
+                      }}
+                    >
                         {content}
                     </Link>
                 )
             }
 
             return (
-              <div key={n.id} className={className}>
+              <button
+                key={n.id}
+                type="button"
+                className={className + " text-left w-full"}
+                onClick={() => {
+                  if (!n.read) void markRead([n.id]);
+                }}
+              >
                 {content}
-              </div>
+              </button>
             );
           })}
         </div>

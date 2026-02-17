@@ -28,10 +28,17 @@ import {
 } from "./src/lib/ws/channels";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? (dev ? "localhost" : "0.0.0.0");
+// IMPORTANT: Windows and some shells set HOSTNAME to the machine name (e.g. "Janjaa").
+// Using that as the bind address makes the server listen only on a single LAN IP,
+// which breaks access via localhost/127.0.0.1.
+//
+// - `BIND_HOST` controls what address we bind the HTTP server to.
+// - `PUBLIC_HOST` controls what host we print/use for Next.js hostname.
+const bindHost = process.env.BIND_HOST ?? (dev ? "0.0.0.0" : "0.0.0.0");
+const publicHost = process.env.PUBLIC_HOST ?? (dev ? "localhost" : bindHost);
 const port = parseInt(process.env.PORT ?? "3000", 10);
 
-const app = next({ dev, hostname, port });
+const app = next({ dev, hostname: publicHost, port });
 const handle = app.getRequestHandler();
 // Next.js dev server uses WebSocket upgrades for HMR. If we attach our own
 // `upgrade` handler we must forward unknown upgrades to Next, otherwise the
@@ -117,9 +124,12 @@ app
   // Start the shared market-data poll loop
   startPolling(sql);
 
-  server.listen(port, hostname, () => {
-    console.log(`  ▲ TradeSynapse ready on http://${hostname}:${port}`);
-    console.log(`  ⚡ WebSocket endpoint: ws://${hostname}:${port}/ws`);
+  server.listen(port, bindHost, () => {
+    console.log(`  ▲ TradeSynapse ready on http://${publicHost}:${port}`);
+    console.log(`  ⚡ WebSocket endpoint: ws://${publicHost}:${port}/ws`);
+    if (bindHost === "0.0.0.0") {
+      console.log("  ↳ Also reachable via http://127.0.0.1:" + port);
+    }
   });
 
   // ── Graceful shutdown ────────────────────────────────────────────

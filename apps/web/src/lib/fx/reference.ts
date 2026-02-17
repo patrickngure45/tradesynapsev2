@@ -333,32 +333,34 @@ export async function getOrComputeFxReferenceRate(
   if (quoteSym.length < 2) return null;
 
   // 1) Compute USDT/fiat reference (used by many flows: min/max limits, indices).
-  // Prefer P2P top-of-book for USDT when available, else fall back to live USD->fiat.
+  // Prefer live USD->fiat (market-based) first, then fall back to P2P top-of-book if live FX is unavailable.
   const usdtFiat = await (async () => {
+    const usdFiat = await getLiveUsdToFiatRate(quoteSym);
+    if (usdFiat) {
+      const spreadBps = clamp(Number(process.env.FX_USDT_FIAT_FALLBACK_SPREAD_BPS ?? "10"), 0, 500);
+      const half = spreadBps / 2 / 10_000;
+      const bid = usdFiat * (1 - half);
+      const ask = usdFiat * (1 + half);
+      const mid = (bid + ask) / 2;
+      return {
+        bid,
+        ask,
+        mid,
+        sources: {
+          kind: "live_usd_fiat_fallback",
+          base: "USDT",
+          quote: quoteSym,
+          usd_fiat_mid: usdFiat,
+          spread_bps: spreadBps,
+          note: "USDT pegged to USD for fallback conversion",
+        },
+      };
+    }
+
     const p2p = await getP2pFiatPerAssetFixedTop(sql, "USDT", quoteSym);
     if (p2p) return p2p;
 
-    const usdFiat = await getLiveUsdToFiatRate(quoteSym);
-    if (!usdFiat) return null;
-
-    const spreadBps = clamp(Number(process.env.FX_USDT_FIAT_FALLBACK_SPREAD_BPS ?? "10"), 0, 500);
-    const half = spreadBps / 2 / 10_000;
-    const bid = usdFiat * (1 - half);
-    const ask = usdFiat * (1 + half);
-    const mid = (bid + ask) / 2;
-    return {
-      bid,
-      ask,
-      mid,
-      sources: {
-        kind: "live_usd_fiat_fallback",
-        base: "USDT",
-        quote: quoteSym,
-        usd_fiat_mid: usdFiat,
-        spread_bps: spreadBps,
-        note: "USDT pegged to USD for fallback conversion",
-      },
-    };
+    return null;
   })();
 
   if (!usdtFiat) return null;

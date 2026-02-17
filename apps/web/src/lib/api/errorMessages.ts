@@ -158,6 +158,19 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     message: "P2P is not available in your country yet.",
   },
 
+  p2p_open_orders_limit: {
+    title: "Too many open trades",
+    message: "You already have too many open P2P orders awaiting payment. Finish or cancel an existing order and try again.",
+  },
+  p2p_order_duplicate_open: {
+    title: "Order already open",
+    message: "You already have an open order for this ad. Open the existing order to continue.",
+  },
+  p2p_order_create_cooldown: {
+    title: "Temporarily blocked",
+    message: "You have too many recent payment timeouts. Please wait a bit before creating a new P2P order.",
+  },
+
   // Not found
   not_found: {
     title: "Not found",

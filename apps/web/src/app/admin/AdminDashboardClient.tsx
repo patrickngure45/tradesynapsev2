@@ -72,6 +72,14 @@ type WalletData = {
   userCounts: UserCounts;
 };
 
+type AdminSystemStatus = {
+  overall: "online" | "degraded" | "offline";
+  db?: { ok: boolean; latency_ms: number | null };
+  outbox?: { open: number; dead: number; with_errors: number };
+  stale_expected_services?: string[];
+  internal_chain?: { last_tx_at: string | null };
+};
+
 // --- Helpers ---
 async function adminFetch(path: string, init?: RequestInit) {
   const res = await fetch(path, {
@@ -218,6 +226,39 @@ function normalizeWalletData(raw: any): WalletData {
 
 export function AdminDashboardClient() {
   const [tab, setTab] = useState<"wallet" | "withdrawals" | "reconciliation" | "dead-letters" | "audit-log" | "kyc-review">("wallet");
+
+  const [sysStatus, setSysStatus] = useState<AdminSystemStatus | null>(null);
+  const [sysStatusError, setSysStatusError] = useState<string | null>(null);
+
+  const fetchSystemStatus = useCallback(async () => {
+    try {
+      const data = await adminFetch("/api/admin/status");
+      setSysStatus(data);
+      setSysStatusError(null);
+    } catch (e) {
+      setSysStatus(null);
+      setSysStatusError(e instanceof Error ? e.message : "status_failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSystemStatus();
+    const t = setInterval(fetchSystemStatus, 20_000);
+    return () => clearInterval(t);
+  }, [fetchSystemStatus]);
+
+  const sysBadge = (() => {
+    if (sysStatusError) return <Badge text="System: unknown" variant="gray" />;
+    if (!sysStatus) return <Badge text="System: …" variant="gray" />;
+    switch (sysStatus.overall) {
+      case "online":
+        return <Badge text="System: Online" variant="green" />;
+      case "degraded":
+        return <Badge text="System: Degraded" variant="amber" />;
+      default:
+        return <Badge text="System: Offline" variant="red" />;
+    }
+  })();
   const [error, setError] = useState<string | null>(null);
 
   // Withdrawal state
@@ -530,6 +571,40 @@ export function AdminDashboardClient() {
           </button>
         </div>
       ) : null}
+
+      {/* System status */}
+      <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-semibold text-[var(--foreground)]">System</div>
+          <div className="flex items-center gap-2">
+            {sysBadge}
+            <button
+              type="button"
+              className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+              onClick={fetchSystemStatus}
+            >
+              refresh
+            </button>
+          </div>
+        </div>
+
+        {sysStatus ? (
+          <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-3">
+            <div>
+              DB: {sysStatus.db?.ok ? "ok" : "down"}
+              {typeof sysStatus.db?.latency_ms === "number" ? ` (${sysStatus.db.latency_ms}ms)` : ""}
+            </div>
+            <div>
+              Outbox: open {sysStatus.outbox?.open ?? 0}, dead {sysStatus.outbox?.dead ?? 0}, errors {sysStatus.outbox?.with_errors ?? 0}
+            </div>
+            <div>
+              Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
+            </div>
+          </div>
+        ) : (
+          <div className="text-[10px] text-[var(--muted)]">{sysStatusError ? `Status error: ${sysStatusError}` : "Checking..."}</div>
+        )}
+      </div>
 
       {/* Tab bar */}
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] text-xs">

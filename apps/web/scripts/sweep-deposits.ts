@@ -4,6 +4,7 @@ import { getSql } from "../src/lib/db";
 import { getBscProvider, getDepositAddressKey } from "../src/lib/blockchain/wallet";
 import { getHotWalletAddress, getHotWalletKey } from "../src/lib/blockchain/hotWallet";
 import { getTokenBalance, sendBnb, sendToken } from "../src/lib/blockchain/tokens";
+import { upsertServiceHeartbeat } from "../src/lib/system/heartbeat";
 
 // ── Well-known BEP-20 contracts to sweep (beyond what's in ex_asset) ─
 const EXTRA_TOKENS: Record<string, string> = {
@@ -89,6 +90,25 @@ async function main() {
   const provider = getBscProvider();
   const hotWallet = getHotWalletAddress();
 
+  const beat = async (details?: Record<string, unknown>) => {
+    try {
+      await upsertServiceHeartbeat(sql, {
+        service: "sweep-deposits:bsc",
+        status: "ok",
+        details: {
+          execute: EXECUTE,
+          min_bnb: MIN_BNB,
+          min_token_default: DEFAULT_MIN_SWEEP,
+          ...(details ?? {}),
+        },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  await beat({ event: "start" });
+
   const feeData = await provider.getFeeData();
   const gasPrice = feeData.gasPrice ?? ethers.parseUnits("3", "gwei");
   const tokenGasCost = gasPrice * TOKEN_TRANSFER_GAS;
@@ -114,6 +134,7 @@ async function main() {
 
   if (deposits.length === 0) {
     console.log("No deposit addresses found.");
+    await beat({ event: "noop", deposits: 0 });
     return;
   }
 
@@ -149,6 +170,8 @@ async function main() {
         if (result.value.balNum > 0) hasAnyToken = true;
         tokenResults.push(result.value);
       }
+
+      await beat({ event: "done", totalSwept, totalGasTopups, deposits: deposits.length });
     }
 
     // Skip entirely empty addresses

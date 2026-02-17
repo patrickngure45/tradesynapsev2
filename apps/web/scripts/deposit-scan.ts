@@ -6,6 +6,7 @@ import { getSql } from "../src/lib/db";
 import { getBscProvider, getEthProvider } from "../src/lib/blockchain/wallet";
 import { getTokenBalance } from "../src/lib/blockchain/tokens";
 import { createNotification } from "../src/lib/notifications";
+import { upsertServiceHeartbeat } from "../src/lib/system/heartbeat";
 
 /** Well-known system/omnibus ledger account owner (must match migration 007). */
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
@@ -64,6 +65,10 @@ function getScanChain(): "bsc" | "eth" {
   return "bsc";
 }
 
+function heartbeatServiceName(chain: "bsc" | "eth"): string {
+  return `deposit-scan:${chain}`;
+}
+
 function getProvider(chain: "bsc" | "eth"): ethers.JsonRpcProvider {
   return chain === "eth" ? getEthProvider() : getBscProvider();
 }
@@ -95,6 +100,23 @@ async function ensureSystemUser(sql: ReturnType<typeof getSql>) {
     VALUES (${SYSTEM_USER_ID}::uuid, 'active', 'full', 'ZZ')
     ON CONFLICT (id) DO NOTHING
   `;
+}
+
+async function beat(sql: ReturnType<typeof getSql>, chain: "bsc" | "eth", details?: Record<string, unknown>) {
+  try {
+    await upsertServiceHeartbeat(sql, {
+      service: heartbeatServiceName(chain),
+      status: "ok",
+      details: {
+        chain,
+        confirmations: getConfirmations(),
+        chunk: getBlockChunkSize(),
+        ...(details ?? {}),
+      },
+    });
+  } catch {
+    // ignore
+  }
 }
 
 type DepositAddressRow = { user_id: string; address: string };
@@ -195,6 +217,8 @@ async function main() {
   const chain = getScanChain();
   const provider = getProvider(chain);
 
+  await beat(sql, chain, { event: "start" });
+
   const confirmations = getConfirmations();
   const blockChunk = getBlockChunkSize();
   const currentBlock = await provider.getBlockNumber();
@@ -215,6 +239,7 @@ async function main() {
 
   if (fromBlock > safeToBlock) {
     console.log(`[deposit-scan] nothing to do fromBlock=${fromBlock} safeToBlock=${safeToBlock}`);
+    await beat(sql, chain, { event: "noop", fromBlock, safeToBlock });
     await sql.end({ timeout: 5 });
     return;
   }
@@ -383,7 +408,7 @@ async function main() {
 
   await sql`
     INSERT INTO ex_chain_deposit_cursor (chain, last_scanned_block)
-    VALUES ('bsc', ${safeToBlock})
+    VALUES (${chain}, ${safeToBlock})
     ON CONFLICT (chain) DO UPDATE
       SET last_scanned_block = EXCLUDED.last_scanned_block,
           updated_at = now()
@@ -392,6 +417,14 @@ async function main() {
   console.log(
     `[deposit-scan] done seenEvents=${seenEvents} credited=${credited} fallbackCredits=${fallbackCredits} advancedTo=${safeToBlock}`,
   );
+
+  await beat(sql, chain, {
+    event: "done",
+    seenEvents,
+    credited,
+    fallbackCredits,
+    advancedTo: safeToBlock,
+  });
   await sql.end({ timeout: 5 });
 }
 

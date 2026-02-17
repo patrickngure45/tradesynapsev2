@@ -11,6 +11,7 @@ export type NotificationType =
   | "trade_won"
   | "trade_lost"
   | "p2p_order_created"
+  | "p2p_order_expiring"
   | "p2p_payment_confirmed"
   | "p2p_order_completed"
   | "p2p_order_cancelled"

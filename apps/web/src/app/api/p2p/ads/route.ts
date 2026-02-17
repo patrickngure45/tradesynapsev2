@@ -110,9 +110,18 @@ export async function GET(req: NextRequest) {
     // Note: If user wants to BUY, we look for ads with side='SELL'
     const targetSide = side === "BUY" ? "SELL" : "BUY";
 
+    // For SELL ads (maker is seller), we must ensure there are usable payout details.
+    // Otherwise the taker can't pay because we can't show valid destination details.
+    const requireSellerPaymentDetails = targetSide === "SELL";
+
     // 1. Get Asset ID
     const [assetRow] = await sql`
-      SELECT id FROM ex_asset WHERE symbol = ${assetUpper} AND chain = 'bsc' LIMIT 1
+      SELECT id
+      FROM ex_asset
+      WHERE symbol = ${assetUpper}
+        AND chain = 'bsc'
+        AND is_enabled = true
+      LIMIT 1
     `;
     
     if (!assetRow) {
@@ -125,6 +134,7 @@ export async function GET(req: NextRequest) {
     const ads = await sql`
       SELECT 
         ad.id,
+        ad.user_id,
         ad.side,
         ad.fiat_currency,
         ad.price_type,
@@ -136,15 +146,27 @@ export async function GET(req: NextRequest) {
         ad.payment_window_minutes,
         ad.payment_method_ids,
         (
-          SELECT coalesce(jsonb_agg(DISTINCT pm.identifier), '[]'::jsonb)
+          SELECT coalesce(array_agg(DISTINCT pm.identifier), ARRAY[]::text[])
           FROM p2p_payment_method pm
           WHERE pm.user_id = ad.user_id
             AND pm.is_enabled = true
             AND pm.id::text = ANY(
               CASE
-                WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN (
+                WHEN jsonb_typeof(
+                  CASE
+                    WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                    WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                    ELSE '[]'::jsonb
+                  END
+                ) = 'array' THEN (
                   SELECT array_agg(x)
-                  FROM jsonb_array_elements_text(ad.payment_method_ids) AS x
+                  FROM jsonb_array_elements_text(
+                    CASE
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                      ELSE '[]'::jsonb
+                    END
+                  ) AS x
                 )
                 ELSE ARRAY[]::text[]
               END
@@ -152,15 +174,63 @@ export async function GET(req: NextRequest) {
         ) AS payment_methods,
         u.email,
         u.display_name,
+        coalesce(rep.positive, 0)::int AS rep_positive,
+        coalesce(rep.negative, 0)::int AS rep_negative,
+        coalesce(rep.total, 0)::int AS rep_total,
         ad.terms
       FROM p2p_ad ad
       JOIN app_user u ON ad.user_id = u.id
+      LEFT JOIN (
+        SELECT
+          to_user_id,
+          sum(CASE WHEN rating = 'positive' THEN 1 ELSE 0 END)::int AS positive,
+          sum(CASE WHEN rating = 'negative' THEN 1 ELSE 0 END)::int AS negative,
+          count(*)::int AS total
+        FROM p2p_feedback
+        GROUP BY to_user_id
+      ) rep ON rep.to_user_id = ad.user_id
       WHERE ad.status = 'online'
         AND ad.side = ${targetSide}
         AND ad.asset_id = ${assetRow.id}
         AND ad.fiat_currency = ${fiatUpper}
         ${amount ? sql`AND ad.min_limit <= ${amount} AND ad.max_limit >= ${amount}` : sql``}
         AND ad.remaining_amount > 0
+        ${
+          requireSellerPaymentDetails
+            ? sql`
+              AND EXISTS (
+                SELECT 1
+                FROM p2p_payment_method pm2
+                WHERE pm2.user_id = ad.user_id
+                  AND pm2.is_enabled = true
+                  AND pm2.id::text = ANY(
+                    CASE
+                      WHEN jsonb_typeof(
+                        CASE
+                          WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                          WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                          ELSE '[]'::jsonb
+                        END
+                      ) = 'array' THEN (
+                        SELECT array_agg(x)
+                        FROM jsonb_array_elements_text(
+                          CASE
+                            WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                            WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                            ELSE '[]'::jsonb
+                          END
+                        ) AS x
+                      )
+                      ELSE ARRAY[]::text[]
+                    END
+                  )
+                  AND pm2.details IS NOT NULL
+                  AND jsonb_typeof(pm2.details) = 'object'
+                  AND pm2.details <> '{}'::jsonb
+              )
+            `
+            : sql``
+        }
       ORDER BY ad.created_at DESC
       LIMIT 200
     `;

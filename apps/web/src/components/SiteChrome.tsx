@@ -46,8 +46,10 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         onClick={onClick}
         className={
           (className ? className + " " : "") +
-          "text-sm font-medium transition-colors hover:text-[var(--foreground)] " +
-          (active ? "text-[var(--foreground)]" : "text-[var(--muted)]")
+          "rounded-xl px-2.5 py-1 text-sm font-semibold transition-colors " +
+          (active
+            ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
+            : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]")
         }
       >
         {label}
@@ -57,8 +59,15 @@ export function SiteChrome({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col font-sans text-[var(--foreground)]">
-      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md overflow-x-clip">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:gap-x-6 lg:px-6">
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-16 opacity-70"
+          style={{
+            background:
+              "radial-gradient(800px 240px at 20% 0%, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 60%), radial-gradient(520px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 55%)",
+          }}
+        />
+
+        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:gap-x-6 lg:px-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-white shadow-sm">
@@ -70,7 +79,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </Link>
 
           {/* Desktop Product Nav */}
-          <nav className="hidden items-center gap-3 lg:gap-6 md:flex">
+          <nav className="hidden items-center gap-1.5 lg:gap-2 md:flex">
             {products.map((p) => (
               <NLink
                 key={p.href}
@@ -87,7 +96,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </nav>
 
           {/* Desktop User Nav */}
-          <nav className="hidden ml-auto items-center gap-3 lg:gap-5 md:flex">
+          <nav className="hidden ml-auto items-center gap-2.5 lg:gap-4 md:flex">
             {tools.map((t) => (
               <NLink
                 key={t.href}
@@ -106,7 +115,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
             <ThemeToggle />
             <Link
               href="/account"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--muted)]/10 text-[var(--muted)] hover:bg-[var(--foreground)] hover:text-[var(--background)] transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] transition-colors"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </Link>
@@ -118,7 +127,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
             <ThemeToggle />
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="group flex h-9 w-9 flex-col items-center justify-center gap-1 rounded-md border border-[var(--border)]"
+              className="group flex h-9 w-9 flex-col items-center justify-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--card-2)]"
               aria-label="Menu"
             >
               <span className={`h-0.5 w-4 bg-current transition-all ${mobileOpen ? "rotate-45 translate-y-1.5" : ""}`} />
@@ -157,8 +166,16 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         {children}
       </div>
 
-      <footer className="border-t border-[var(--border)] bg-[var(--card)]/30 py-12 text-center text-sm text-[var(--muted)]">
-        <div className="mx-auto w-full max-w-7xl px-6 grid gap-8 md:grid-cols-4 text-left">
+      <footer className="relative border-t border-[var(--border)] bg-[var(--card)]/30 py-12 text-center text-sm text-[var(--muted)] overflow-hidden">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          style={{
+            background:
+              "radial-gradient(900px 320px at 15% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%), radial-gradient(600px 260px at 90% 15%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 55%)",
+          }}
+        />
+
+        <div className="relative mx-auto w-full max-w-7xl px-6 grid gap-8 md:grid-cols-4 text-left">
           <div className="space-y-3">
              <div className="flex items-center gap-2 font-bold text-[var(--foreground)]">
                 <span className="h-4 w-4 bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] rounded-sm"></span>
@@ -167,6 +184,10 @@ export function SiteChrome({ children }: { children: ReactNode }) {
              <p className="text-xs leading-relaxed max-w-[200px]">
                Next-generation spot trading platform with built-in P2P execution and AI-driven risk management.
              </p>
+             <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-[10px] font-semibold text-[var(--muted)]">
+               <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+               Synapse network online
+             </div>
           </div>
           <div>
             <h4 className="font-medium text-[var(--foreground)] mb-3">Exchange</h4>

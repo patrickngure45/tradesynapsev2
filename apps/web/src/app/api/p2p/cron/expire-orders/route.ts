@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function requireCronAuth(req: NextRequest): string | null {
@@ -37,9 +38,62 @@ export async function POST(req: NextRequest) {
 
 	const sql = getSql();
 	const limit = Math.max(1, Math.min(200, Number(req.nextUrl.searchParams.get("limit") ?? "50")));
+	const warnMinutes = Math.max(1, Math.min(60, Number(process.env.P2P_EXPIRY_WARNING_MINUTES ?? "5") || 5));
 
 	try {
 		const result = await sql.begin(async (tx: any) => {
+			// 0. Warn about orders that are close to expiring (one-time reminder)
+			// We lock candidate rows to avoid duplicate reminders across concurrent cron runs.
+			const expiringSoon = (await tx`
+				WITH candidates AS (
+					SELECT id
+					FROM p2p_order
+					WHERE status = 'created'
+						AND expires_at > now()
+						AND expires_at <= now() + make_interval(mins => ${warnMinutes})
+					ORDER BY expires_at ASC
+					LIMIT ${limit}
+					FOR UPDATE SKIP LOCKED
+				)
+				SELECT
+					o.id::text,
+					o.buyer_id::text,
+					o.seller_id::text,
+					o.expires_at,
+					o.fiat_currency,
+					o.amount_fiat::text
+				FROM p2p_order o
+				JOIN candidates c ON c.id = o.id
+				WHERE NOT EXISTS (
+					SELECT 1
+					FROM ex_notification n
+					WHERE n.user_id = o.buyer_id
+						AND n.type = 'p2p_order_expiring'
+						AND (n.metadata_json->>'order_id') = (o.id::text)
+				)
+			`) as {
+				id: string;
+				buyer_id: string;
+				seller_id: string;
+				expires_at: Date;
+				fiat_currency: string;
+				amount_fiat: string;
+			}[];
+
+			for (const order of expiringSoon) {
+				await createNotification(tx, {
+					userId: order.buyer_id,
+					type: "p2p_order_expiring",
+					title: "Payment window ending soon",
+					body: `Order ${order.id.slice(0, 8)} expires soon. Mark as paid only after you actually sent ${order.amount_fiat} ${order.fiat_currency}.`,
+					metadata: {
+						order_id: order.id,
+						expires_at: order.expires_at?.toISOString?.() ?? String(order.expires_at),
+						warn_minutes: warnMinutes,
+					},
+				});
+			}
+
 			// Lock and cancel a batch of expired orders.
 			// We only auto-expire orders that are still awaiting payment confirmation.
 			const expired = (await tx`
@@ -109,7 +163,12 @@ export async function POST(req: NextRequest) {
 				});
 			}
 
-			return { expiredCount: expired.length, expiredIds: expired.map((o) => o.id) };
+			return {
+				expiringSoonCount: expiringSoon.length,
+				expiringSoonIds: expiringSoon.map((o) => o.id),
+				expiredCount: expired.length,
+				expiredIds: expired.map((o) => o.id),
+			};
 		});
 
 		return NextResponse.json({ ok: true, ...result });

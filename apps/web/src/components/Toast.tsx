@@ -24,18 +24,40 @@ export function Toast({
   if (!message) return null;
 
   const base =
-    "pointer-events-none fixed bottom-4 right-4 z-50 rounded-lg border px-3 py-2 text-sm shadow-sm";
+    "pointer-events-none fixed bottom-4 left-4 right-4 z-50 rounded-xl border px-3 py-2 text-sm shadow-[var(--shadow)] sm:left-auto sm:right-4 sm:w-[420px] overflow-hidden";
 
   const klass =
     kind === "success"
-      ? `${base} border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950 dark:text-emerald-100`
+      ? `${base} border-[color-mix(in_srgb,var(--up)_25%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--card))] text-[var(--foreground)]`
       : kind === "error"
-        ? `${base} border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950 dark:text-rose-100`
-        : `${base} border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100`;
+        ? `${base} border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--card))] text-[var(--foreground)]`
+        : `${base} border-[var(--border)] bg-[var(--card)] text-[var(--foreground)]`;
 
   return (
     <div role="status" aria-live="polite" className={klass}>
-      {message}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-60"
+        style={{
+          background:
+            "radial-gradient(420px 140px at 10% 0%, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 60%), radial-gradient(260px 140px at 90% 10%, color-mix(in oklab, var(--accent-2) 12%, transparent) 0%, transparent 55%)",
+        }}
+      />
+      <div className="relative flex items-start gap-2">
+        <div
+          className={
+            "mt-0.5 h-2.5 w-2.5 rounded-full " +
+            (kind === "success" ? "bg-[var(--up)]" : kind === "error" ? "bg-[var(--down)]" : "bg-[var(--accent)]")
+          }
+        />
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-[var(--muted)]">
+            {kind === "success" ? "Signal" : kind === "error" ? "Error" : "Update"}
+          </div>
+          <div className="mt-0.5 text-sm leading-snug text-[var(--foreground)] break-words">
+            {message}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { handleWithdrawalBroadcast } from "../src/lib/outbox/handlers/exchangeWi
 import { handleCopyTradeExecution } from "../src/lib/outbox/handlers/copyTradeExecution";
 import { handleTradingBotExecution } from "../src/lib/outbox/handlers/tradingBotExecution";
 import { handleTradingBotUnwind } from "../src/lib/outbox/handlers/tradingBotUnwind";
+import { upsertServiceHeartbeat } from "../src/lib/system/heartbeat";
 
 const MAX_ATTEMPTS = Math.max(1, Math.min(25, Number.parseInt(process.env.OUTBOX_MAX_ATTEMPTS ?? "10", 10) || 10));
 const BATCH_SIZE = Math.max(1, Math.min(200, Number.parseInt(process.env.OUTBOX_BATCH ?? "25", 10) || 25));
@@ -95,9 +96,34 @@ async function main() {
   const lockId = randomUUID();
   const sql = getSql();
 
+  let lastBeatAt = 0;
+  const beat = async (details?: Record<string, unknown>) => {
+    const now = Date.now();
+    if (now - lastBeatAt < 30_000) return;
+    lastBeatAt = now;
+    try {
+      await upsertServiceHeartbeat(sql, {
+        service: "outbox-worker",
+        status: "ok",
+        details: {
+          lockId,
+          once,
+          batch: BATCH_SIZE,
+          sleep_ms: SLEEP_MS,
+          ...(details ?? {}),
+        },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   console.log(`[outbox] worker start lockId=${lockId} once=${once} batch=${BATCH_SIZE}`);
 
+  await beat({ event: "start" });
+
   for (;;) {
+    await beat({ event: "loop" });
     const events = await claimOutboxBatch(sql, {
       limit: BATCH_SIZE,
       lockId,
@@ -122,6 +148,7 @@ async function main() {
         if (attemptsNext >= MAX_ATTEMPTS) {
           console.error(`[outbox] dead-letter id=${ev.id} topic=${ev.topic} err=${errMsg}`);
           await deadLetterOutbox(sql, { id: ev.id, lockId, error: e });
+          await beat({ event: "dead-letter", topic: ev.topic, attempts: attemptsNext });
           continue;
         }
 
@@ -134,6 +161,8 @@ async function main() {
           error: e,
           nextVisibleAt: new Date(Date.now() + backoffMs),
         });
+
+        await beat({ event: "fail", topic: ev.topic, attempts: attemptsNext, backoff_ms: backoffMs });
       }
     }
 
@@ -141,6 +170,7 @@ async function main() {
   }
 
   console.log("[outbox] worker done");
+  await beat({ event: "stop" });
   await sql.end({ timeout: 5 });
 }
 

@@ -1,3 +1,4 @@
+@import "flag-icons/css/flag-icons.min.css";
 @import "tailwindcss";
 
 :root {
@@ -8,6 +9,13 @@
   --card-2: #eef2f9;
   --muted: #52607a;
   --border: rgba(15, 23, 42, 0.10);
+
+  /* Back-compat aliases (used across older components) */
+  --bg: var(--background);
+  --fg: var(--foreground);
+  --card-bg: var(--card);
+  --hover-bg: var(--card-2);
+  --accent-hover: var(--accent);
 
   /* Brand accent — TradeSynapse blue/cyan */
   --accent: #2563eb;
@@ -140,6 +148,17 @@ body {
   option {
     background-color: var(--card);
     color: var(--foreground);
+  }
+
+  /* Hide number input spin buttons (makes Amount fields look consistent) */
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
 }
 

@@ -21,14 +21,56 @@ async function main() {
   const sql = getSql();
   try {
     const fx = await getOrComputeFxReferenceRate(sql as any, "USDT", fiat);
-    if (!fx) {
-      console.log(JSON.stringify({ ok: false, error: "fx_unavailable", base: "USDT", quote: fiat }, null, 2));
+
+    // Fallback: if live FX compute is unavailable in this environment, use the most recent cached rate.
+    const cachedRows =
+      fx
+        ? []
+        : await sql<
+            {
+              mid: string;
+              computed_at: Date;
+              valid_until: Date;
+              sources: any;
+            }[]
+          >`
+            SELECT
+              mid::text AS mid,
+              computed_at,
+              valid_until,
+              sources
+            FROM fx_reference_rate
+            WHERE base_symbol = 'USDT'
+              AND quote_symbol = ${fiat}
+            ORDER BY computed_at DESC
+            LIMIT 1
+          `;
+
+    const fxMid = fx?.mid ?? (cachedRows[0] ? Number(cachedRows[0].mid) : null);
+    const computedAt = fx?.computedAt ?? cachedRows[0]?.computed_at ?? null;
+    const validUntil = fx?.validUntil ?? cachedRows[0]?.valid_until ?? null;
+    const sources = fx?.sources ?? cachedRows[0]?.sources ?? null;
+
+    if (!(typeof fxMid === "number" && Number.isFinite(fxMid) && fxMid > 0)) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: false,
+            error: "fx_unavailable",
+            base: "USDT",
+            quote: fiat,
+            hint: "Set FX_USD_FIAT_OVERRIDE_<FIAT> (e.g. FX_USD_FIAT_OVERRIDE_KES=160) or provide --usd-fiat-mid when seeding ads.",
+          },
+          null,
+          2,
+        ),
+      );
       process.exitCode = 1;
       return;
     }
 
     // Treat USDT≈USD for the base minimum.
-    const fiatAmount = usd * fx.mid;
+    const fiatAmount = usd * fxMid;
 
     console.log(
       JSON.stringify(
@@ -36,12 +78,12 @@ async function main() {
           ok: true,
           base: "USDT",
           quote: fiat,
-          usdt_fiat_mid: fx.mid,
+          usdt_fiat_mid: fxMid,
           usd_amount: usd,
           fiat_amount: round2(fiatAmount),
-          computed_at: fx.computedAt.toISOString(),
-          valid_until: fx.validUntil.toISOString(),
-          sources: fx.sources,
+          computed_at: computedAt ? new Date(computedAt).toISOString() : null,
+          valid_until: validUntil ? new Date(validUntil).toISOString() : null,
+          sources,
         },
         null,
         2,
