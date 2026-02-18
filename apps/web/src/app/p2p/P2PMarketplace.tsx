@@ -104,6 +104,25 @@ export function P2PMarketplace() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/whoami")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const id = typeof data?.user?.id === "string" ? data.user.id : null;
+        setCurrentUserId(id);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const didAutoOpenCreateRef = useRef(false);
   useEffect(() => {
     if (didAutoOpenCreateRef.current) return;
@@ -365,7 +384,18 @@ export function P2PMarketplace() {
             ) : (
               <div className="pt-3 pb-1 md:pt-0 md:pb-0">
                 {ads.map((ad, idx) => (
-                  <AdRow key={ad.id} ad={ad} mySide={side} asset={asset} onTake={() => setSelectedAd(ad)} isLast={idx === ads.length - 1} />
+                  <AdRow
+                    key={ad.id}
+                    ad={ad}
+                    mySide={side}
+                    asset={asset}
+                    currentUserId={currentUserId}
+                    onTake={() => {
+                      if (currentUserId && ad.user_id === currentUserId) return;
+                      setSelectedAd(ad);
+                    }}
+                    isLast={idx === ads.length - 1}
+                  />
                 ))}
               </div>
             )}
@@ -405,12 +435,14 @@ function AdRow({
   ad,
   mySide,
   asset,
+  currentUserId,
   onTake,
   isLast,
 }: {
   ad: Ad;
   mySide: "BUY" | "SELL";
   asset: string;
+  currentUserId: string | null;
   onTake: () => void;
   isLast: boolean;
 }) {
@@ -453,6 +485,8 @@ function AdRow({
 
   const completedLabel = Number.isFinite(completedCount) && completedCount > 0 ? `${completedCount} completed` : null;
 
+  const isOwnAd = Boolean(currentUserId) && ad.user_id === currentUserId;
+
   return (
     <div
       className={`mb-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 transition hover:bg-[var(--card-2)] md:mb-0 md:rounded-none md:border-0 md:bg-transparent md:grid md:grid-cols-[200px_180px_1fr_200px_auto] md:items-center md:gap-3 lg:grid-cols-[240px_220px_1fr_240px_auto] lg:gap-4 ${
@@ -482,13 +516,14 @@ function AdRow({
 
         <button
           onClick={onTake}
-          className={`h-9 w-32 shrink-0 rounded-lg px-4 text-sm font-bold text-white transition hover:brightness-110 md:hidden sm:w-36 ${
+          disabled={isOwnAd}
+          className={`h-9 w-32 shrink-0 rounded-lg px-4 text-sm font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 md:hidden sm:w-36 ${
             mySide === "BUY" ? "bg-[var(--up)]" : "bg-[var(--down)]"
           }`}
         >
           <span className="inline-flex min-w-0 items-center gap-2">
             <AssetIcon symbol={asset} size={18} className="border-white/20 bg-white/10 text-white" />
-            <span className="min-w-0 truncate">{mySide === "BUY" ? `Buy ${asset}` : `Sell ${asset}`}</span>
+            <span className="min-w-0 truncate">{isOwnAd ? "Your ad" : mySide === "BUY" ? `Buy ${asset}` : `Sell ${asset}`}</span>
           </span>
         </button>
       </div>
@@ -547,13 +582,14 @@ function AdRow({
       <div className="hidden md:flex md:justify-end">
         <button
           onClick={onTake}
-          className={`h-9 rounded-lg px-6 text-sm font-bold text-white transition hover:brightness-110 ${
+          disabled={isOwnAd}
+          className={`h-9 rounded-lg px-6 text-sm font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${
             mySide === "BUY" ? "bg-[var(--up)]" : "bg-[var(--down)]"
           }`}
         >
           <span className="inline-flex items-center gap-2">
             <AssetIcon symbol={asset} size={18} className="border-white/20 bg-white/10 text-white" />
-            <span>{mySide === "BUY" ? `Buy ${asset}` : `Sell ${asset}`}</span>
+            <span>{isOwnAd ? "Your ad" : mySide === "BUY" ? `Buy ${asset}` : `Sell ${asset}`}</span>
           </span>
         </button>
       </div>
