@@ -384,7 +384,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  );
 
  const sellUsdtP2pAmountParam = useMemo(() => {
-  if (!localValueReady) return "";
   const row = balances.find((b) => b.symbol.toUpperCase() === "USDT");
   const available = Number(row?.available ?? NaN);
   const rate = assetLocalRates["USDT"];
@@ -392,7 +391,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   if (!Number.isFinite(rate) || rate <= 0) return "";
   const fiatAmount = Math.floor(available * rate);
   return fiatAmount >= 1 ? String(fiatAmount) : "";
- }, [balances, assetLocalRates, localValueReady]);
+ }, [balances, assetLocalRates]);
 
  const sellConvertP2pAmountParam = useMemo(() => {
   if (!convertQuote) return "";
@@ -528,6 +527,25 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [holds]);
 
  async function loadAssetLocalRates(fiat: string) {
+ const fiatUpper = String(fiat ?? "").trim().toUpperCase() || "USD";
+ const fxCacheKey = `ts_fx_usdt_${fiatUpper}`;
+
+ // Instant UX: use last-known USDT->fiat rate (cached) while fresh rates load.
+ try {
+  const cachedRaw = typeof window !== "undefined" ? localStorage.getItem(fxCacheKey) : null;
+  const cached = cachedRaw ? Number(cachedRaw) : NaN;
+  if (Number.isFinite(cached) && cached > 0) {
+   setAssetLocalRates((prev) => {
+    const current = prev.USDT;
+    if (Number.isFinite(current) && (current as number) > 0) return prev;
+    return { ...prev, USDT: cached };
+   });
+   setAssetLocalRateSource((prev) => ({ ...prev, USDT: "Cached" }));
+  }
+ } catch {
+  // ignore storage errors
+ }
+
  const fetchWithTimeout = async <T,>(url: string, timeoutMs = 4000): Promise<T> => {
  const controller = new AbortController();
  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -542,7 +560,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  };
 
  try {
- const q = new URLSearchParams({ fiat });
+ const q = new URLSearchParams({ fiat: fiatUpper });
  const market = await fetchWithTimeout<{
   assets?: Array<{ symbol: string; index_fiat?: string | null; index_usdt?: string | null }>;
   markets?: Array<{
@@ -602,13 +620,18 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  if (Number.isFinite(usdtFx) && usdtFx > 0) {
  rates.USDT = usdtFx;
  rateSource.USDT = "Live FX";
+ try {
+  if (typeof window !== "undefined") localStorage.setItem(fxCacheKey, String(usdtFx));
+ } catch {
+  // ignore storage errors
+ }
  }
 
  let usdtLocal = rates.USDT ?? null;
  if (!(usdtLocal != null && Number.isFinite(usdtLocal) && usdtLocal > 0)) {
  try {
  const p2pUsdt = await fetchWithTimeout<{ ads?: Array<{ fixed_price?: string | number }> }>(
- `/api/p2p/ads?side=BUY&asset=USDT&fiat=${encodeURIComponent(fiat)}`,
+ `/api/p2p/ads?side=BUY&asset=USDT&fiat=${encodeURIComponent(fiatUpper)}`,
  2500,
  );
  const px = Number(p2pUsdt.ads?.[0]?.fixed_price ?? NaN);
@@ -616,6 +639,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  usdtLocal = px;
  rates.USDT = px;
  rateSource.USDT = "P2P";
+ try {
+  if (typeof window !== "undefined") localStorage.setItem(fxCacheKey, String(px));
+ } catch {
+  // ignore storage errors
+ }
  }
 
  // No forced parity: the anchor currency should not be assumed.
@@ -674,6 +702,20 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  setLastPricesRefreshAt(Date.now());
  } catch {
  // Keep previous rates on transient failures to avoid flicker/jumps.
+ try {
+  const cachedRaw = typeof window !== "undefined" ? localStorage.getItem(fxCacheKey) : null;
+  const cached = cachedRaw ? Number(cachedRaw) : NaN;
+  if (Number.isFinite(cached) && cached > 0) {
+   setAssetLocalRates((prev) => {
+    const current = prev.USDT;
+    if (Number.isFinite(current) && (current as number) > 0) return prev;
+    return { ...prev, USDT: cached };
+   });
+   setAssetLocalRateSource((prev) => ({ ...prev, USDT: "Cached" }));
+  }
+ } catch {
+  // ignore storage errors
+ }
  }
  }
 
