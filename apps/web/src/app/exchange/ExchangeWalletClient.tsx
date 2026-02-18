@@ -683,27 +683,33 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  setLocalValueReady(Object.keys(assetLocalRates).length > 0);
 
  try {
- const a = await fetchJsonOrThrow<{ assets: Asset[] }>("/api/exchange/assets", {
- cache:"no-store",
+ const a = await fetchJsonOrThrow<{ assets?: Asset[] }>("/api/exchange/assets", {
+  cache: "no-store",
  });
- setAssets(a.assets ?? []);
+ const nextAssets = Array.isArray(a?.assets) ? a.assets : [];
+ setAssets(nextAssets);
 
- const b = await fetchJsonOrThrow<{ user_id: string; balances: BalanceRow[] }>(
-"/api/exchange/balances",
- {
- cache:"no-store",
- headers: requestHeaders,
+ const b = await fetchJsonOrThrow<unknown>("/api/exchange/balances", {
+  cache: "no-store",
+  headers: requestHeaders,
+ });
+ const nextBalances =
+  b && typeof b === "object" && "balances" in (b as any) && Array.isArray((b as any).balances)
+   ? ((b as any).balances as BalanceRow[])
+   : null;
+ if (!nextBalances) {
+  throw new ApiError("bad_response", { details: { endpoint: "/api/exchange/balances" } });
  }
- );
- setBalances(b.balances ?? []);
+
+ setBalances(nextBalances);
  setLastBalancesRefreshAt(Date.now());
 
  try {
- const h = await fetchJsonOrThrow<{ holds: Hold[] }>("/api/exchange/holds?status=all", {
- cache:"no-store",
- headers: requestHeaders,
+ const h = await fetchJsonOrThrow<{ holds?: Hold[] }>("/api/exchange/holds?status=all", {
+  cache: "no-store",
+  headers: requestHeaders,
  });
- setHolds(h.holds ?? []);
+ setHolds(Array.isArray(h?.holds) ? h.holds : []);
  } catch {
  setHolds([]);
  }
@@ -713,8 +719,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  try {
  const p = await fetchJsonOrThrow<ProfileResponse>("/api/account/profile", {
- cache:"no-store",
- headers: requestHeaders,
+  cache: "no-store",
+  headers: requestHeaders,
  });
  const fiat = fiatForCountry(p.user?.country);
  setLocalFiat(fiat);
@@ -727,11 +733,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  setLocalValueReady(true);
  }
 
- if (!holdAssetId && a.assets?.[0]?.id) setHoldAssetId(a.assets[0].id);
+ if (!holdAssetId && nextAssets?.[0]?.id) setHoldAssetId(nextAssets[0].id);
  if (!transferAssetId) {
- const firstTransferable = (a.assets ?? []).find((asset) => {
- const bal = b.balances?.find((row) => row.asset_id === asset.id);
- const available = Number(bal?.available ?? NaN);
+ const firstTransferable = (nextAssets ?? []).find((asset) => {
+ const bal = nextBalances.find((row) => row.asset_id === asset.id);
+ const available = Number((bal as any)?.available ?? NaN);
  return Number.isFinite(available) && available > 0;
  })?.id;
  if (firstTransferable) setTransferAssetId(firstTransferable);
@@ -1151,7 +1157,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    <div className="mt-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/50 px-4 py-4 text-xs">
      <div className="font-medium text-[var(--foreground)]">No funds yet</div>
      <div className="mt-1 text-[var(--muted)]">
-       Your wallet supports {balances.length} assets. Generate a deposit address above and send tokens to get started.
+       Your wallet supports {assets.length} assets. Generate a deposit address above and send tokens to get started.
      </div>
    </div>
  ) : null}

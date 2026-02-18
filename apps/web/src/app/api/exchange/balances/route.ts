@@ -37,31 +37,28 @@ export async function GET(request: Request) {
           SELECT id, asset_id
           FROM ex_ledger_account
           WHERE user_id = ${actingUserId}
-        ),
-        posted AS (
-          SELECT a.asset_id, coalesce(sum(j.amount), 0)::text AS posted
-          FROM accounts a
-          LEFT JOIN ex_journal_line j ON j.account_id = a.id
-          GROUP BY a.asset_id
-        ),
-        held AS (
-          SELECT a.asset_id, coalesce(sum(h.remaining_amount), 0)::text AS held
-          FROM accounts a
-          LEFT JOIN ex_hold h ON h.account_id = a.id AND h.status = 'active'
-          GROUP BY a.asset_id
         )
         SELECT
           asset.id AS asset_id,
           asset.chain,
           asset.symbol,
           asset.decimals,
-          coalesce(posted.posted, '0') AS posted,
-          coalesce(held.held, '0') AS held,
-          (coalesce(posted.posted, '0')::numeric - coalesce(held.held, '0')::numeric)::text AS available
-        FROM ex_asset asset
-        LEFT JOIN posted ON posted.asset_id = asset.id
-        LEFT JOIN held ON held.asset_id = asset.id
-        WHERE asset.is_enabled = true
+          p.posted::text AS posted,
+          h.held::text AS held,
+          (p.posted - h.held)::text AS available
+        FROM accounts a
+        JOIN ex_asset asset ON asset.id = a.asset_id
+        LEFT JOIN LATERAL (
+          SELECT coalesce(sum(j.amount), 0)::numeric AS posted
+          FROM ex_journal_line j
+          WHERE j.account_id = a.id
+        ) p ON true
+        LEFT JOIN LATERAL (
+          SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
+          FROM ex_hold
+          WHERE account_id = a.id AND status = 'active'
+        ) h ON true
+        WHERE (p.posted <> 0) OR (h.held <> 0)
         ORDER BY asset.chain ASC, asset.symbol ASC
       `;
     });
