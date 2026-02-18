@@ -10,6 +10,15 @@ import { Avatar } from "@/components/Avatar";
 import { buttonClassName } from "@/components/ui/Button";
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 
+function withDevUserHeader(init?: RequestInit): RequestInit {
+    const headers = new Headers(init?.headers);
+    if (typeof window !== "undefined") {
+        const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
+        if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
+    }
+    return { ...init, headers, credentials: init?.credentials ?? "same-origin" };
+}
+
 // Types matching API response
 type Order = {
   id: string;
@@ -314,24 +323,39 @@ export default function OrderPage() {
         setActionError(null);
         setActionLoading(true);
         try {
-            const res = await fetch(`/api/p2p/orders/${id}/action`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ action }),
-            });
-            if (!res.ok) {
-                let code: string | undefined;
-                let msg: string | undefined;
-                try {
-                    const body = await res.json();
-                    code = body?.error;
-                    msg = body?.details?.message;
-                } catch {
-                    // ignore
-                }
-                if (code === "order_state_conflict") {
+            const updated = await fetchJsonOrThrow<Partial<Order> | null>(
+                `/api/p2p/orders/${id}/action`,
+                withDevUserHeader({
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ action }),
+                }),
+            );
+
+            if (updated && typeof updated === "object") {
+                setOrder((prev) => (prev ? ({ ...prev, ...(updated as any) } as Order) : prev));
+            }
+
+            if (action === "PAY_CONFIRMED") {
+                setActionNotice("Payment marked as sent. Waiting for the seller to release crypto…");
+            } else if (action === "RELEASE") {
+                setActionNotice("Release submitted. Finalizing order…");
+            } else if (action === "CANCEL") {
+                setActionNotice("Cancellation submitted. Updating order…");
+            }
+        } catch (e) {
+            if (e instanceof ApiError) {
+                const code = e.code;
+                const msg =
+                    (e.details && typeof e.details === "object" && "message" in (e.details as any) && typeof (e.details as any).message === "string"
+                        ? (e.details as any).message
+                        : typeof e.details === "string"
+                            ? e.details
+                            : undefined) as string | undefined;
+
+                if (code === "csrf_token_mismatch") {
+                    setActionError("Session expired. Refresh the page and try again.");
+                } else if (code === "order_state_conflict") {
                     setActionError(msg || "Order state changed. Please refresh and try again.");
                 } else if (code === "order_not_found") {
                     setActionError(msg || "Order not found (or access denied).");
@@ -343,24 +367,6 @@ export default function OrderPage() {
                 return;
             }
 
-            // Update local order immediately (avoid waiting for poll)
-            try {
-                const updated = (await res.json()) as Partial<Order> | null;
-                if (updated && typeof updated === "object") {
-                    setOrder((prev) => (prev ? ({ ...prev, ...(updated as any) } as Order) : prev));
-                }
-            } catch {
-                // ignore
-            }
-
-            if (action === "PAY_CONFIRMED") {
-                setActionNotice("Payment marked as sent. Waiting for the seller to release crypto…");
-            } else if (action === "RELEASE") {
-                setActionNotice("Release submitted. Finalizing order…");
-            } else if (action === "CANCEL") {
-                setActionNotice("Cancellation submitted. Updating order…");
-            }
-        } catch {
             setActionError("Network error. Please try again.");
         } finally {
             setActionLoading(false);
@@ -427,28 +433,24 @@ export default function OrderPage() {
         }
         setDisputeLoading(true);
         try {
-            const res = await fetch(`/api/p2p/orders/${id}/dispute`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reason }),
-            });
-            if (!res.ok) {
-                let code: string | undefined;
-                let msg: string | undefined;
-                try {
-                    const body = await res.json();
-                    code = body?.error;
-                    msg = body?.details?.message;
-                } catch {
-                    // ignore
-                }
-                setActionError(msg || code || "Failed to open dispute");
-                return;
-            }
+            await fetchJsonOrThrow(
+                `/api/p2p/orders/${id}/dispute`,
+                withDevUserHeader({
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ reason }),
+                }),
+            );
             setDisputeReason("");
             setActionNotice("Dispute opened. Support will review — keep communication in chat.");
-        } catch {
-            setActionError("Network error. Please try again.");
+        } catch (e) {
+            if (e instanceof ApiError && e.code === "csrf_token_mismatch") {
+                setActionError("Session expired. Refresh the page and try again.");
+            } else if (e instanceof ApiError) {
+                setActionError(typeof e.details === "string" ? e.details : e.code);
+            } else {
+                setActionError("Network error. Please try again.");
+            }
         } finally {
             setDisputeLoading(false);
         }
@@ -464,30 +466,26 @@ export default function OrderPage() {
         setActionNotice(null);
         setFeedbackLoading(true);
         try {
-            const res = await fetch(`/api/p2p/orders/${id}/feedback`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    rating: feedbackRating,
-                    comment: feedbackComment.trim() || undefined,
+            await fetchJsonOrThrow(
+                `/api/p2p/orders/${id}/feedback`,
+                withDevUserHeader({
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                        rating: feedbackRating,
+                        comment: feedbackComment.trim() || undefined,
+                    }),
                 }),
-            });
-            if (!res.ok) {
-                let code: string | undefined;
-                let msg: string | undefined;
-                try {
-                    const body = await res.json();
-                    code = body?.error;
-                    msg = body?.details?.message;
-                } catch {
-                    // ignore
-                }
-                setActionError(msg || code || "Failed to submit feedback");
-                return;
-            }
+            );
             setFeedbackDone(true);
-        } catch {
-            setActionError("Network error. Please try again.");
+        } catch (e) {
+            if (e instanceof ApiError && e.code === "csrf_token_mismatch") {
+                setActionError("Session expired. Refresh the page and try again.");
+            } else if (e instanceof ApiError) {
+                setActionError(typeof e.details === "string" ? e.details : e.code);
+            } else {
+                setActionError("Network error. Please try again.");
+            }
         } finally {
             setFeedbackLoading(false);
         }
