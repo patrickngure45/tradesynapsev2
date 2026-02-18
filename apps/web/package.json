@@ -31,6 +31,7 @@
     "ledger:treasury-mint": "tsx scripts/treasury-mint.ts",
     "ledger:treasury-topup-agents": "tsx scripts/treasury-topup-agents.ts",
     "ledger:normalize-initial-balances": "tsx scripts/normalize-initial-balances.ts",
+    "ledger:sync-funded-ad-balances": "tsx scripts/sync-funded-ad-balances.ts",
     "ledger:report:offchain": "tsx scripts/report-offchain-ledger-balances.ts",
     "ledger:report:onchain": "tsx scripts/report-onchain-custody-balances.ts",
     "ledger:reset:admin-only": "tsx scripts/reset-nonadmin-exchange-state.ts",
