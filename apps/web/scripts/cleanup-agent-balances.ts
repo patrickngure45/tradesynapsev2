@@ -162,6 +162,87 @@ async function offlineNonUsdtAds(sql: Sql, userId: string, usdtAssetId: string, 
   return rows[0]?.n ?? 0;
 }
 
+async function capOnlineUsdtSellAdsToAvailable(
+  sql: Sql,
+  userId: string,
+  usdtAssetId: string,
+  availableUsdt: number,
+): Promise<{ keptOnline: number; offlined: number; cappedTotal: number }>{
+  // Cap maker SELL ads inventory to prevent order-create failures:
+  // - order creation checks ad.remaining_amount first
+  // - then checks seller available funds
+  // Keeping remaining_amount <= available ensures a taker doesn't hit "seller_insufficient_funds".
+  const ads = await sql<
+    { id: string; remaining_amount: string; fixed_price: string | null; price_type: string; min_limit: string; max_limit: string; status: string }[]
+  >`
+    SELECT
+      id::text AS id,
+      remaining_amount::text AS remaining_amount,
+      fixed_price::text AS fixed_price,
+      price_type,
+      min_limit::text AS min_limit,
+      max_limit::text AS max_limit,
+      status
+    FROM p2p_ad
+    WHERE user_id = ${userId}::uuid
+      AND asset_id = ${usdtAssetId}::uuid
+      AND side = 'SELL'
+      AND status IN ('online','offline')
+    ORDER BY updated_at DESC, created_at DESC, id
+  `;
+
+  let remainingBudget = Math.max(0, availableUsdt);
+  let keptOnline = 0;
+  let offlined = 0;
+  let cappedTotal = 0;
+
+  for (const ad of ads) {
+    const current = Number(ad.remaining_amount);
+    if (!Number.isFinite(current) || current < 0) continue;
+
+    const next = Math.max(0, Math.min(current, remainingBudget));
+    remainingBudget -= next;
+    cappedTotal += next;
+
+    // If we can't allocate anything, take it offline to avoid showing unfillable ads.
+    const nextStatus = next > 0 ? 'online' : 'offline';
+    if (next > 0) keptOnline += 1;
+    else offlined += 1;
+
+    if (Math.abs(next - current) < 1e-12 && ad.status === nextStatus) {
+      continue;
+    }
+
+    // If fixed pricing, cap fiat max_limit to match remaining inventory.
+    let nextMaxLimit: number | null = null;
+    if (ad.price_type === 'fixed' && ad.fixed_price) {
+      const px = Number(ad.fixed_price);
+      if (Number.isFinite(px) && px > 0) {
+        nextMaxLimit = px * next;
+      }
+    }
+
+    await sql`
+      UPDATE p2p_ad
+      SET
+        remaining_amount = (${asNumericString(next)}::numeric),
+        status = ${nextStatus},
+        max_limit = CASE
+          WHEN ${nextMaxLimit}::numeric IS NULL THEN max_limit
+          ELSE LEAST(max_limit, ${asNumericString(nextMaxLimit ?? 0)}::numeric)
+        END,
+        min_limit = CASE
+          WHEN ${nextMaxLimit}::numeric IS NULL THEN min_limit
+          ELSE LEAST(min_limit, ${asNumericString(nextMaxLimit ?? 0)}::numeric)
+        END,
+        updated_at = now()
+      WHERE id = ${ad.id}::uuid
+    `;
+  }
+
+  return { keptOnline, offlined, cappedTotal };
+}
+
 async function postDelta(
   sql: Sql,
   params: {
@@ -219,7 +300,10 @@ async function main() {
 
   const adsModeRaw = (parseArgValue("--non-usdt-ads") ?? process.env.NON_USDT_ADS ?? "offline").trim();
   const nonUsdtAdsMode: "offline" | "closed" = adsModeRaw === "closed" ? "closed" : "offline";
-  const handleAds = (parseArgValue("--handle-ads") ?? process.env.HANDLE_ADS ?? (apply ? "1" : "0")).trim() !== "0";
+  // Default: do NOT touch ads unless explicitly requested.
+  const handleAds = (parseArgValue("--handle-ads") ?? process.env.HANDLE_ADS ?? "0").trim() !== "0";
+  // Default on apply: cap online USDT SELL ads to avoid new-user order failures.
+  const capUsdtSellAds = (parseArgValue("--cap-usdt-sell-ads") ?? process.env.CAP_USDT_SELL_ADS ?? (apply ? "1" : "0")).trim() !== "0";
 
   const sql = getSql();
   await ensureSystemUser(sql);
@@ -233,7 +317,7 @@ async function main() {
   if (agents.length === 0) throw new Error("No matching agents found.");
 
   console.log(`[cleanup-agent-balances] agents=${agents.length} chain=${chain} apply=${apply}`);
-  console.log(`[cleanup-agent-balances] target USDT=${targetUsdt} handleAds=${handleAds} nonUsdtAdsMode=${nonUsdtAdsMode}`);
+  console.log(`[cleanup-agent-balances] target USDT=${targetUsdt} handleAds=${handleAds} nonUsdtAdsMode=${nonUsdtAdsMode} capUsdtSellAds=${capUsdtSellAds}`);
 
   for (const agent of agents) {
     const counts = await getActiveP2PCounts(sql, agent.id);
@@ -270,6 +354,9 @@ async function main() {
 
       const referenceBase = `agent_cleanup:${agent.id}`;
 
+      let heldUsdt = 0;
+      let desiredPostedUsdt = targetUsdt;
+
       // Ensure we have ledger accounts for all touched assets.
       // Balances list already represents assets where a ledger account exists.
       for (const row of balances) {
@@ -287,7 +374,9 @@ async function main() {
         if (!Number.isFinite(posted) || !Number.isFinite(held)) continue;
 
         if (row.symbol === "USDT") {
+          heldUsdt = held;
           const desired = Math.max(targetUsdt, held);
+          desiredPostedUsdt = desired;
           const delta = desired - posted;
           if (Math.abs(delta) < 1e-12) continue;
           await postDelta(txSql, {
@@ -333,6 +422,14 @@ async function main() {
           systemAccountId: systemAcct,
           delta: asNumericString(delta),
         });
+      }
+
+      if (capUsdtSellAds) {
+        const availableAfter = Math.max(0, desiredPostedUsdt - heldUsdt);
+        const res = await capOnlineUsdtSellAdsToAvailable(txSql, agent.id, usdtAssetId, availableAfter);
+        console.log(
+          `[cleanup-agent-balances] capped USDT SELL ads: keptOnline=${res.keptOnline} offlined=${res.offlined} totalRemaining=${asNumericString(res.cappedTotal)}`,
+        );
       }
     });
 

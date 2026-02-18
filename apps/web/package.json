@@ -28,6 +28,8 @@
     "demo:seed-top-assets": "tsx scripts/seed-top-assets-and-balances.ts",
     "ledger:set-fixed-balances": "tsx scripts/set-fixed-balances.ts",
     "ledger:cleanup-agents": "tsx scripts/cleanup-agent-balances.ts",
+    "ledger:treasury-mint": "tsx scripts/treasury-mint.ts",
+    "ledger:treasury-topup-agents": "tsx scripts/treasury-topup-agents.ts",
     "ledger:report:offchain": "tsx scripts/report-offchain-ledger-balances.ts",
     "ledger:report:onchain": "tsx scripts/report-onchain-custody-balances.ts",
     "ledger:reset:admin-only": "tsx scripts/reset-nonadmin-exchange-state.ts",
