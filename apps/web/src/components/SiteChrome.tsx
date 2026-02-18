@@ -47,7 +47,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         onClick={onClick}
         className={
           (className ? className + " " : "") +
-          "rounded-xl px-2.5 py-1 text-sm font-semibold transition-colors " +
+          "rounded-lg px-2 py-1 text-sm font-semibold transition-colors " +
           (active
             ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
             : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]")
@@ -68,7 +68,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           }}
         />
 
-        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:gap-x-6 lg:px-6">
+        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 lg:gap-x-4 lg:px-6 xl:flex-nowrap">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
             <div
@@ -85,7 +85,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </Link>
 
           {/* Desktop Product Nav */}
-          <nav className="hidden items-center gap-1.5 lg:gap-2 md:flex">
+          <nav className="hidden items-center gap-1 md:flex lg:gap-1.5">
             {products.map((p) => (
               <NLink
                 key={p.href}
@@ -102,7 +102,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </nav>
 
           {/* Desktop User Nav */}
-          <nav className="hidden ml-auto items-center gap-2.5 lg:gap-4 md:flex">
+          <nav className="hidden ml-auto items-center gap-2 md:flex lg:gap-3">
             {tools.map((t) => (
               <NLink
                 key={t.href}
