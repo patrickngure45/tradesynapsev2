@@ -2,11 +2,30 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LogoMark } from "@/components/LogoMark";
+import { Avatar } from "@/components/Avatar";
+import { fetchJsonOrThrow, ApiError } from "@/lib/api/client";
+
+function withDevUserHeader(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  if (typeof window !== "undefined") {
+    const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
+    if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
+  }
+  return { ...init, headers, credentials: init?.credentials ?? "same-origin" };
+}
+
+function initials2(label: string): string {
+  const s = String(label ?? "").trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/g).filter(Boolean);
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
+}
 
 const products = [
   { href: "/markets", label: "Markets" },
@@ -28,6 +47,49 @@ const tools = [
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const [profile, setProfile] = useState<
+    | {
+        user?: {
+          id: string;
+          email: string | null;
+          display_name: string | null;
+          role: string;
+          status: string;
+          kyc_level: string;
+          email_verified: boolean;
+          totp_enabled: boolean;
+          country: string | null;
+          created_at: string;
+        };
+      }
+    | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await fetchJsonOrThrow<{ user?: any }>("/api/account/profile", withDevUserHeader({ cache: "no-store" }));
+        if (!cancelled) setProfile(p);
+      } catch (e) {
+        if (cancelled) return;
+        // Not logged in is fine; keep it null.
+        if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) return;
+        // Swallow other errors to avoid header flicker.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const userLabel = useMemo(() => {
+    const u = profile?.user;
+    const name = String(u?.display_name ?? "").trim();
+    const email = String(u?.email ?? "").trim();
+    return name || email || "Account";
+  }, [profile]);
 
   const NLink = ({
     href,
@@ -119,18 +181,91 @@ export function SiteChrome({ children }: { children: ReactNode }) {
             <div className="h-4 w-px bg-[var(--border)]" />
             <NotificationBell />
             <ThemeToggle />
-            <Link
-              href="/account"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] transition-colors"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            </Link>
+            <div className="relative group">
+              <Link
+                href="/account"
+                aria-label="Account"
+                className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg)] pr-2 pl-1 py-1 text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] transition-colors"
+                title={userLabel}
+              >
+                <Avatar
+                  seed={String(profile?.user?.email ?? profile?.user?.id ?? "account")}
+                  label={userLabel}
+                  size={28}
+                  fallbackText={initials2(userLabel)}
+                  className="bg-[var(--bg)]"
+                />
+                <span className="hidden lg:block text-xs font-semibold max-w-[140px] truncate">
+                  {userLabel}
+                </span>
+              </Link>
+
+              {/* Hover card (desktop) */}
+              <div className="pointer-events-none absolute right-0 top-full mt-2 w-[260px] opacity-0 translate-y-1 transition group-hover:pointer-events-auto group-hover:opacity-100 group-hover:translate-y-0">
+                <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-2)]">
+                  <div
+                    className="pointer-events-none absolute inset-0 opacity-70"
+                    style={{
+                      background:
+                        "radial-gradient(420px 160px at 20% 0%, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 60%), radial-gradient(320px 140px at 90% 10%, color-mix(in oklab, var(--accent-2) 12%, transparent) 0%, transparent 55%)",
+                    }}
+                  />
+                  <div className="relative px-3 py-2.5">
+                    {profile?.user ? (
+                      <>
+                        <div className="text-xs font-semibold text-[var(--foreground)] truncate">
+                          {String(profile.user.display_name ?? "").trim() || "Account"}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[var(--muted)] truncate">
+                          {profile.user.email ?? profile.user.id}
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-[var(--muted)]">
+                          <div>
+                            <div className="font-semibold text-[var(--muted)]">Role</div>
+                            <div className="mt-0.5 text-[var(--foreground)]">{String(profile.user.role ?? "user")}</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-[var(--muted)]">KYC</div>
+                            <div className="mt-0.5 text-[var(--foreground)]">{String(profile.user.kyc_level ?? "none")}</div>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-[var(--muted)]">
+                          Status: <span className="text-[var(--foreground)]">{String(profile.user.status ?? "")}</span>
+                        </div>
+                        <div className="mt-2 text-[10px] text-[var(--muted)]">
+                          View settings →
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-xs font-semibold text-[var(--foreground)]">Not logged in</div>
+                        <div className="mt-0.5 text-[11px] text-[var(--muted)]">Open Account to sign in</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </nav>
 
           {/* Mobile Toggle */}
           <div className="ml-auto flex items-center gap-4 md:hidden">
             <NotificationBell />
             <ThemeToggle />
+            <Link
+              href="/account"
+              aria-label="Account"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--card-2)]"
+              title={userLabel}
+            >
+              <Avatar
+                seed={String(profile?.user?.email ?? profile?.user?.id ?? "account")}
+                label={userLabel}
+                size={26}
+                fallbackText={initials2(userLabel)}
+                className="bg-[var(--bg)]"
+              />
+            </Link>
             <button
               onClick={() => setMobileOpen(!mobileOpen)}
               className="group flex h-9 w-9 flex-col items-center justify-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--card-2)]"

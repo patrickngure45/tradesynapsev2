@@ -26,6 +26,7 @@ export async function GET(request: Request) {
         id: string;
         email: string | null;
         display_name: string | null;
+        role: string;
         status: string;
         kyc_level: string;
         email_verified: boolean;
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
         country: string | null;
         created_at: string;
       }[]>`
-        SELECT id, email, display_name, status, kyc_level, email_verified, totp_enabled, country, created_at
+        SELECT id, email, display_name, role, status, kyc_level, email_verified, totp_enabled, country, created_at
         FROM app_user
         WHERE id = ${actingUserId}
         LIMIT 1
