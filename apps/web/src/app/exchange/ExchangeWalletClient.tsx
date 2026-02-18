@@ -552,7 +552,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    last_fiat?: { fiat?: string | null; value?: string | null } | null;
   }>;
   fx?: { usdt_fiat?: { mid?: number | string } | null };
- }>(`/api/exchange/markets/overview?${q.toString()}`, 4500);
+ }>(`/api/exchange/markets/overview?${q.toString()}`, 9000);
 
  const rates: Record<string, number> = {};
  const rateSource: Record<string, string> = {};

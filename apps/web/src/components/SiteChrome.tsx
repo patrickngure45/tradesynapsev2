@@ -70,7 +70,12 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const p = await fetchJsonOrThrow<{ user?: any }>("/api/account/profile", withDevUserHeader({ cache: "no-store" }));
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 3500);
+        const p = await fetchJsonOrThrow<{ user?: any }>(
+          "/api/account/profile",
+          withDevUserHeader({ cache: "no-store", signal: controller.signal }),
+        ).finally(() => window.clearTimeout(timer));
         if (!cancelled) setProfile(p);
       } catch (e) {
         if (cancelled) return;

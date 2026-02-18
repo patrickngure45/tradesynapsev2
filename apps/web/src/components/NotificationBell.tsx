@@ -125,10 +125,36 @@ export function NotificationBell() {
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchJsonOrThrow<{ notifications?: Notification[]; unread_count?: number }>(
-        "/api/notifications?limit=30",
-        withDevUserHeader({ cache: "no-store" }),
-      );
+      const fetchWithTimeout = async <T,>(url: string, timeoutMs: number): Promise<T> => {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetchJsonOrThrow<T>(url, withDevUserHeader({ cache: "no-store", signal: controller.signal }));
+        } finally {
+          window.clearTimeout(timer);
+        }
+      };
+
+      const tryLoadOnce = async () => {
+        return await fetchWithTimeout<{ notifications?: Notification[]; unread_count?: number }>(
+          "/api/notifications?limit=30",
+          7000,
+        );
+      };
+
+      let data: { notifications?: Notification[]; unread_count?: number };
+      try {
+        data = await tryLoadOnce();
+      } catch (e) {
+        // Transient 5xx / gateway errors happen on cold starts or brief restarts; retry once.
+        const status = e instanceof Error && "status" in (e as any) ? Number((e as any).status) : null;
+        if (status && status >= 500) {
+          await new Promise((r) => setTimeout(r, 350));
+          data = await tryLoadOnce();
+        } else {
+          throw e;
+        }
+      }
 
       const nextNotifications: Notification[] = data.notifications ?? [];
       const nextUnread = Number(data.unread_count ?? 0);
