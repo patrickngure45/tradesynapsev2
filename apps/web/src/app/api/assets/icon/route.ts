@@ -27,6 +27,23 @@ function getCache(): Map<string, string> {
   return globalThis.__assetIconSvgCache;
 }
 
+async function getGenericSvg(cache: Map<string, string>): Promise<string> {
+  const genericFilename = "generic.svg";
+  const cached = cache.get(genericFilename);
+  if (cached) return cached;
+  const iconPath = path.join(findIconsDir(), genericFilename);
+  try {
+    const svg = await fs.readFile(iconPath, "utf8");
+    cache.set(genericFilename, svg);
+    return svg;
+  } catch {
+    // Extremely defensive fallback: a minimal empty SVG.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"/>';
+    cache.set(genericFilename, svg);
+    return svg;
+  }
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const symbol = cleanSymbol(url.searchParams.get("symbol"));
@@ -39,7 +56,17 @@ export async function GET(req: Request) {
   const cache = getCache();
   const cached = cache.get(filename);
   if (cached !== undefined) {
-    if (!cached) return new NextResponse("", { status: 404 });
+    if (!cached) {
+      const generic = await getGenericSvg(cache);
+      return new NextResponse(generic, {
+        status: 200,
+        headers: {
+          "content-type": "image/svg+xml; charset=utf-8",
+          "cache-control": "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
+          "x-asset-icon": "generic",
+        },
+      });
+    }
     return new NextResponse(cached, {
       status: 200,
       headers: {
@@ -64,6 +91,14 @@ export async function GET(req: Request) {
     });
   } catch {
     cache.set(filename, "");
-    return new NextResponse("", { status: 404 });
+    const generic = await getGenericSvg(cache);
+    return new NextResponse(generic, {
+      status: 200,
+      headers: {
+        "content-type": "image/svg+xml; charset=utf-8",
+        "cache-control": "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
+        "x-asset-icon": "generic",
+      },
+    });
   }
 }

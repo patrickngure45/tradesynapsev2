@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ALL_CURRENCIES, PAYMENT_METHODS } from "@/lib/p2p/constants"; // Import constants
 import { countryToDefaultFiat, fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
+import { buttonClassName } from "@/components/ui/Button";
 
 type UserPaymentMethod = {
   id: string;
@@ -90,8 +91,10 @@ function AddMethodForm({ onCancel, onSuccess }: { onCancel: () => void, onSucces
           )}
 
           <div className="flex gap-2 justify-end mt-2">
-             <button type="button" onClick={onCancel} className="text-xs px-3 py-1 bg-gray-600 rounded">Cancel</button>
-             <button type="submit" disabled={loading} className="text-xs px-3 py-1 bg-[var(--accent)] rounded font-bold">
+             <button type="button" onClick={onCancel} className={buttonClassName({ variant: "secondary", size: "xs" })}>
+               Cancel
+             </button>
+             <button type="submit" disabled={loading} className={buttonClassName({ variant: "primary", size: "xs" })}>
                {loading ? 'Saving...' : 'Save Method'}
              </button>
           </div>
@@ -102,6 +105,7 @@ function AddMethodForm({ onCancel, onSuccess }: { onCancel: () => void, onSucces
 
 export function CreateAdModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const params = useSearchParams();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +121,23 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
   const [fiat, setFiat] = useState("USD"); // Default; refine via whoami
 
   const [assetOptions, setAssetOptions] = useState<string[]>(["USDT"]);
+
+  const didInitFromQueryRef = useRef(false);
+  useEffect(() => {
+    if (didInitFromQueryRef.current) return;
+    didInitFromQueryRef.current = true;
+
+    // One-shot init from query params when modal opens via deep-link.
+    // Supported params: side, asset, fiat.
+    // We intentionally do not auto-fill amounts/limits to avoid accidental posting.
+    const qSide = String(params.get("side") ?? "").trim().toUpperCase();
+    const qAsset = String(params.get("asset") ?? "").trim().toUpperCase();
+    const qFiat = String(params.get("fiat") ?? "").trim().toUpperCase();
+
+    if (qSide === "BUY" || qSide === "SELL") setSide(qSide);
+    if (qAsset) setAsset(qAsset);
+    if (qFiat) setFiat(qFiat);
+  }, [params]);
 
   useEffect(() => {
     fetch("/api/p2p/assets")
@@ -268,7 +289,8 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
           <h2 className="text-lg font-semibold">Post P2P Ad</h2>
           <button 
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-[var(--hover-bg)]"
+            className={buttonClassName({ variant: "secondary", size: "xs", className: "h-8 w-8 rounded-full p-0" })}
+            aria-label="Close"
           >
             ✕
           </button>
@@ -471,14 +493,14 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
              <button
                type="button"
                onClick={onClose}
-               className="rounded-lg px-4 py-2 text-sm font-medium hover:bg-[var(--bg)] transition"
+               className={buttonClassName({ variant: "secondary", size: "md" })}
              >
                Cancel
              </button>
              <button
                type="submit"
                disabled={loading}
-               className="rounded-lg bg-[var(--accent)] px-6 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+               className={buttonClassName({ variant: "primary", size: "md" })}
              >
                {loading ? "Posting..." : "Post Ad"}
              </button>

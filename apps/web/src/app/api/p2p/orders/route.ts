@@ -165,6 +165,62 @@ export async function POST(req: NextRequest) {
     if (!payload.success) return apiZodError(payload.error) ?? apiError("invalid_input");
     const { ad_id, amount_fiat, payment_method_id } = payload.data;
 
+    // Self-heal: if an earlier order timed out and cron hasn't run yet,
+    // don't block the buyer from creating a new order. Cancel expired
+    // 'created' orders for this buyer+ad, release escrow, restore ad liquidity.
+    // (Cron will do this globally; this makes the flow robust in dev and low-ops envs.)
+    await sql.begin(async (tx: any) => {
+      const expired = (await tx`
+        UPDATE p2p_order o
+        SET status = 'cancelled', cancelled_at = now()
+        WHERE o.buyer_id = ${actingUserId}::uuid
+          AND o.ad_id = ${ad_id}::uuid
+          AND o.status = 'created'
+          AND o.expires_at IS NOT NULL
+          AND o.expires_at <= now()
+        RETURNING
+          o.id::text,
+          o.ad_id::text,
+          o.escrow_hold_id::text,
+          o.amount_asset::text
+      `) as { id: string; ad_id: string; escrow_hold_id: string | null; amount_asset: string }[];
+
+      for (const order of expired) {
+        if (order.escrow_hold_id) {
+          await tx`
+            UPDATE ex_hold
+            SET status = 'released', released_at = now()
+            WHERE id = ${order.escrow_hold_id}::uuid
+              AND status = 'active'
+          `;
+        }
+
+        await tx`
+          UPDATE p2p_ad
+          SET remaining_amount = remaining_amount + (${order.amount_asset}::numeric)
+          WHERE id = ${order.ad_id}::uuid
+        `;
+
+        await tx`
+          INSERT INTO p2p_chat_message (order_id, sender_id, content)
+          VALUES (${order.id}::uuid, NULL, 'System: Order expired (late cleanup). Escrow released.')
+        `;
+      }
+    });
+
+    // Pre-compute FX reference outside the ad-locking transaction.
+    // This can touch external markets; we must not hold a FOR UPDATE lock while waiting.
+    // NOTE: computed later (after cheap abuse-prevention checks pass).
+    let preRef:
+      | {
+          assetSymbol: string;
+          fiat: string;
+          mid: number;
+          sources: Record<string, unknown>;
+          computedAt: Date;
+        }
+      | null = null;
+
     // ── Abuse prevention: open-order cap + cooldown for repeat timeouts ──
     // 1) Cap how many "awaiting payment" orders a buyer can keep open.
     const maxOpenCreated = Number(process.env.P2P_MAX_OPEN_CREATED_ORDERS ?? "3");
@@ -192,6 +248,7 @@ export async function POST(req: NextRequest) {
       WHERE buyer_id = ${actingUserId}::uuid
         AND ad_id = ${ad_id}::uuid
         AND status IN ('created', 'paid_confirmed', 'disputed')
+        AND (status <> 'created' OR expires_at IS NULL OR expires_at > now())
       ORDER BY created_at DESC
       LIMIT 1
     `;
@@ -271,8 +328,59 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Compute reference only once we know the request won't be rejected by caps/cooldowns.
+    const refTimeoutRaw = process.env.P2P_REFERENCE_TIMEOUT_MS ?? process.env.FX_LIVE_TIMEOUT_MS ?? "2500";
+    const refTimeoutParsed = Number(refTimeoutRaw);
+    const refTimeoutMs =
+      Number.isFinite(refTimeoutParsed) ? Math.min(8000, Math.max(500, Math.trunc(refTimeoutParsed))) : 2500;
+
+    try {
+      const adPreviewRows = await sql<
+        { asset_id: string; fiat_currency: string | null; price_type: string | null }[]
+      >`
+        SELECT asset_id::text AS asset_id, fiat_currency, price_type
+        FROM p2p_ad
+        WHERE id = ${ad_id}::uuid
+        LIMIT 1
+      `;
+      const preview = adPreviewRows[0] ?? null;
+      const fiat = String(preview?.fiat_currency ?? "").toUpperCase();
+
+      if (preview?.asset_id && fiat && String(preview?.price_type ?? "") === "fixed") {
+        const assetRows = await sql<{ symbol: string }[]>`
+          SELECT symbol
+          FROM ex_asset
+          WHERE id = ${preview.asset_id}::uuid
+          LIMIT 1
+        `;
+        const assetSymbol = String(assetRows[0]?.symbol ?? "").toUpperCase();
+        if (assetSymbol) {
+          const ref = await Promise.race([
+            getOrComputeFxReferenceRate(sql as any, assetSymbol, fiat),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), refTimeoutMs)),
+          ]);
+
+          if (ref && typeof ref.mid === "number" && Number.isFinite(ref.mid) && ref.mid > 0) {
+            preRef = {
+              assetSymbol,
+              fiat,
+              mid: ref.mid,
+              sources: (ref.sources ?? {}) as Record<string, unknown>,
+              computedAt: ref.computedAt,
+            };
+          }
+        }
+      }
+    } catch {
+      preRef = null;
+    }
+
     const orderId = await sql.begin(async (txArg) => {
       const tx = txArg as any;
+
+      // Fail fast if we can't acquire locks (e.g. another order is taking the same ad).
+      // Avoids long hangs that surface as client-side "Request timed out".
+      await tx`SET LOCAL lock_timeout = '5s'`;
 
       // 1. Fetch & lock the ad
       // NOTE: payment_method_ids can be a legacy JSONB string containing a JSON array.
@@ -337,18 +445,22 @@ export async function POST(req: NextRequest) {
       // Fetch asset symbol (needed for guardrails and later ledger ops)
       const [asset] = await tx`SELECT id, symbol FROM ex_asset WHERE id = ${ad.asset_id}`;
 
-      if (asset?.symbol && ad.price_type === "fixed") {
-        const ref = await getOrComputeFxReferenceRate(tx as any, asset.symbol, fiat);
-        if (ref) {
-          refMid = ref.mid;
-          refSources = ref.sources;
-          refComputedAt = ref.computedAt;
-          const bandPct = getBandPctForFiat(fiat);
-          const lo = refMid * (1 - bandPct);
-          const hi = refMid * (1 + bandPct);
-          if (price < lo || price > hi) {
-            throw new Error("p2p_price_out_of_band");
-          }
+      if (
+        asset?.symbol &&
+        ad.price_type === "fixed" &&
+        preRef &&
+        preRef.assetSymbol === String(asset.symbol).toUpperCase() &&
+        preRef.fiat === fiat
+      ) {
+        refMid = preRef.mid;
+        refSources = preRef.sources;
+        refComputedAt = preRef.computedAt;
+
+        const bandPct = getBandPctForFiat(fiat);
+        const lo = refMid * (1 - bandPct);
+        const hi = refMid * (1 + bandPct);
+        if (price < lo || price > hi) {
+          throw new Error("p2p_price_out_of_band");
         }
       }
 
@@ -550,6 +662,19 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error("[POST /orders] Error:", err);
+
+    // Postgres lock_timeout / statement timeout often surfaces as "query canceled".
+    const pgCode = typeof err?.code === "string" ? err.code : "";
+    const msg = typeof err?.message === "string" ? err.message : "";
+    if (
+      pgCode === "55P03" ||
+      pgCode === "57014" ||
+      /lock timeout/i.test(msg) ||
+      /canceling statement due to lock timeout/i.test(msg)
+    ) {
+      return apiError("p2p_busy", { status: 409 });
+    }
+
     // Map known domain errors to user-safe codes; hide internals
     const knownErrors = [
       "ad_not_found", "cannot_trade_own_ad", "ad_is_not_online",

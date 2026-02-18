@@ -209,6 +209,12 @@ export default async function proxy(request: NextRequest) {
 
   // ── CSRF checks on mutating API requests ──────────────────────────
   if (pathname.startsWith("/api/") && MUTATING_METHODS.has(method)) {
+    // Cron endpoints are not browser-driven; they won't have Origin/Referer and
+    // should not be forced through the CSRF double-submit flow.
+    // They are authenticated separately (e.g. x-cron-secret) in production.
+    if (pathname.startsWith("/api/p2p/cron/")) {
+      // no-op
+    } else {
     // 1. Origin / Referer check
     const origin = request.headers.get("origin");
     const referer = request.headers.get("referer");
@@ -330,6 +336,7 @@ export default async function proxy(request: NextRequest) {
         );
         return attachCsrfCookieIfMissing(request, res);
       }
+    }
     }
   }
 

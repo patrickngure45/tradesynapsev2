@@ -81,7 +81,8 @@ export async function getOrCreateDepositAddress(
     const txSql = tx as unknown as typeof sql;
 
     // Lock to serialize index allocation
-    await txSql`SELECT pg_advisory_xact_lock(hashtext('deposit_address_alloc'))`;
+    const lockKey = `deposit_address_alloc:${chain}`;
+    await txSql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
 
     // Double-check after lock
     const check = await txSql<{ address: string }[]>`

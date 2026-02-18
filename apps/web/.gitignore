@@ -17,6 +17,10 @@
 /.next/
 /out/
 
+# backups of .next (created during dev recovery)
+/.next_bad_*/
+/.next_bad/
+
 # production
 /build
 
@@ -48,3 +52,9 @@ next-env.d.ts
 
 # local scratch artifacts
 /.tmp/
+
+# local-only operational scripts (do not commit)
+/scripts/_repro_p2p_order.mjs
+/scripts/report-real-agent-ads.ts
+/scripts/upsert-real-agent-mpesa.ts
+/scripts/verify-real-users.ts

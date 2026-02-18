@@ -11,6 +11,10 @@ export const groq = new Groq({
 
 export async function getMarketSentiment(symbol: string) {
   try {
+    if (!apiKey) {
+      return "AI offline — configure GROQ_API_KEY to enable analyst insights.";
+    }
+
     const completion = await groq.chat.completions.create({
       messages: [
         {

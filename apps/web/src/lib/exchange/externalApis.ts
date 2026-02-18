@@ -228,7 +228,12 @@ export function createCcxtPublic(exchangeId: string): CcxtExchange {
   if (!Ctor) throw new Error(`Unsupported ccxt exchange: ${exchangeId}`);
   // Force swap/futures mode for funding rates if possible, though strict spot/swap separation depends on exchange
   // For generic use, we stick to default and let the caller specify arguments or rely on unified behavior.
-  return new Ctor({ enableRateLimit: true });
+
+  const rawTimeout = process.env.CCXT_TIMEOUT_MS ?? process.env.MARKETS_INDEX_TICKER_TIMEOUT_MS;
+  const parsed = rawTimeout ? Number(rawTimeout) : Number.NaN;
+  const timeoutMs = Number.isFinite(parsed) ? Math.min(20_000, Math.max(500, Math.trunc(parsed))) : 5000;
+
+  return new Ctor({ enableRateLimit: true, timeout: timeoutMs });
 }
 
 function toSafeNumber(v: unknown): number | null {
@@ -409,7 +414,16 @@ export function getAuthenticatedExchangeClientWithType(
 async function ccxtGetTicker(exchangeId: string, symbol: string): Promise<ExchangeTicker> {
   const ex = createCcxtPublic(exchangeId);
   const s = toCcxtSymbol(symbol);
-  const t = await ex.fetchTicker(s);
+
+  const rawTimeout = process.env.CCXT_TICKER_TIMEOUT_MS ?? process.env.CCXT_TIMEOUT_MS ?? "5000";
+  const parsed = Number(rawTimeout);
+  const timeoutMs = Number.isFinite(parsed) ? Math.min(20_000, Math.max(500, Math.trunc(parsed))) : 5000;
+
+  // CCXT has its own HTTP timeout, but some transports can still hang; enforce an upper bound.
+  const t = await Promise.race([
+    ex.fetchTicker(s),
+    new Promise<any>((_resolve, reject) => setTimeout(() => reject(new Error("timeout:ccxtGetTicker")), timeoutMs)),
+  ]);
   const bid = t.bid ?? 0;
   const ask = t.ask ?? 0;
   const last = t.last ?? 0;

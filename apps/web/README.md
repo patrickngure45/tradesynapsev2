@@ -59,7 +59,60 @@ npm run db:migrate
 npm run dev
 ```
 
+Or start the dev server + the deposit watcher together:
+
+```bash
+npm run dev:all
+```
+
 Open `http://localhost:3000`.
+
+## Deposits (permanent address) + fast settlement
+
+- Each user has **one permanent deposit address per chain** (e.g. BSC).
+- The wallet UI auto-fetches it via `POST /api/exchange/deposit/address`.
+- Deposits are credited by the **deposit scan worker**, which watches on-chain transfers and posts ledger credits.
+
+Run the worker locally (fast settlement):
+
+```bash
+# BSC (recommended for local demos)
+DEPOSIT_CONFIRMATIONS=1 DEPOSIT_SCAN_POLL_MS=5000 npm run deposit:watch:bsc
+
+# ETH (slower, more confirmations)
+DEPOSIT_CONFIRMATIONS=3 DEPOSIT_SCAN_POLL_MS=15000 npm run deposit:watch:eth
+```
+
+Key env vars:
+- `BSC_RPC_URL` / `ETH_RPC_URL` — set these for reliability and speed.
+- `DEPOSIT_CONFIRMATIONS` — lower = faster crediting (tradeoff: reorg risk).
+- `DEPOSIT_PENDING_CREDIT` — if set (`1`/`true`), credits immediately but locks funds with a hold until confirmations (requires migration `044_deposit_pending_hold.sql`).
+- `DEPOSIT_REORG_WINDOW_BLOCKS` — how far back the worker verifies recorded deposit logs still exist on-chain (default `24`). If a log disappears (reorg), it marks the event `reverted`, releases any pending hold, and posts a compensating ledger entry.
+- `DEPOSIT_SCAN_POLL_MS` — how often the worker scans for new deposits.
+
+Quick readiness check (schema + trigger):
+
+```bash
+npm run check:deposit-worker
+```
+
+## Sweeping deposit addresses (ops)
+
+Deposit addresses can accumulate dust/native gas and sweepable tokens. The sweeper consolidates funds back to the hot wallet.
+
+```bash
+# plan-only (prints actions, does not send tx)
+npx tsx scripts/sweep-deposits.ts
+
+# execute on-chain
+SWEEP_EXECUTE=true npx tsx scripts/sweep-deposits.ts
+```
+
+Optional env vars:
+- `SWEEP_MIN_BNB` — minimum native balance to consider sweeping (default `0.0001`).
+- `SWEEP_MIN_TOKEN` — default minimum token balance to consider sweeping (default `0.001`).
+- `SWEEP_MIN_<SYMBOL>` — per-token override (e.g. `SWEEP_MIN_USDT=1`).
+- `SWEEP_ACCOUNT_GAS_LEDGER` — if `true`, records actual on-chain gas spend (from tx receipts) into the exchange ledger as a `gas_spend` journal entry (system treasury → burn/sink) for accounting.
 
 ## P2P market seeding
 

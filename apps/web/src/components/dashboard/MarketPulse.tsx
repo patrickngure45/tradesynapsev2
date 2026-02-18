@@ -1,72 +1,112 @@
+import { unstable_noStore as noStore } from "next/cache";
+
 import { getMarketSentiment } from "@/lib/ai/client";
 import { getTopTickers } from "@/lib/market/external";
 
 export async function MarketPulse() {
-  const tickers = await getTopTickers();
-  const btcTicker = tickers.find((t) => t.symbol === "BTC/USDT");
-  const btcPrice = btcTicker ? btcTicker.price.toFixed(2) : "Unknown";
-  const btcChange = btcTicker ? btcTicker.change24h : 0;
+  // This component depends on external services (market data + optional AI).
+  // Prevent static prerendering at build-time to avoid flaky network timeouts.
+  noStore();
 
-  // AI Analysis (Cached or fresh)
-  // We pass the context to the AI
-  const prompt = `Current Market Data:
-${tickers.map(t => `${t.symbol}: $${t.price} (${t.change24h}%)`).join('\n')}
+  const tickers = await getTopTickers().catch(() => []);
 
-Based on this, what is the single most important thing a trader should know right now? Keep it under 40 words.`;
-  
-  // We can't actually pass dynamic prompts to the simple function I wrote earlier, 
-  // so I will just ask for general sentiment on the leader (BTC) for now 
-  // to avoid rewriting the client immediately.
-  const aiInsight = await getMarketSentiment("BTC");
+  const aiInsight = await getMarketSentiment("BTC").catch(() => "AI connectivity interruption. Check back momentarily.");
 
   return (
-    <div className="w-full max-w-4xl rounded-2xl border border-[var(--border)] bg-[var(--card-bg)] p-6 shadow-xl backdrop-blur-sm">
-      <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-        
-        {/* Left: AI Analyst */}
-        <div className="flex-1">
-          <div className="mb-2 flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-500/20 text-purple-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
-                <path d="M12 12L2.5 16" />
-                <path d="M12 12V22" />
-              </svg>
-            </div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--muted)]">Citadel AI Analyst</h2>
-          </div>
-          <p className="text-lg leading-relaxed text-[var(--fg)] font-medium">
-            &ldquo;{aiInsight}&rdquo;
-          </p>
-          <div className="mt-4 flex gap-2">
-             <span className="inline-flex items-center rounded-md bg-[var(--accent-bg)] px-2 py-1 text-xs font-medium text-[var(--accent)]">
-               Live Data
-             </span>
-             <span className="inline-flex items-center rounded-md bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-400">
-               Llama 3 Powered
-             </span>
-          </div>
-        </div>
+    <div
+      className="relative w-full rounded-3xl p-[1px] shadow-[var(--shadow-2)]"
+      style={{
+        background:
+          "linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent-2) 18%, transparent))",
+      }}
+    >
+      <div className="relative overflow-hidden rounded-3xl border border-[color-mix(in_srgb,var(--border)_70%,transparent)] bg-[var(--card)] p-6">
+        <div
+          className="pointer-events-none absolute inset-x-0 -top-10 h-28 opacity-70"
+          aria-hidden
+          style={{
+            background:
+              "radial-gradient(900px 240px at 15% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%), radial-gradient(640px 240px at 92% 10%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 55%)",
+          }}
+        />
 
-        {/* Right: Live Tickers */}
-        <div className="min-w-[280px] space-y-3 rounded-xl bg-[var(--bg)] p-4">
-          <h3 className="mb-1 text-xs font-semibold text-[var(--muted)]">Global Market Pulse</h3>
-          {tickers.map((t) => (
-            <div key={t.symbol} className="flex items-center justify-between text-sm">
-              <span className="font-medium text-[var(--muted)]">{t.symbol.split('/')[0]}</span>
-              <div className="flex flex-col items-end">
-                <span className="text-[var(--fg)]">${t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                <span className={`text-xs ${t.change24h >= 0 ? 'text-[var(--up)]' : 'text-[var(--down)]'}`}>
-                  {t.change24h >= 0 ? '+' : ''}{t.change24h.toFixed(2)}%
-                </span>
+        <div className="relative grid gap-6 lg:grid-cols-12 lg:items-start">
+          {/* Left: Insight */}
+          <div className="lg:col-span-7">
+            <div className="flex items-center gap-3">
+              <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+                <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              </span>
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">AI analyst</div>
+              <div className="h-px flex-1 bg-[var(--border)]" />
+            </div>
+
+            <p className="mt-4 text-balance text-lg font-medium leading-relaxed text-[var(--foreground)]">{aiInsight}</p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--muted)]">
+              <span className="inline-flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" aria-hidden />
+                Live market feed
+              </span>
+              <span className="text-[var(--border)]" aria-hidden>
+                •
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-2)]" aria-hidden />
+                Sentiment layer
+              </span>
+            </div>
+          </div>
+
+          {/* Right: Tickers rail */}
+          <div className="lg:col-span-5">
+            <div className="rounded-3xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--bg)_70%,transparent)] p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Global pulse</div>
+                <div className="text-[11px] font-semibold text-[var(--muted)]">Live</div>
+              </div>
+
+              <div className="relative mt-4">
+                <div className="absolute left-3 top-3 bottom-3 w-px bg-[var(--border)] opacity-70" aria-hidden />
+                <div className="space-y-2 pl-8">
+                  {tickers.slice(0, 6).map((t) => {
+                    const sym = t.symbol.split("/")[0] ?? t.symbol;
+                    const up = t.change24h >= 0;
+                    return (
+                      <div key={t.symbol} className="relative">
+                        <span className="absolute -left-8 top-3 inline-flex h-3 w-3 items-center justify-center" aria-hidden>
+                          <span className={"absolute inline-flex h-3 w-3 rounded-full " + (up ? "bg-[var(--up)]" : "bg-[var(--down)]")} />
+                          <span className="absolute inline-flex h-5 w-5 rounded-full bg-[var(--ring)]" />
+                        </span>
+                        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{sym}</div>
+                            <div className="flex flex-col items-end">
+                              <div className="text-sm font-semibold tabular-nums text-[var(--foreground)]">
+                                ${t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                              <div className={"text-xs font-semibold tabular-nums " + (up ? "text-[var(--up)]" : "text-[var(--down)]")}>
+                                {up ? "+" : ""}
+                                {t.change24h.toFixed(2)}%
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {tickers.length === 0 && (
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-xs text-[var(--muted)]">
+                      Market data currently unavailable
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          ))}
-          {tickers.length === 0 && (
-            <div className="text-xs text-[var(--muted)]">Market data currently unavailable</div>
-          )}
+          </div>
         </div>
-
       </div>
     </div>
   );

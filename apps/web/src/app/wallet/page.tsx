@@ -30,15 +30,8 @@ export default async function WalletPage() {
 
   return (
     <SiteChrome>
-      <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
-        <header className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Wallet</h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            View your internal balances and manage transfers, holds, allowlists, and withdrawals.
-          </p>
-        </header>
-
-        <div className="mt-6">
+      <main className="mx-auto flex w-full max-w-6xl flex-col px-6 py-10 sm:py-14">
+        <div className="fade-in-up">
           <ExchangeWalletClient isAdmin={isAdmin} />
         </div>
       </main>
