@@ -527,7 +527,7 @@ export async function POST(req: NextRequest) {
       return apiError("invalid_input", { details: { message: "min_limit must be <= max_limit." } });
     }
 
-    const created = await sql.begin(async (tx) => {
+    const created = await sql.begin(async (tx: any) => {
       const [newAd] = await tx`
         INSERT INTO p2p_ad (
           user_id, side, asset_id, fiat_currency,
