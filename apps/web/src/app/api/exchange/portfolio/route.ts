@@ -27,22 +27,30 @@ export async function GET(req: NextRequest) {
   try {
     // 1. All balances across all assets
     const balances = await sql`
+      WITH accts AS (
+        SELECT id, asset_id
+        FROM ex_ledger_account
+        WHERE user_id = ${actingUserId}::uuid
+      )
       SELECT
         a.asset_id,
         asset.symbol AS asset_symbol,
-        coalesce(sum(jl.amount), 0)::text AS posted,
-        coalesce(h.held, 0)::text AS held,
-        (coalesce(sum(jl.amount), 0) - coalesce(h.held, 0))::text AS available
-      FROM ex_ledger_account a
-      LEFT JOIN ex_journal_line jl ON jl.account_id = a.id
-      LEFT JOIN ex_asset asset ON asset.id = a.asset_id
+        p.posted::text AS posted,
+        h.held::text AS held,
+        (p.posted - h.held)::text AS available
+      FROM accts a
+      JOIN ex_asset asset ON asset.id = a.asset_id
       LEFT JOIN LATERAL (
-        SELECT coalesce(sum(remaining_amount), 0) AS held
+        SELECT coalesce(sum(amount), 0)::numeric AS posted
+        FROM ex_journal_line
+        WHERE account_id = a.id
+      ) p ON true
+      LEFT JOIN LATERAL (
+        SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
         FROM ex_hold
         WHERE account_id = a.id AND status = 'active'
       ) h ON true
-      WHERE a.user_id = ${actingUserId}::uuid
-      GROUP BY a.asset_id, asset.symbol, h.held
+      WHERE (p.posted <> 0) OR (h.held <> 0)
       ORDER BY asset.symbol
     `;
 
