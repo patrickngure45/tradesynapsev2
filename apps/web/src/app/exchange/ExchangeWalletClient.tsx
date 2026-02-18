@@ -495,21 +495,27 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [balancesToDisplay, localValueReady, assetLocalRates, freezeWalletSortUntil]);
 
  const balancesSummary = useMemo(() => {
- const activeHolds = holds.filter((h) => String(h.status ?? "").toLowerCase() === "active").length;
- if (!localValueReady) {
-  return { assetCount: balancesToDisplay.length, activeHolds, totalLocal: null as number | null };
- }
- let total = 0;
- let hasAny = false;
+  const assetCount = balancesToDisplay.length;
+  const activeHolds = balancesToDisplay.reduce((acc, b) => {
+    const held = Number(b.held);
+    return acc + (Number.isFinite(held) && held > 0 ? 1 : 0);
+  }, 0);
+
+  if (!localValueReady) {
+    return { assetCount, activeHolds, totalLocal: null as number | null };
+  }
+
+  let total = 0;
+  let hasAny = false;
   for (const b of balancesToDisplay) {
- const available = Number(b.available);
- const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
- if (!(Number.isFinite(available) && rate != null && Number.isFinite(rate) && rate > 0)) continue;
- total += available * rate;
- hasAny = true;
- }
-  return { assetCount: balancesToDisplay.length, activeHolds, totalLocal: hasAny ? total : null };
-  }, [holds, balancesToDisplay, localValueReady, assetLocalRates]);
+    const available = Number(b.available);
+    const rate = assetLocalRates[b.symbol.toUpperCase()] ?? null;
+    if (!(Number.isFinite(available) && rate != null && Number.isFinite(rate) && rate > 0)) continue;
+    total += available * rate;
+    hasAny = true;
+  }
+  return { assetCount, activeHolds, totalLocal: hasAny ? total : null };
+ }, [balancesToDisplay, localValueReady, assetLocalRates]);
 
  const assetsWithPendingDepositConfirmations = useMemo(() => {
   const out = new Set<string>();
