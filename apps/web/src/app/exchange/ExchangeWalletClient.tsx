@@ -1214,8 +1214,13 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          const hasLocked = Number.isFinite(heldNum) && heldNum > 0;
 
          const rate = assetLocalRates[symbol] ?? null;
-         const rowLocalEquivalent =
-           Number.isFinite(availableNum) && rate != null ? availableNum * rate : null;
+         const rowLocalEquivalent = (() => {
+           if (!Number.isFinite(availableNum)) return null;
+           if (rate != null && Number.isFinite(rate) && rate > 0) return availableNum * rate;
+           // USDT feels like money; if fiat is USD we can display a sane fallback even if rates are still loading.
+           if (symbol === "USDT" && String(localFiat ?? "").toUpperCase() === "USD") return availableNum;
+           return null;
+         })();
 
          const canSend = transferableAssetIds.has(b.asset_id);
          const canWithdraw = Number.isFinite(availableNum) && availableNum > 0;
@@ -1251,9 +1256,18 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                          </span>
                        ) : null}
                      </div>
-                     {hasLocked ? (
-                       <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                         Locked: <span className="break-all font-mono">{fmtAmount(b.held, b.decimals)}</span>
+                     <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                       Total: <span className="break-all font-mono">{fmtAmount(b.posted, b.decimals)}</span>
+                       {hasLocked ? (
+                         <>
+                           <span className="mx-2 text-[var(--border)]">•</span>
+                           <span
+                             title="Reserved funds (includes active P2P ads inventory + active order escrow holds)"
+                           >
+                             Reserved: <span className="break-all font-mono">{fmtAmount(b.held, b.decimals)}</span>
+                           </span>
+                         </>
+                       ) : null}
                          {assetsWithPendingDepositConfirmations.has(b.asset_id) ? (
                            <span
                              className="ml-2 inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--warn-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--warn)]"
@@ -1262,8 +1276,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                              Pending confirmations
                            </span>
                          ) : null}
-                       </div>
-                     ) : null}
+                     </div>
                    </div>
                  </div>
                </div>
@@ -1278,10 +1291,12 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                <div
                  className={
                    "text-right text-[11px] " +
-                   (!localValueReady || rowLocalEquivalent == null ? "text-[var(--muted)]" : "font-medium text-[var(--foreground)]")
+                   (rowLocalEquivalent == null ? "text-[var(--muted)]" : "font-medium text-[var(--foreground)]")
                  }
                >
-                 {!localValueReady ? "Updating…" : rowLocalEquivalent == null ? "—" : fmtFiat(rowLocalEquivalent, localFiat)}
+                 {rowLocalEquivalent == null
+                   ? (!localValueReady ? "Updating…" : "—")
+                   : fmtFiat(rowLocalEquivalent, localFiat)}
                </div>
 
                <div className="flex flex-wrap justify-end gap-2 md:opacity-80 md:transition-opacity md:group-hover:opacity-100">
