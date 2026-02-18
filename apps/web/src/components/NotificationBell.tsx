@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toast } from "@/components/Toast";
+import { fetchJsonOrThrow } from "@/lib/api/client";
 
 type Notification = {
   id: string;
@@ -14,13 +15,13 @@ type Notification = {
   metadata_json?: any;
 };
 
-function fetchOpts(extra?: RequestInit): RequestInit {
-  const opts: RequestInit = { credentials: "include", ...extra };
+function withDevUserHeader(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
   if (typeof window !== "undefined") {
     const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
-    if (uid) opts.headers = { ...(opts.headers as Record<string, string>), "x-user-id": uid };
+    if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
   }
-  return opts;
+  return { ...init, headers, credentials: init?.credentials ?? "same-origin" };
 }
 
 function timeAgo(iso: string): string {
@@ -109,9 +110,9 @@ export function NotificationBell() {
     prevUnreadRef.current = Math.max(0, prevUnreadRef.current - ids.length);
 
     try {
-      await fetch(
+      await fetchJsonOrThrow<{ marked_read?: number }>(
         "/api/notifications",
-        fetchOpts({
+        withDevUserHeader({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ids }),
@@ -124,14 +125,11 @@ export function NotificationBell() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(
+      const data = await fetchJsonOrThrow<{ notifications?: Notification[]; unread_count?: number }>(
         "/api/notifications?limit=30",
-        fetchOpts({
-          cache: "no-store",
-        }),
+        withDevUserHeader({ cache: "no-store" }),
       );
-      if (!res.ok) return;
-      const data = await res.json();
+
       const nextNotifications: Notification[] = data.notifications ?? [];
       const nextUnread = Number(data.unread_count ?? 0);
       setNotifications(nextNotifications);
@@ -176,9 +174,9 @@ export function NotificationBell() {
   const markAllRead = async () => {
     setLoading(true);
     try {
-      await fetch(
+      await fetchJsonOrThrow<{ marked_read?: number }>(
         "/api/notifications",
-        fetchOpts({
+        withDevUserHeader({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ mark_all_read: true }),

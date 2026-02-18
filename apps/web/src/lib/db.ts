@@ -10,6 +10,14 @@ export function createSql() {
     throw new Error("DATABASE_URL is not set");
   }
 
+  const poolMax = (() => {
+    const raw = process.env.DB_POOL_MAX;
+    if (!raw) return 10;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 10;
+    return Math.max(1, Math.min(50, Math.trunc(n)));
+  })();
+
   const connectTimeoutSec = (() => {
     const raw = process.env.DB_CONNECT_TIMEOUT_SEC;
     if (!raw) return 30;
@@ -39,7 +47,7 @@ export function createSql() {
   }
 
   return postgres(databaseUrl, {
-    max: 10,
+    max: poolMax,
     idle_timeout: 20,
     connect_timeout: connectTimeoutSec,
     ...(ssl ? { ssl } : {}),

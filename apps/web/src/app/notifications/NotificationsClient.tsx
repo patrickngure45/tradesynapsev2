@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { SiteChrome } from "@/components/SiteChrome";
+import { fetchJsonOrThrow } from "@/lib/api/client";
 
 type Notification = {
   id: string;
@@ -16,13 +17,13 @@ type Notification = {
 
 /* ── helpers (mirrored from NotificationBell) ── */
 
-function fetchOpts(extra?: RequestInit): RequestInit {
-  const opts: RequestInit = { credentials: "include", ...extra };
+function withDevUserHeader(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
   if (typeof window !== "undefined") {
     const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
-    if (uid) opts.headers = { ...opts.headers as Record<string, string>, "x-user-id": uid };
+    if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
   }
-  return opts;
+  return { ...init, headers, credentials: init?.credentials ?? "same-origin" };
 }
 
 function timeAgo(iso: string): string {
@@ -111,9 +112,9 @@ export function NotificationsClient() {
     if (ids.length === 0) return;
     setNotifications((prev) => prev.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n)));
     try {
-      await fetch(
+      await fetchJsonOrThrow<{ marked_read?: number }>(
         "/api/notifications",
-        fetchOpts({
+        withDevUserHeader({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ids }),
@@ -126,9 +127,10 @@ export function NotificationsClient() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/notifications?limit=100", fetchOpts({ cache: "no-store" }));
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await fetchJsonOrThrow<{ notifications?: Notification[] }>(
+        "/api/notifications?limit=100",
+        withDevUserHeader({ cache: "no-store" }),
+      );
       setNotifications(data.notifications ?? []);
     } catch {
       // silent
@@ -146,11 +148,14 @@ export function NotificationsClient() {
   const markAllRead = async () => {
     setMarking(true);
     try {
-      await fetch("/api/notifications", fetchOpts({
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mark_all_read: true }),
-      }));
+      await fetchJsonOrThrow<{ marked_read?: number }>(
+        "/api/notifications",
+        withDevUserHeader({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mark_all_read: true }),
+        }),
+      );
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     } catch {
       // silent

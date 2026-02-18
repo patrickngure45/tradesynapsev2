@@ -169,8 +169,13 @@ export async function POST(req: NextRequest) {
     // don't block the buyer from creating a new order. Cancel expired
     // 'created' orders for this buyer+ad, release escrow, restore ad liquidity.
     // (Cron will do this globally; this makes the flow robust in dev and low-ops envs.)
-    await sql.begin(async (tx: any) => {
-      const expired = (await tx`
+    try {
+      await sql.begin(async (tx: any) => {
+        // Avoid hanging the whole request on lock contention.
+        await tx`SET LOCAL lock_timeout = '5s'`;
+        await tx`SET LOCAL statement_timeout = '8s'`;
+
+        const expired = (await tx`
         UPDATE p2p_order o
         SET status = 'cancelled', cancelled_at = now()
         WHERE o.buyer_id = ${actingUserId}::uuid
@@ -206,7 +211,21 @@ export async function POST(req: NextRequest) {
           VALUES (${order.id}::uuid, NULL, 'System: Order expired (late cleanup). Escrow released.')
         `;
       }
-    });
+      });
+    } catch (e: any) {
+      const pgCode = typeof e?.code === "string" ? e.code : "";
+      const msg = typeof e?.message === "string" ? e.message : "";
+      if (
+        pgCode === "55P03" ||
+        pgCode === "57014" ||
+        /lock timeout/i.test(msg) ||
+        /canceling statement due to lock timeout/i.test(msg) ||
+        /canceling statement due to statement timeout/i.test(msg)
+      ) {
+        return apiError("p2p_busy", { status: 409 });
+      }
+      // Non-fatal: cleanup is best-effort; continue to normal flow.
+    }
 
     // Pre-compute FX reference outside the ad-locking transaction.
     // This can touch external markets; we must not hold a FOR UPDATE lock while waiting.
@@ -381,6 +400,7 @@ export async function POST(req: NextRequest) {
       // Fail fast if we can't acquire locks (e.g. another order is taking the same ad).
       // Avoids long hangs that surface as client-side "Request timed out".
       await tx`SET LOCAL lock_timeout = '5s'`;
+      await tx`SET LOCAL statement_timeout = '10s'`;
 
       // 1. Fetch & lock the ad
       // NOTE: payment_method_ids can be a legacy JSONB string containing a JSON array.

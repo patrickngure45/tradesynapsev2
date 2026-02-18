@@ -87,31 +87,49 @@ export async function GET(request: Request) {
           trade_count: number;
         }[]
       >`
-        WITH stats AS (
+        WITH recent AS (
+          SELECT market_id, price, quantity, created_at, id
+          FROM ex_execution
+          WHERE created_at >= NOW() - INTERVAL '24 hours'
+        ),
+        open_rows AS (
+          SELECT DISTINCT ON (market_id)
+            market_id,
+            price AS open
+          FROM recent
+          ORDER BY market_id, created_at ASC, id ASC
+        ),
+        last_rows AS (
+          SELECT DISTINCT ON (market_id)
+            market_id,
+            price AS last
+          FROM recent
+          ORDER BY market_id, created_at DESC, id DESC
+        ),
+        agg AS (
           SELECT
             market_id,
-            (array_agg(price ORDER BY created_at ASC, id ASC))[1] as open,
-            (array_agg(price ORDER BY created_at DESC, id DESC))[1] as last,
             MAX(price) as high,
             MIN(price) as low,
             SUM(quantity) as volume,
             SUM(price * quantity) as quote_volume,
             COUNT(*) as trade_count
-          FROM ex_execution
-          WHERE created_at >= NOW() - INTERVAL '24 hours'
+          FROM recent
           GROUP BY market_id
         )
         SELECT
           m.id::text as market_id,
-          s.open::text,
-          s.last::text,
-          s.high::text,
-          s.low::text,
-          COALESCE(s.volume, 0)::text as volume,
-          COALESCE(s.quote_volume, 0)::text as quote_volume,
-          COALESCE(s.trade_count, 0)::int as trade_count
+          o.open::text,
+          l.last::text,
+          a.high::text,
+          a.low::text,
+          COALESCE(a.volume, 0)::text as volume,
+          COALESCE(a.quote_volume, 0)::text as quote_volume,
+          COALESCE(a.trade_count, 0)::int as trade_count
         FROM ex_market m
-        LEFT JOIN stats s ON s.market_id = m.id
+        LEFT JOIN open_rows o ON o.market_id = m.id
+        LEFT JOIN last_rows l ON l.market_id = m.id
+        LEFT JOIN agg a ON a.market_id = m.id
         WHERE m.status = 'enabled'
       `;
 
@@ -173,6 +191,7 @@ export async function GET(request: Request) {
         FROM ex_asset a
         LEFT JOIN mkt m ON m.asset_id = a.id
         WHERE a.is_enabled = true
+          AND m.asset_id IS NOT NULL
         ORDER BY a.chain ASC, a.symbol ASC
       `;
 

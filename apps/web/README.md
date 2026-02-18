@@ -67,6 +67,31 @@ npm run dev:all
 
 Open `http://localhost:3000`.
 
+## Railway production checklist (important)
+
+If you see deploy logs like `FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory`, the web container is running out of RAM and will restart mid-request.
+
+**Service sizing**
+- Give the **web** service at least **1GB RAM** (512MB is often too small for Next.js + data-heavy endpoints).
+- Keep **replicas low** until stable (start with 1).
+
+**Node runtime**
+- Set `NODE_ENV=production` (already used by `npm run start:prod`).
+- If you increased RAM, set `NODE_OPTIONS=--max-old-space-size=768` (or higher if your container has more memory).
+
+**Database pool (per Railway service)**
+- Set `DB_POOL_MAX` to a conservative value per service to avoid connection storms.
+	- Example: `DB_POOL_MAX=5` for the web service.
+	- If you run separate worker services, give each its own `DB_POOL_MAX` too.
+
+**Workers (recommended layout)**
+The web service only runs migrations + serves HTTP/WebSocket traffic. For production deposits/outbox you should run these as separate Railway services:
+- `npm run outbox:worker`
+- `npm run deposit:watch:bsc` (or `deposit:watch:eth`)
+
+Sweeps should run as a scheduled job (or a separate service invoked on a timer):
+- `npm run sweep:deposits`
+
 ## Deposits (permanent address) + fast settlement
 
 - Each user has **one permanent deposit address per chain** (e.g. BSC).

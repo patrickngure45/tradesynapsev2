@@ -48,7 +48,14 @@ async function main() {
 
   console.log(`🔌 Connected to database: ${dbHost}/${dbName}`);
 
+  // Avoid concurrent migrations across multiple Railway services.
+  // Session-level lock is released automatically when the process exits.
+  const MIGRATION_LOCK_KEY = "tradesynapse:db:migrate:v1";
+
   try {
+    console.log("🔒 Acquiring migration lock...");
+    await sql`SELECT pg_advisory_lock(hashtext(${MIGRATION_LOCK_KEY}))`;
+
     console.log("⏱️ Setting statement_timeout...");
     await sql`SET statement_timeout = '60s'`;
 
@@ -120,6 +127,11 @@ async function main() {
     console.error("❌ Migration failed:", err);
     process.exit(1);
   } finally {
+    try {
+      await sql`SELECT pg_advisory_unlock(hashtext(${MIGRATION_LOCK_KEY}))`;
+    } catch {
+      // ignore
+    }
     await sql.end();
   }
 }
