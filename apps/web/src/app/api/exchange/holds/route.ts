@@ -137,7 +137,7 @@ export async function POST(request: Request) {
         WHERE account_id = ${accountId}
       ),
       held AS (
-        SELECT coalesce(sum(amount), 0)::numeric AS held
+        SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
         FROM ex_hold
         WHERE account_id = ${accountId} AND status = 'active'
       )

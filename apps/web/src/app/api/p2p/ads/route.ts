@@ -471,7 +471,9 @@ export async function POST(req: NextRequest) {
     if (!targetAsset) return apiError("invalid_asset");
 
     // 3. For SELL ads, verify inventory via authoritative availability check:
-    // available = posted - active_holds
+    // available = posted - sum(active_holds.remaining_amount)
+    // (remaining_amount supports partial consumption)
+    let sellerAccountId: string | null = null;
     if (data.side === "SELL") {
       const acctRows = await sql<{ id: string }[]>`
         INSERT INTO ex_ledger_account (user_id, asset_id)
@@ -480,7 +482,7 @@ export async function POST(req: NextRequest) {
         RETURNING id
       `;
 
-      const accountId = acctRows[0]!.id;
+      sellerAccountId = acctRows[0]!.id;
 
       const availRows = await sql<
         { posted: string; held: string; available: string; ok: boolean }[]
@@ -488,12 +490,12 @@ export async function POST(req: NextRequest) {
         WITH posted AS (
           SELECT coalesce(sum(amount), 0)::numeric AS posted
           FROM ex_journal_line
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${sellerAccountId}::uuid
         ),
         held AS (
-          SELECT coalesce(sum(amount), 0)::numeric AS held
+          SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
           FROM ex_hold
-          WHERE account_id = ${accountId}::uuid AND status = 'active'
+          WHERE account_id = ${sellerAccountId}::uuid AND status = 'active'
         )
         SELECT
           posted.posted::text AS posted,
@@ -513,7 +515,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Create the Ad
+    // 4. Create the Ad (and inventory hold for SELL ads)
     // Extra sanity: ensure max_limit is compatible with the ad's total liquidity.
     // max_limit (fiat) must not exceed total_amount(asset) * fixed_price(fiat/asset).
     const maxByLiquidity = Math.floor(data.total_amount * data.fixed_price);
@@ -525,25 +527,59 @@ export async function POST(req: NextRequest) {
       return apiError("invalid_input", { details: { message: "min_limit must be <= max_limit." } });
     }
 
-    const [newAd] = await sql`
-      INSERT INTO p2p_ad (
-        user_id, side, asset_id, fiat_currency,
-        price_type, fixed_price, total_amount, remaining_amount,
-        min_limit, max_limit, payment_window_minutes, terms,
-        status, payment_method_ids,
-        reference_mid, reference_sources, reference_computed_at, price_band_pct
-      ) VALUES (
-        ${actingUserId}, ${data.side}, ${targetAsset.id}, ${fiatUpper},
-        ${data.price_type}, ${data.fixed_price}, ${data.total_amount}, ${data.total_amount},
-        ${data.min_limit}, ${finalMaxLimit}, ${data.payment_window_minutes}, ${data.terms || ""},
-        'online', ${JSON.stringify(paymentMethodIds)}::jsonb,
-        ${refMid}, ${refSources ? JSON.stringify(refSources) : "{}"}::jsonb, ${refComputedAt ? refComputedAt.toISOString() : null},
-        ${refMid ? getBandPctForFiat(data.fiat) : null}
-      )
-      RETURNING id
-    `;
+    const created = await sql.begin(async (tx) => {
+      const [newAd] = await tx`
+        INSERT INTO p2p_ad (
+          user_id, side, asset_id, fiat_currency,
+          price_type, fixed_price, total_amount, remaining_amount,
+          min_limit, max_limit, payment_window_minutes, terms,
+          status, payment_method_ids,
+          reference_mid, reference_sources, reference_computed_at, price_band_pct
+        ) VALUES (
+          ${actingUserId}, ${data.side}, ${targetAsset.id}, ${fiatUpper},
+          ${data.price_type}, ${data.fixed_price}, ${data.total_amount}, ${data.total_amount},
+          ${data.min_limit}, ${finalMaxLimit}, ${data.payment_window_minutes}, ${data.terms || ""},
+          'online', ${JSON.stringify(paymentMethodIds)}::jsonb,
+          ${refMid}, ${refSources ? JSON.stringify(refSources) : "{}"}::jsonb, ${refComputedAt ? refComputedAt.toISOString() : null},
+          ${refMid ? getBandPctForFiat(data.fiat) : null}
+        )
+        RETURNING id
+      `;
 
-    return NextResponse.json({ success: true, id: newAd.id });
+      // Option A (backed ads): for SELL ads, reserve inventory in an ex_hold.
+      if (data.side === "SELL") {
+        const acctRows = await tx<{ id: string }[]>`
+          INSERT INTO ex_ledger_account (user_id, asset_id)
+          VALUES (${actingUserId}::uuid, ${targetAsset.id}::uuid)
+          ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
+          RETURNING id
+        `;
+        const accountId = acctRows[0]!.id;
+
+        const holdRows = await tx<{ id: string }[]>`
+          INSERT INTO ex_hold (account_id, asset_id, amount, remaining_amount, reason, status)
+          VALUES (
+            ${accountId}::uuid,
+            ${targetAsset.id}::uuid,
+            (${data.total_amount}::numeric),
+            (${data.total_amount}::numeric),
+            ${`p2p_ad:${newAd.id}`},
+            'active'
+          )
+          RETURNING id
+        `;
+
+        await tx`
+          UPDATE p2p_ad
+          SET inventory_hold_id = ${holdRows[0]!.id}::uuid
+          WHERE id = ${newAd.id}
+        `;
+      }
+
+      return newAd;
+    });
+
+    return NextResponse.json({ success: true, id: created.id });
 
   } catch (err: any) {
     console.error("POST /api/p2p/ads error:", err);

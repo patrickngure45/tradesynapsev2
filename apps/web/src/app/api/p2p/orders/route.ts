@@ -575,27 +575,33 @@ export async function POST(req: NextRequest) {
       `) as { id: string }[];
       const sellerAccountId = sellerAccountRows[0]!.id;
 
-      const availRows = (await tx`
-        WITH posted AS (
-          SELECT coalesce(sum(amount), 0)::numeric AS posted
-          FROM ex_journal_line
-          WHERE account_id = ${sellerAccountId}::uuid
-        ),
-        held AS (
-          SELECT coalesce(sum(amount), 0)::numeric AS held
-          FROM ex_hold
-          WHERE account_id = ${sellerAccountId}::uuid AND status = 'active'
-        )
-        SELECT
-          posted.posted::text AS posted,
-          held.held::text AS held,
-          (posted.posted - held.held)::text AS available,
-          ((posted.posted - held.held) >= (${amountAsset}::numeric)) AS ok
-        FROM posted, held
-      `) as { posted: string; held: string; available: string; ok: boolean }[];
+      const isSellAdMakerIsSeller = String(ad.side) === "SELL" && String(makerId) === String(sellerId);
 
-      if (!availRows[0]?.ok) {
-        throw new Error("seller_insufficient_funds");
+      if (!isSellAdMakerIsSeller) {
+        // For BUY ads, the seller is the taker. They have not pre-reserved inventory.
+        // Check authoritative availability: posted - sum(active_holds.remaining_amount)
+        const availRows = (await tx`
+          WITH posted AS (
+            SELECT coalesce(sum(amount), 0)::numeric AS posted
+            FROM ex_journal_line
+            WHERE account_id = ${sellerAccountId}::uuid
+          ),
+          held AS (
+            SELECT coalesce(sum(remaining_amount), 0)::numeric AS held
+            FROM ex_hold
+            WHERE account_id = ${sellerAccountId}::uuid AND status = 'active'
+          )
+          SELECT
+            posted.posted::text AS posted,
+            held.held::text AS held,
+            (posted.posted - held.held)::text AS available,
+            ((posted.posted - held.held) >= (${amountAsset}::numeric)) AS ok
+          FROM posted, held
+        `) as { posted: string; held: string; available: string; ok: boolean }[];
+
+        if (!availRows[0]?.ok) {
+          throw new Error("seller_insufficient_funds");
+        }
       }
 
       // b. Update Ad Remaining Amount (Inventory management)
@@ -624,12 +630,45 @@ export async function POST(req: NextRequest) {
         RETURNING id
       `;
 
-      // d. Create ex_hold as escrow and link it to the order
+      // d. Create ex_hold as escrow and link it to the order.
+      // For SELL ads (maker is seller), consume from the ad inventory hold so we don't double-hold.
+
+      if (isSellAdMakerIsSeller) {
+        if (!ad.inventory_hold_id) {
+          throw new Error("ad_not_funded");
+        }
+
+        const invHolds = (await tx`
+          SELECT id::text, account_id::text, asset_id::text, status, remaining_amount::text, amount::text
+          FROM ex_hold
+          WHERE id = ${ad.inventory_hold_id}::uuid
+          FOR UPDATE
+        `) as { id: string; account_id: string; asset_id: string; status: string; remaining_amount: string; amount: string }[];
+        const inv = invHolds[0];
+        if (!inv || inv.status !== "active") throw new Error("ad_not_funded");
+        if (String(inv.account_id) !== String(sellerAccountId)) throw new Error("ad_not_funded");
+        if (String(inv.asset_id) !== String(asset.id)) throw new Error("ad_not_funded");
+
+        const okRows = (await tx`
+          SELECT ((${inv.remaining_amount}::numeric) >= (${amountAsset}::numeric)) AS ok
+        `) as { ok: boolean }[];
+        if (!okRows[0]?.ok) throw new Error("insufficient_liquidity_on_ad");
+
+        await tx`
+          UPDATE ex_hold
+          SET
+            remaining_amount = remaining_amount - (${amountAsset}::numeric)
+          WHERE id = ${ad.inventory_hold_id}::uuid
+            AND status = 'active'
+        `;
+      }
+
       const holdRows = (await tx`
-        INSERT INTO ex_hold (account_id, asset_id, amount, reason, status)
+        INSERT INTO ex_hold (account_id, asset_id, amount, remaining_amount, reason, status)
         VALUES (
           ${sellerAccountId}::uuid,
           ${asset.id}::uuid,
+          (${amountAsset}::numeric),
           (${amountAsset}::numeric),
           ${`p2p_order:${newOrder.id}`},
           'active'
@@ -699,6 +738,7 @@ export async function POST(req: NextRequest) {
     const knownErrors = [
       "ad_not_found", "cannot_trade_own_ad", "ad_is_not_online",
       "amount_out_of_bounds", "insufficient_liquidity_on_ad", "seller_insufficient_funds",
+      "ad_not_funded",
       "seller_payment_details_missing", "seller_payment_method_required", "invalid_seller_payment_method",
       "reference_price_unavailable", "p2p_price_out_of_band",
     ];

@@ -385,6 +385,14 @@ export async function POST(
         // role + timing rules are enforced by the shared guard; keep local role var
         // only for system message / audit metadata.
 
+        const adRows = (await tx`
+          SELECT side, inventory_hold_id::text AS inventory_hold_id
+          FROM p2p_ad
+          WHERE id = ${order.ad_id}::uuid
+          FOR UPDATE
+        `) as { side: string; inventory_hold_id: string | null }[];
+        const adRow = adRows[0] ?? null;
+
         if (order.escrow_hold_id) {
           await tx`
             UPDATE ex_hold
@@ -398,6 +406,17 @@ export async function POST(
           SET remaining_amount = remaining_amount + ${order.amount_asset}
           WHERE id = ${order.ad_id}
         `;
+
+        // If this was a funded SELL ad (maker is seller), return liquidity back into the ad inventory hold.
+        if (adRow?.side === "SELL" && adRow.inventory_hold_id) {
+          await tx`
+            UPDATE ex_hold
+            SET
+              remaining_amount = remaining_amount + (${order.amount_asset}::numeric)
+            WHERE id = ${adRow.inventory_hold_id}::uuid
+              AND status = 'active'
+          `;
+        }
 
         const updated = await tx`
           UPDATE p2p_order

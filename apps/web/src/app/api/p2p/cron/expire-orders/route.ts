@@ -21,6 +21,8 @@ function requireCronAuth(req: NextRequest): string | null {
 type ExpiredOrder = {
 	id: string;
 	ad_id: string;
+	ad_side: string;
+	ad_inventory_hold_id: string | null;
 	escrow_hold_id: string | null;
 	amount_asset: string;
 	seller_id: string;
@@ -113,6 +115,8 @@ export async function POST(req: NextRequest) {
 				RETURNING
 					o.id::text,
 					o.ad_id::text,
+					(SELECT ad.side FROM p2p_ad ad WHERE ad.id = o.ad_id) AS ad_side,
+					(SELECT ad.inventory_hold_id::text FROM p2p_ad ad WHERE ad.id = o.ad_id) AS ad_inventory_hold_id,
 					o.escrow_hold_id::text,
 					o.amount_asset::text,
 					o.seller_id::text,
@@ -138,6 +142,17 @@ export async function POST(req: NextRequest) {
 					SET remaining_amount = remaining_amount + (${order.amount_asset}::numeric)
 					WHERE id = ${order.ad_id}::uuid
 				`;
+
+				// Restore inventory hold for funded SELL ads
+				if (order.ad_side === "SELL" && order.ad_inventory_hold_id) {
+					await tx`
+						UPDATE ex_hold
+						SET
+							remaining_amount = remaining_amount + (${order.amount_asset}::numeric)
+						WHERE id = ${order.ad_inventory_hold_id}::uuid
+							AND status = 'active'
+					`;
+				}
 
 				// System chat message
 				await tx`
