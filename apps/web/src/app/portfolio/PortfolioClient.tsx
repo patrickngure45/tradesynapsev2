@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { formatDecimalString, isNonZeroDecimalString } from "@/lib/format/amount";
+import { AssetIcon } from "@/components/AssetIcon";
 
 type Balance = {
   assetId: string;
@@ -113,14 +114,30 @@ export function PortfolioClient() {
   }, [fetchPortfolio]);
 
   if (loading) {
-    return <div className="py-8 text-center text-sm text-[var(--muted)]">Loading portfolio...</div>;
+    return (
+      <div className="rounded-3xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_55%,transparent)] px-6 py-10 text-center text-sm text-[var(--muted)]">
+        Loading portfolio…
+      </div>
+    );
   }
 
   if (error || !data) {
     return (
-      <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-        {error ?? "No data"}
-        <button onClick={() => { setLoading(true); setError(null); fetchPortfolio(); }} className="ml-3 underline hover:text-red-300">Retry</button>
+      <div className="rounded-3xl border border-[color-mix(in_srgb,var(--down)_22%,var(--border))] bg-[color-mix(in_srgb,var(--down)_10%,transparent)] px-5 py-4 text-sm text-[var(--muted)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="font-semibold text-[var(--foreground)]">Portfolio unavailable</div>
+          <button
+            onClick={() => {
+              setLoading(true);
+              setError(null);
+              fetchPortfolio();
+            }}
+            className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--card-2)]"
+          >
+            Retry
+          </button>
+        </div>
+        <div className="mt-1 text-xs text-[var(--muted)]">{error ?? "No data"}</div>
       </div>
     );
   }
@@ -138,19 +155,47 @@ export function PortfolioClient() {
     <div className="space-y-6">
       {/* Get started banner for new users */}
       {data.stats.totalFills === 0 && data.balances.length === 0 && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-6 py-8 text-center">
-          <div className="text-2xl">🚀</div>
-          <h3 className="text-sm font-semibold">Welcome to TradeSynapse</h3>
-          <p className="max-w-md text-xs text-[var(--muted)]">
-            Your portfolio is empty. Deposit funds and place your first trade to see stats here.
-          </p>
-          <div className="flex gap-3">
-            <Link href="/wallet" className="rounded-lg bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[var(--accent)]/80">
-              Deposit Funds
-            </Link>
-            <Link href="/exchange" className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-medium transition hover:bg-[var(--card)]">
-              Go to Exchange
-            </Link>
+        <div
+          className="relative overflow-hidden rounded-3xl border border-[color-mix(in_srgb,var(--border)_70%,transparent)] bg-[var(--card)] px-7 py-8 text-center shadow-[var(--shadow)]"
+        >
+          <div
+            className="pointer-events-none absolute inset-0 opacity-70"
+            aria-hidden
+            style={{
+              background:
+                "radial-gradient(900px 320px at 15% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%), radial-gradient(640px 280px at 92% 10%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 58%)",
+            }}
+          />
+
+          <div className="relative mx-auto max-w-xl">
+            <div className="mx-auto flex w-fit items-center gap-3">
+              <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+                <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              </span>
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Start here</div>
+              <div className="h-px w-16 bg-[var(--border)]" />
+            </div>
+
+            <h3 className="mt-5 text-lg font-semibold tracking-tight text-[var(--foreground)]">No activity yet</h3>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--muted)]">
+              Fund your wallet, place a trade, and this page turns into your execution ledger: PnL, volume, and recent fills.
+            </p>
+
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/wallet"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] px-5 text-xs font-semibold text-white shadow-[var(--shadow)] transition hover:opacity-95"
+              >
+                Fund wallet
+              </Link>
+              <Link
+                href="/exchange"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg)] px-5 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--card-2)]"
+              >
+                Open terminal
+              </Link>
+            </div>
           </div>
         </div>
       )}
@@ -181,8 +226,13 @@ export function PortfolioClient() {
       </div>
 
       {/* Balances */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h3 className="mb-3 text-sm font-medium">Balances</h3>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold tracking-tight text-[var(--foreground)]">Balances</h3>
+          <Link href="/wallet" className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
+            Wallet →
+          </Link>
+        </div>
         {balancesToShow.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">No balances yet. <Link href="/wallet" className="text-[var(--accent)] hover:underline">Deposit funds</Link></p>
         ) : (
@@ -204,7 +254,12 @@ export function PortfolioClient() {
 
                   return (
                     <tr key={b.assetId} className="border-b border-[var(--border)]/50">
-                      <td className="py-2 font-medium">{b.symbol.toUpperCase()}</td>
+                      <td className="py-2">
+                        <span className="inline-flex items-center gap-2 font-semibold text-[var(--foreground)]">
+                          <AssetIcon symbol={b.symbol} size={18} />
+                          {b.symbol.toUpperCase()}
+                        </span>
+                      </td>
                       <td className="py-2 text-right font-mono">{availableText}</td>
                       <td className="py-2 text-right font-mono text-[var(--muted)]">{heldText}</td>
                       <td className="py-2 text-right font-mono text-[var(--muted)]">
@@ -220,8 +275,8 @@ export function PortfolioClient() {
       </div>
 
       {/* PnL breakdown */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h3 className="mb-3 text-sm font-medium">PnL Breakdown</h3>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <h3 className="text-sm font-semibold tracking-tight text-[var(--foreground)]">PnL Breakdown</h3>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <div className="text-xs text-[var(--muted)]">Total Bought</div>
@@ -247,8 +302,8 @@ export function PortfolioClient() {
       </div>
 
       {/* Recent fills */}
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h3 className="mb-3 text-sm font-medium">Recent Fills</h3>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <h3 className="text-sm font-semibold tracking-tight text-[var(--foreground)]">Recent Fills</h3>
         {data.recentFills.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">No trade history yet.</p>
         ) : (
@@ -297,10 +352,18 @@ function StatCard({ label, value, sub, className = "" }: {
   className?: string;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-      <div className="text-xs text-[var(--muted)]">{label}</div>
-      <div className={`mt-1 font-mono text-xl font-bold ${className}`}>{value}</div>
-      <div className="mt-0.5 text-xs text-[var(--muted)]">{sub}</div>
+    <div
+      className="relative rounded-3xl p-[1px] shadow-[var(--shadow)]"
+      style={{
+        background:
+          "linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent-2) 14%, transparent))",
+      }}
+    >
+      <div className="relative h-full rounded-3xl border border-[color-mix(in_srgb,var(--border)_70%,transparent)] bg-[var(--card)] p-5">
+        <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">{label}</div>
+        <div className={"mt-2 font-mono text-2xl font-extrabold tabular-nums text-[var(--foreground)] " + className}>{value}</div>
+        <div className="mt-1 text-xs text-[var(--muted)]">{sub}</div>
+      </div>
     </div>
   );
 }

@@ -28,3 +28,38 @@ services:
       - GAS_BURN_BPS=${GAS_BURN_BPS:-25}
     
     restart: always
+
+  deposit_scan_bsc:
+    build: .
+    command: ["npm", "run", "deposit:watch:bsc"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=production
+      # Fast settlement knobs
+      - DEPOSIT_SCAN_CHAIN=bsc
+      - DEPOSIT_CONFIRMATIONS=${DEPOSIT_CONFIRMATIONS:-1}
+      - DEPOSIT_SCAN_POLL_MS=${DEPOSIT_SCAN_POLL_MS:-10000}
+      - DEPOSIT_SCAN_BLOCK_CHUNK=${DEPOSIT_SCAN_BLOCK_CHUNK:-50}
+      - DEPOSIT_SCAN_RETRIES=${DEPOSIT_SCAN_RETRIES:-6}
+      # RPC
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      - NEXT_PUBLIC_USE_MAINNET=${NEXT_PUBLIC_USE_MAINNET:-1}
+    restart: always
+
+  deposit_scan_eth:
+    build: .
+    command: ["npm", "run", "deposit:watch:eth"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=production
+      # Fast settlement knobs
+      - DEPOSIT_SCAN_CHAIN=eth
+      - DEPOSIT_CONFIRMATIONS=${DEPOSIT_CONFIRMATIONS_ETH:-3}
+      - DEPOSIT_SCAN_POLL_MS=${DEPOSIT_SCAN_POLL_MS:-15000}
+      - DEPOSIT_SCAN_BLOCK_CHUNK=${DEPOSIT_SCAN_BLOCK_CHUNK:-50}
+      - DEPOSIT_SCAN_RETRIES=${DEPOSIT_SCAN_RETRIES:-6}
+      # RPC
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - NEXT_PUBLIC_USE_MAINNET=${NEXT_PUBLIC_USE_MAINNET:-1}
+    restart: always

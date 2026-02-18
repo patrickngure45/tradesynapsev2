@@ -28,6 +28,14 @@ import {
 } from "./src/lib/ws/channels";
 
 const dev = process.env.NODE_ENV !== "production";
+// Next.js 16 uses Turbopack by default in dev in some setups.
+// We run a custom server (`tsx server.ts`), and on Windows it’s easy to end up with
+// a corrupted Turbopack cache DB which prevents startup.
+//
+// Force webpack dev bundler for reliability.
+if (dev) {
+  process.env.NEXT_DISABLE_TURBOPACK ??= "1";
+}
 // IMPORTANT: Windows and some shells set HOSTNAME to the machine name (e.g. "Janjaa").
 // Using that as the bind address makes the server listen only on a single LAN IP,
 // which breaks access via localhost/127.0.0.1.

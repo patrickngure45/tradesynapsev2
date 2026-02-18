@@ -9,7 +9,7 @@ export default function WalletError({
 }) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-xl text-red-400">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[color-mix(in_srgb,var(--down)_22%,var(--border))] bg-[color-mix(in_srgb,var(--down)_10%,transparent)] text-xl text-[var(--down)]">
         !
       </div>
       <h2 className="text-lg font-semibold">Wallet Error</h2>
@@ -21,7 +21,7 @@ export default function WalletError({
       </p>
       <button
         onClick={() => reset()}
-        className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]/80"
+        className="inline-flex h-10 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] px-5 text-sm font-semibold text-white shadow-[var(--shadow)] transition hover:opacity-95"
       >
         Retry
       </button>

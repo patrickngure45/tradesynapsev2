@@ -4,6 +4,14 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getPaymentMethodName } from "@/lib/p2p/constants";
 import { paymentMethodBadge, safePaymentMethods } from "@/lib/p2p/display";
+import { buttonClassName } from "@/components/ui/Button";
+import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
+
+type ApiErrorResponse = {
+  error?: string;
+  message?: string;
+  details?: any;
+};
 
 type AdSnapshot = {
   id: string;
@@ -16,6 +24,8 @@ type AdSnapshot = {
   payment_window: number;
   trader?: string | null;
   trader_rep?: { positive: number; total: number } | null;
+  trader_completed?: number | null;
+  trader_verified?: boolean | null;
   payment_methods?: string[] | null;
   terms?: string | null;
 };
@@ -45,7 +55,19 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
   const repTotal = Number(ad.trader_rep?.total ?? 0);
   const repPositive = Number(ad.trader_rep?.positive ?? 0);
   const repPct = repTotal > 0 ? Math.round((repPositive / repTotal) * 100) : null;
-  const repLabel = repTotal >= 3 && repPct !== null ? `${repPct}% positive (${repTotal})` : repTotal > 0 ? `New (${repTotal})` : "New";
+  const isVerifiedTrader = Boolean(ad.trader_verified);
+  const completedCount = Number(ad.trader_completed ?? 0);
+  const completedLabel = Number.isFinite(completedCount) && completedCount > 0 ? `${completedCount} completed` : null;
+  const repLabel =
+    repTotal >= 3 && repPct !== null
+      ? `${repPct}% (${repTotal})`
+      : isVerifiedTrader
+        ? "Verified"
+        : repTotal > 0
+          ? `New (${repTotal})`
+          : Number.isFinite(completedCount) && completedCount > 0
+            ? "No feedback"
+            : "New";
 
   useEffect(() => {
     fetch(`/api/p2p/reference?asset=${encodeURIComponent(ad.asset)}&fiat=${encodeURIComponent(ad.fiat)}`)
@@ -80,16 +102,79 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
     return (f / p).toFixed(6);
   };
 
-  const getCreateOrderErrorMessage = (errorCode?: string, fallback?: string) => {
+  const humanizeErrorCode = (code: string) =>
+    code
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const getCreateOrderErrorMessage = (resp?: ApiErrorResponse) => {
+    const errorCode = String(resp?.error ?? "").trim() || undefined;
+    const fallback = String(resp?.message ?? "").trim() || undefined;
+    const details = resp?.details as any;
+
     switch (errorCode) {
+      case "csrf_no_origin":
+      case "csrf_origin_mismatch":
+      case "csrf_referer_mismatch":
+      case "csrf_invalid_referer":
+      case "csrf_token_mismatch":
+        return "Security check failed for this request. Please refresh the page and try again.";
+      case "p2p_busy":
+        return "This ad is being taken by someone else right now. Please try again in a few seconds.";
+      case "ad_not_found":
+        return "This ad no longer exists. Please refresh the marketplace.";
+      case "ad_is_not_online":
+        return "This ad is not online anymore. Please choose another ad.";
+      case "cannot_trade_own_ad":
+        return "You can’t trade on your own ad.";
+      case "amount_out_of_bounds":
+        return `Amount must be between ${Number(ad.min).toLocaleString()} and ${Number(ad.max).toLocaleString()} ${ad.fiat}.`;
+      case "insufficient_liquidity_on_ad":
+        return "This ad doesn’t have enough remaining liquidity for that amount. Try a smaller amount or another ad.";
+      case "seller_insufficient_funds":
+        return `Seller doesn’t have enough ${ad.asset} available for escrow right now. Try a smaller amount or another ad.`;
+      case "p2p_price_out_of_band":
+        return "This ad’s price is too far from the current reference rate. Please refresh and choose another ad.";
       case "seller_payment_details_missing":
-        return "Seller payment details are missing. Please choose another ad or ask the seller to update payment details.";
+        return "Seller payment details are missing. Please choose another ad.";
       case "seller_payment_method_required":
         return "Select your payment method before creating this sell order.";
       case "invalid_seller_payment_method":
         return "The selected payment method is invalid. Please choose another method.";
-      default:
-        return fallback || "Failed to create order";
+      case "p2p_open_orders_limit": {
+        const max = typeof details?.max === "number" ? details.max : null;
+        const open = typeof details?.open === "number" ? details.open : null;
+        if (max && open !== null) return `You already have ${open} open orders. Please complete or cancel one before creating another (limit: ${max}).`;
+        return "You have too many open orders. Please complete or cancel one before creating another.";
+      }
+      case "p2p_order_create_cooldown": {
+        const ends = typeof details?.cooldown_ends_at === "string" ? details.cooldown_ends_at : null;
+        return ends
+          ? `You’re temporarily blocked from creating new orders due to repeated payment timeouts. Try again after ${new Date(ends).toLocaleString()}.`
+          : "You’re temporarily blocked from creating new orders due to repeated payment timeouts. Please try again later.";
+      }
+      case "rate_limit_exceeded": {
+        const resetMs = typeof details?.resetMs === "number" ? details.resetMs : null;
+        if (resetMs && resetMs > 0) return `Too many attempts. Please try again in ${Math.max(1, Math.ceil(resetMs / 1000))}s.`;
+        return "Too many attempts. Please try again in a moment.";
+      }
+      case "p2p_country_not_supported":
+        return "P2P is not available in your country yet.";
+      case "unauthorized":
+      case "missing_x_user_id":
+      case "missing_user_id":
+      case "session_token_expired":
+        return "Your session has expired. Please log in again.";
+      case "invalid_input":
+        return "Invalid input. Please double-check the amount and try again.";
+      default: {
+        if (fallback) return fallback;
+        if (errorCode) {
+          const msg = humanizeErrorCode(errorCode);
+          return process.env.NODE_ENV === "development" ? `${msg} (${errorCode})` : msg;
+        }
+        return "Failed to create order";
+      }
     }
   };
   
@@ -105,40 +190,51 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout for safety
+    // In dev, the first request can include a large one-time cost (Next route compilation).
+    // Avoid showing a false "timeout" to users during local development.
+    const timeoutMs = process.env.NODE_ENV === "development" ? 60_000 : 20_000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const res = await fetch("/api/p2p/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ad_id: ad.id,
-          amount_fiat: parseFloat(amountFiat),
-          payment_method_id: isSelling ? selectedMethodId : undefined
-        }),
-        signal: controller.signal
-      });
+      const data = await fetchJsonOrThrow<{ success: true; order_id: string }>(
+        "/api/p2p/orders",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ad_id: ad.id,
+            amount_fiat: parseFloat(amountFiat),
+            payment_method_id: isSelling ? selectedMethodId : undefined,
+          }),
+          signal: controller.signal,
+        },
+      );
 
       clearTimeout(timeoutId);
-
-      // Handle non-JSON responses gracefully
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error("Server Error: " + text.slice(0, 100));
-      }
-
-      if (!res.ok) {
-        throw new Error(getCreateOrderErrorMessage(data.error, data.message));
-      }
 
       router.push(`/p2p/orders/${data.order_id}`);
       
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setError("Request timed out. The server took too long to respond.");
+        setError(
+          `Request timed out after ${Math.round(timeoutMs / 1000)}s. The server took too long to respond.`,
+        );
+      } else if (err instanceof ApiError) {
+        // If the server says an open order already exists for this ad, route there.
+        if (err.code === "p2p_order_duplicate_open") {
+          const details: any = err.details;
+          if (details && typeof details.order_id === "string" && details.order_id) {
+            router.push(`/p2p/orders/${details.order_id}`);
+            return;
+          }
+        }
+
+        const resp: ApiErrorResponse = {
+          error: err.code,
+          message: typeof err.details === "string" ? err.details : undefined,
+          details: typeof err.details === "object" ? err.details : undefined,
+        };
+        setError(getCreateOrderErrorMessage(resp));
       } else {
         setError(err.message);
       }
@@ -185,15 +281,21 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
                   {traderLabel ? <span className="normal-case font-semibold">{traderLabel}</span> : null}
                   {traderLabel ? <span aria-hidden>•</span> : null}
                   <span className="normal-case">{repLabel}</span>
+                  {completedLabel ? (
+                    <>
+                      <span aria-hidden>•</span>
+                      <span className="normal-case">{completedLabel}</span>
+                    </>
+                  ) : null}
                   <span aria-hidden>•</span>
-                  <span>Pay within {ad.payment_window} min</span>
+                  <span>{ad.payment_window}m window</span>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={onClose}
-                className="shrink-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-bold text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                className={buttonClassName({ variant: "secondary", size: "xs", className: "shrink-0 h-8 w-8 rounded-full p-0" })}
                 aria-label="Close"
                 title="Close"
               >
@@ -313,14 +415,14 @@ export function TakeAdModal({ ad, onClose }: { ad: AdSnapshot, onClose: () => vo
              <button 
                type="button" 
                onClick={onClose}
-               className="flex-1 rounded-lg py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] transition"
+               className={buttonClassName({ variant: "secondary", size: "md", className: "flex-1 py-3" })}
              >
                 Cancel
              </button>
              <button 
                type="submit" 
                disabled={loading || !amountFiat}
-               className="flex-1 rounded-lg bg-[var(--accent)] py-3 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+               className={buttonClassName({ variant: "primary", size: "md", className: "flex-1 py-3" })}
              >
                 {loading ? "Processing..." : `${myAction} ${ad.asset}`}
              </button>

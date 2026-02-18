@@ -2,6 +2,10 @@
 
 import React, { useMemo, useState } from "react";
 
+// Cache missing icons across the session to avoid spamming /api/assets/icon with 404s
+// when the wallet lists hundreds of long-tail tokens.
+const missingIconSymbols = new Set<string>();
+
 type Tone = "neutral" | "accent" | "up" | "warn";
 
 function normalizeSymbol(symbol: string): string {
@@ -65,7 +69,7 @@ export function AssetIcon({
 }) {
   const s = useMemo(() => normalizeSymbol(symbol), [symbol]);
   const { glyph, tone } = useMemo(() => markForSymbol(s), [s]);
-  const [iconFailed, setIconFailed] = useState(false);
+  const [iconFailed, setIconFailed] = useState(() => (s ? missingIconSymbols.has(s) : false));
 
   // Choose a text size that stays balanced as the circle grows.
   const textClass =
@@ -106,7 +110,11 @@ export function AssetIcon({
           height={size}
           className="h-full w-full rounded-full object-contain"
           loading="lazy"
-          onError={() => setIconFailed(true)}
+          decoding="async"
+          onError={() => {
+            if (s) missingIconSymbols.add(s);
+            setIconFailed(true);
+          }}
         />
       ) : (
         <span className={"select-none font-extrabold leading-none " + textClass}>{glyph}</span>

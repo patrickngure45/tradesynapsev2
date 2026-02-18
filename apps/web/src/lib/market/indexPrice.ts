@@ -105,6 +105,12 @@ function concurrencyLimit(): number {
   return clamp(Number.isFinite(v) ? v : 4, 1, 10);
 }
 
+function tickerTimeoutMs(): number {
+  const raw = process.env.MARKETS_INDEX_TICKER_TIMEOUT_MS ?? process.env.CCXT_TICKER_TIMEOUT_MS;
+  const v = raw ? Number(raw) : NaN;
+  return clamp(Number.isFinite(v) ? v : 3500, 500, 20_000);
+}
+
 const cache = new Map<string, ExternalIndexQuote>();
 
 async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
@@ -131,9 +137,16 @@ export async function getExternalIndexUsdt(base: string): Promise<ExternalIndexQ
   const exchanges = parseExchangesEnv();
   const sources: ExternalIndexSource[] = [];
 
+  const timeout = tickerTimeoutMs();
+
   await runWithConcurrency(exchanges, concurrencyLimit(), async (exchange) => {
     try {
-      const t = await getExchangeTicker(exchange, symbol);
+      const t = await Promise.race([
+        getExchangeTicker(exchange, symbol),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(() => reject(new Error(`timeout:getExchangeTicker:${exchange}`)), timeout)
+        ),
+      ]);
       const bid = parseNum(t.bid);
       const ask = parseNum(t.ask);
       const last = parseNum(t.last);

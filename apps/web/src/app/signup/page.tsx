@@ -3,12 +3,12 @@ import { Suspense } from "react";
 
 import { SiteChrome } from "@/components/SiteChrome";
 import { AuthShell } from "@/components/auth/AuthShell";
-import { AuthClient } from "./AuthClient";
+import { AuthClient } from "../login/AuthClient";
 
-export const metadata: Metadata = { title: "Log In" };
+export const metadata: Metadata = { title: "Sign Up" };
 export const dynamic = "force-dynamic";
 
-export default function LoginPage({
+export default function SignupPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
@@ -19,17 +19,16 @@ export default function LoginPage({
   return (
     <SiteChrome>
       <AuthShell
-        title="Welcome back"
-        subtitle="Access your exchange wallet, spot markets, and the P2P desk — all in one session."
-        switchHint="New here? Create an account in under a minute."
-        switchHref={`/signup${nextQuery}`}
-        switchLabel="Create account"
+        title="Create your account"
+        subtitle="Create an exchange account to unlock spot markets, P2P escrow, and your wallet. Email verification is recommended."
+        switchHint="Already have an account?"
+        switchHref={`/login${nextQuery}`}
+        switchLabel="Log in"
       >
         <Suspense>
-          <AuthClient variant="page" initialMode="login" />
+          <AuthClient variant="page" initialMode="signup" />
         </Suspense>
       </AuthShell>
     </SiteChrome>
   );
 }
-

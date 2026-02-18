@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LogoMark } from "@/components/LogoMark";
 
 const products = [
   { href: "/markets", label: "Markets" },
@@ -70,10 +71,15 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 lg:gap-x-6 lg:px-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-white shadow-sm">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-              </svg>
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--accent)]"
+              style={{
+                background: "color-mix(in srgb, var(--background) 35%, transparent)",
+                boxShadow: "var(--glow)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <LogoMark size={18} className="opacity-95" />
             </div>
             <span className="hidden text-lg font-bold tracking-tight lg:block">TradeSynapse</span>
           </Link>

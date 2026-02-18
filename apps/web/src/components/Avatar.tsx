@@ -42,7 +42,7 @@ export function Avatar({
     >
       {svgDataUri ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={svgDataUri} alt={label ?? ""} width={side} height={side} />
+        <img src={svgDataUri} alt="" width={side} height={side} />
       ) : (
         <span className="text-[11px] font-bold text-[var(--muted)]">
           {(fallbackText ?? "?").slice(0, 2).toUpperCase()}

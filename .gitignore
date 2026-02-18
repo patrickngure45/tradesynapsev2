@@ -18,3 +18,6 @@
 .DS_Store
 Thumbs.db
 .vscode/
+
+# accidental nested directory created locally
+apps/web/apps/web/

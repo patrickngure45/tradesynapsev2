@@ -9,6 +9,7 @@ import { Avatar } from "@/components/Avatar";
 import { AssetIcon } from "@/components/AssetIcon";
 import { AssetSelect } from "@/components/AssetSelect";
 import { FiatSelect } from "@/components/FiatSelect";
+import { buttonClassName } from "@/components/ui/Button";
 import { ALL_CURRENCIES } from "@/lib/p2p/constants";
 import { countryToDefaultFiat, initials2, paymentMethodBadge, safePaymentMethods } from "@/lib/p2p/display";
 import { fiatCodeToIso2 } from "@/lib/p2p/fiatIso2";
@@ -32,6 +33,8 @@ type Ad = {
   rep_positive?: number;
   rep_negative?: number;
   rep_total?: number;
+  completed_count?: number;
+  is_verified_agent?: boolean;
   terms: string | null;
 };
 
@@ -100,6 +103,16 @@ export function P2PMarketplace() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
+
+  const didAutoOpenCreateRef = useRef(false);
+  useEffect(() => {
+    if (didAutoOpenCreateRef.current) return;
+    const v = String(params.get("new_ad") ?? "").trim().toLowerCase();
+    if (v === "1" || v === "true" || v === "yes") {
+      didAutoOpenCreateRef.current = true;
+      setShowCreateModal(true);
+    }
+  }, [params]);
 
   useEffect(() => {
     async function fetchAds() {
@@ -198,7 +211,11 @@ export function P2PMarketplace() {
             </Link>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="hidden h-9 items-center justify-center rounded-lg bg-[var(--accent)] px-4 text-sm font-bold text-white transition hover:brightness-110 md:inline-flex"
+              className={buttonClassName({
+                variant: "primary",
+                size: "md",
+                className: "hidden h-9 md:inline-flex",
+              })}
             >
               + Post Ad
             </button>
@@ -266,7 +283,12 @@ export function P2PMarketplace() {
 
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex h-10 items-center justify-center rounded-lg bg-[var(--accent)] px-4 text-sm font-bold text-white transition hover:brightness-110 md:hidden"
+            className={buttonClassName({
+              variant: "primary",
+              size: "md",
+              className: "flex h-10 md:hidden",
+              fullWidth: true,
+            })}
           >
             + Post Ad
           </button>
@@ -289,7 +311,7 @@ export function P2PMarketplace() {
               </div>
               <button
                 type="button"
-                className="shrink-0 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-bold text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                className={buttonClassName({ variant: "secondary", size: "xs", className: "shrink-0" })}
                 onClick={() => setFiatHint(null)}
               >
                 Dismiss
@@ -310,7 +332,7 @@ export function P2PMarketplace() {
               <button
                 type="button"
                 onClick={() => setRetryNonce((n) => n + 1)}
-                className="flex h-9 items-center justify-center rounded-lg bg-[var(--accent)] px-4 text-sm font-bold text-white transition hover:brightness-110"
+                className={buttonClassName({ variant: "primary", size: "md", className: "h-9" })}
               >
                 Retry
               </button>
@@ -335,10 +357,13 @@ export function P2PMarketplace() {
             ) : ads.length === 0 ? (
               <div className="px-5 py-10 text-center">
                 <div className="text-sm font-extrabold text-[var(--foreground)]">No ads found</div>
-                <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Try changing the crypto, fiat, or amount.</div>
+                <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+                  Try switching to <span className="font-semibold text-[var(--foreground)]">{side === "BUY" ? "Sell" : "Buy"}</span>,
+                  or change the crypto, fiat, or amount.
+                </div>
               </div>
             ) : (
-              <div>
+              <div className="pt-3 pb-1 md:pt-0 md:pb-0">
                 {ads.map((ad, idx) => (
                   <AdRow key={ad.id} ad={ad} mySide={side} asset={asset} onTake={() => setSelectedAd(ad)} isLast={idx === ads.length - 1} />
                 ))}
@@ -364,6 +389,8 @@ export function P2PMarketplace() {
               positive: Number(selectedAd.rep_positive ?? 0),
               total: Number(selectedAd.rep_total ?? 0),
             },
+            trader_completed: Number(selectedAd.completed_count ?? 0),
+            trader_verified: Boolean(selectedAd.is_verified_agent),
             payment_methods: selectedAd.payment_methods ?? null,
             terms: selectedAd.terms ?? null,
           }}
@@ -411,32 +438,51 @@ function AdRow({
   const repTotal = Number((ad as any).rep_total ?? 0);
   const repPositive = Number((ad as any).rep_positive ?? 0);
   const repPct = repTotal > 0 ? Math.round((repPositive / repTotal) * 100) : null;
-  const repLabel = repTotal >= 3 && repPct !== null ? `${repPct}% (${repTotal})` : repTotal > 0 ? `New (${repTotal})` : "New";
+  const isVerifiedAgent = Boolean((ad as any).is_verified_agent);
+  const completedCount = Number((ad as any).completed_count ?? 0);
+  const repLabel =
+    repTotal >= 3 && repPct !== null
+      ? `${repPct}% (${repTotal})`
+      : isVerifiedAgent
+        ? "Verified"
+        : repTotal > 0
+          ? `New (${repTotal})`
+          : Number.isFinite(completedCount) && completedCount > 0
+            ? "No feedback yet"
+            : "New";
+
+  const completedLabel = Number.isFinite(completedCount) && completedCount > 0 ? `${completedCount} completed` : null;
 
   return (
     <div
-      className={`px-5 py-4 transition hover:bg-[var(--card-2)] md:grid md:grid-cols-[200px_180px_1fr_200px_auto] md:items-center md:gap-3 lg:grid-cols-[240px_220px_1fr_240px_auto] lg:gap-4 ${
-        isLast ? "" : "border-b border-[var(--border)]"
+      className={`mb-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 transition hover:bg-[var(--card-2)] md:mb-0 md:rounded-none md:border-0 md:bg-transparent md:grid md:grid-cols-[200px_180px_1fr_200px_auto] md:items-center md:gap-3 lg:grid-cols-[240px_220px_1fr_240px_auto] lg:gap-4 ${
+        isLast ? "" : "md:border-b md:border-[var(--border)]"
       }`}
     >
       <div className="flex items-center justify-between gap-3 md:justify-start">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <Avatar seed={ad.email || displayName} label={displayName} size={36} fallbackText={initials2(displayName)} />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-[var(--foreground)]">{displayName}</div>
-            <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--muted)]">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--muted)]">
               <span className="text-[var(--up)]">Active</span>
               <span>•</span>
-              <span className="text-[var(--muted)]">{repLabel}</span>
+              <span className="text-[var(--muted)]">{repLabel === "No feedback yet" ? "No feedback" : repLabel}</span>
+              {completedLabel ? (
+                <>
+                  <span>•</span>
+                  <span>{completedLabel}</span>
+                </>
+              ) : null}
               <span>•</span>
-              <span>Pay within {ad.payment_window_minutes} min</span>
+              <span>{ad.payment_window_minutes}m window</span>
             </div>
           </div>
         </div>
 
         <button
           onClick={onTake}
-          className={`h-9 max-w-full min-w-0 rounded-lg px-4 text-sm font-bold text-white transition hover:brightness-110 md:hidden ${
+          className={`h-9 w-32 shrink-0 rounded-lg px-4 text-sm font-bold text-white transition hover:brightness-110 md:hidden sm:w-36 ${
             mySide === "BUY" ? "bg-[var(--up)]" : "bg-[var(--down)]"
           }`}
         >

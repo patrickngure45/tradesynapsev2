@@ -6,6 +6,9 @@ import { getHotWalletAddress, getHotWalletKey } from "../src/lib/blockchain/hotW
 import { getTokenBalance, sendBnb, sendToken } from "../src/lib/blockchain/tokens";
 import { upsertServiceHeartbeat } from "../src/lib/system/heartbeat";
 
+const SYSTEM_TREASURY_USER_ID = "00000000-0000-0000-0000-000000000001";
+const SYSTEM_BURN_USER_ID = "00000000-0000-0000-0000-000000000003";
+
 // ── Well-known BEP-20 contracts to sweep (beyond what's in ex_asset) ─
 const EXTRA_TOKENS: Record<string, string> = {
   // Mainnet
@@ -31,12 +34,112 @@ type SweepToken = {
 };
 
 const EXECUTE = process.env.SWEEP_EXECUTE === "true";
+const ACCOUNT_GAS_IN_LEDGER = process.env.SWEEP_ACCOUNT_GAS_LEDGER === "true";
 const MIN_BNB = process.env.SWEEP_MIN_BNB || "0.0001"; // ~$0.03 — sweep nearly everything
 const DEFAULT_MIN_SWEEP = Number(process.env.SWEEP_MIN_TOKEN || "0.001"); // sweep tokens with >0.001 balance
 
 const TOKEN_TRANSFER_GAS = 65000n; // safe upper bound for BEP-20 transfer
 const NATIVE_TRANSFER_GAS = 21000n;
 const GAS_MARGIN = 1.15; // 15% safety margin on gas top-ups
+
+async function ensureSystemUser(sql: ReturnType<typeof getSql>, userId: string): Promise<void> {
+  await sql`
+    INSERT INTO app_user (id, status, kyc_level, country)
+    VALUES (${userId}::uuid, 'active', 'none', NULL)
+    ON CONFLICT (id) DO NOTHING
+  `;
+}
+
+async function ensureLedgerAccount(
+  sql: ReturnType<typeof getSql>,
+  userId: string,
+  assetId: string,
+): Promise<string> {
+  const rows = await sql<{ id: string }[]>`
+    INSERT INTO ex_ledger_account (user_id, asset_id)
+    VALUES (${userId}::uuid, ${assetId}::uuid)
+    ON CONFLICT (user_id, asset_id) DO UPDATE SET user_id = EXCLUDED.user_id
+    RETURNING id::text AS id
+  `;
+  return rows[0]!.id;
+}
+
+async function getBnbAssetId(sql: ReturnType<typeof getSql>): Promise<string | null> {
+  const rows = await sql<{ id: string }[]>`
+    SELECT id::text AS id
+    FROM ex_asset
+    WHERE LOWER(chain) = 'bsc'
+      AND symbol = 'BNB'
+      AND is_enabled = true
+    LIMIT 1
+  `;
+  return rows[0]?.id ?? null;
+}
+
+async function gasCostWeiFromReceipt(provider: any, txHash: string): Promise<bigint | null> {
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) return null;
+  // ethers v6: receipt.gasUsed + (receipt.effectiveGasPrice || receipt.gasPrice)
+  const gasUsed = (receipt as any).gasUsed as bigint | undefined;
+  const gasPrice = ((receipt as any).effectiveGasPrice ?? (receipt as any).gasPrice) as
+    | bigint
+    | undefined;
+  if (typeof gasUsed !== "bigint" || typeof gasPrice !== "bigint") return null;
+  return gasUsed * gasPrice;
+}
+
+async function recordGasSpend(sql: ReturnType<typeof getSql>, input: {
+  txHash: string;
+  gasWei: bigint;
+  kind: "sweep_gas_topup" | "sweep_token" | "sweep_native";
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  if (input.gasWei <= 0n) return;
+
+  const bnbAssetId = await getBnbAssetId(sql);
+  if (!bnbAssetId) return;
+
+  const gasBnb = ethers.formatEther(input.gasWei);
+
+  await sql.begin(async (tx) => {
+    const txSql = tx as unknown as typeof sql;
+
+    await ensureSystemUser(txSql, SYSTEM_TREASURY_USER_ID);
+    await ensureSystemUser(txSql, SYSTEM_BURN_USER_ID);
+
+    const [treasuryAcct, burnAcct] = await Promise.all([
+      ensureLedgerAccount(txSql, SYSTEM_TREASURY_USER_ID, bnbAssetId),
+      ensureLedgerAccount(txSql, SYSTEM_BURN_USER_ID, bnbAssetId),
+    ]);
+
+    const entryRows = await txSql<{ id: string }[]>`
+      INSERT INTO ex_journal_entry (type, reference, metadata_json)
+      VALUES (
+        'gas_spend',
+        ${`onchain:bsc:${input.txHash}`},
+        ${txSql.json({
+          chain: "bsc",
+          tx_hash: input.txHash,
+          gas_wei: input.gasWei.toString(),
+          gas_bnb: gasBnb,
+          kind: input.kind,
+          ...(input.metadata ?? {}),
+        })}::jsonb
+      )
+      RETURNING id::text AS id
+    `;
+    const entryId = entryRows[0]!.id;
+
+    // Double-entry: treasury pays gas; burn/sink receives.
+    // Avoid inserting any zero-amount lines (DB constraint: amount <> 0).
+    await txSql`
+      INSERT INTO ex_journal_line (entry_id, account_id, asset_id, amount)
+      VALUES
+        (${entryId}::uuid, ${treasuryAcct}::uuid, ${bnbAssetId}::uuid, ((${gasBnb}::numeric) * -1)),
+        (${entryId}::uuid, ${burnAcct}::uuid, ${bnbAssetId}::uuid, (${gasBnb}::numeric))
+    `;
+  });
+}
 
 async function buildTokenList(sql: ReturnType<typeof getSql>): Promise<SweepToken[]> {
   // 1. Load from database (ex_asset with contract addresses)
@@ -120,6 +223,7 @@ async function main() {
   console.log("--- DEPOSIT SWEEPER ---");
   console.log(`Mode: ${EXECUTE ? "EXECUTE" : "PLAN ONLY"}`);
   console.log(`Hot wallet: ${hotWallet}`);
+  if (EXECUTE) console.log(`Ledger gas accounting: ${ACCOUNT_GAS_IN_LEDGER ? "ON" : "OFF"}`);
   console.log(`Gas price: ${ethers.formatUnits(gasPrice, "gwei")} gwei`);
   console.log(`Token gas cost: ${ethers.formatEther(tokenGasCost)} BNB per token transfer`);
   console.log(`Native gas cost: ${ethers.formatEther(nativeGasCost)} BNB`);
@@ -211,6 +315,17 @@ async function main() {
             const hotKey = getHotWalletKey();
             const tx = await sendBnb(hotKey, address, topupAmount);
             console.log(`  ✅ Gas top-up sent: ${tx.txHash}`);
+            if (ACCOUNT_GAS_IN_LEDGER) {
+              const gasWei = await gasCostWeiFromReceipt(provider, tx.txHash).catch(() => null);
+              if (gasWei) {
+                await recordGasSpend(sql, {
+                  txHash: tx.txHash,
+                  gasWei,
+                  kind: "sweep_gas_topup",
+                  metadata: { to: address, amount_bnb: topupAmount },
+                }).catch(() => undefined);
+              }
+            }
             totalGasTopups++;
             await new Promise((r) => setTimeout(r, 3000));
             bnbBal = await provider.getBalance(address);
@@ -233,6 +348,17 @@ async function main() {
         try {
           const tx = await sendToken(t.contract, privKey, hotWallet, balance, decimals);
           console.log(`  ✅ ${t.symbol} swept: ${tx.txHash}`);
+          if (ACCOUNT_GAS_IN_LEDGER) {
+            const gasWei = await gasCostWeiFromReceipt(provider, tx.txHash).catch(() => null);
+            if (gasWei) {
+              await recordGasSpend(sql, {
+                txHash: tx.txHash,
+                gasWei,
+                kind: "sweep_token",
+                metadata: { from: address, token: t.symbol, contract: t.contract },
+              }).catch(() => undefined);
+            }
+          }
           totalSwept++;
           bnbBal = await provider.getBalance(address);
         } catch (e: any) {
@@ -256,6 +382,17 @@ async function main() {
             gasPrice,
           });
           console.log(`  ✅ BNB swept: ${tx.hash}`);
+          if (ACCOUNT_GAS_IN_LEDGER) {
+            const gasWei = await gasCostWeiFromReceipt(provider, tx.hash).catch(() => null);
+            if (gasWei) {
+              await recordGasSpend(sql, {
+                txHash: tx.hash,
+                gasWei,
+                kind: "sweep_native",
+                metadata: { from: address },
+              }).catch(() => undefined);
+            }
+          }
           totalSwept++;
         } catch (e: any) {
           console.log(`  ❌ BNB sweep failed: ${e.message}`);

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 import { ApiErrorBanner, type ClientApiError } from"@/components/ApiErrorBanner";
 import { Toast, type ToastKind } from"@/components/Toast";
+import { AssetIcon } from "@/components/AssetIcon";
+import { buttonClassName } from "@/components/ui/Button";
 import { persistActingUserIdPreference, readActingUserIdPreference } from"@/lib/state/actingUser";
 import { formatTokenAmount, isNonZeroDecimalString } from "@/lib/format/amount";
 import { toBigInt3818 } from "@/lib/exchange/fixed3818";
@@ -161,7 +163,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
   const depositSectionRef = useRef<HTMLDivElement | null>(null);
   const sendSectionRef = useRef<HTMLDivElement | null>(null);
-  const withdrawSectionRef = useRef<HTMLDivElement | null>(null);
   const convertSectionRef = useRef<HTMLDivElement | null>(null);
 
  const [balances, setBalances] = useState<BalanceRow[]>([]);
@@ -171,6 +172,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [assetLocalRateSource, setAssetLocalRateSource] = useState<Record<string, string>>({});
  const [localValueReady, setLocalValueReady] = useState(false);
 
+ const [lastBalancesRefreshAt, setLastBalancesRefreshAt] = useState<number | null>(null);
+ const [lastPricesRefreshAt, setLastPricesRefreshAt] = useState<number | null>(null);
+
  const [authMode, setAuthMode] = useState<"session"|"header">("session");
  const [actingUserId, setActingUserId] = useState<string>(() => {
  if (typeof window ==="undefined") return"";
@@ -179,20 +183,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  const [devUsers, setDevUsers] = useState<DevUser[]>([]);
 
- const [allowlist, setAllowlist] = useState<AllowlistRow[]>([]);
- const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
-
- const [newAllowlistAddress, setNewAllowlistAddress] = useState<string>("");
- const [newAllowlistLabel, setNewAllowlistLabel] = useState<string>("");
-
- const [withdrawAssetId, setWithdrawAssetId] = useState<string>("");
- const [withdrawAmount, setWithdrawAmount] = useState<string>("");
- const [withdrawDestination, setWithdrawDestination] = useState<string>("");
- const [withdrawTotpCode, setWithdrawTotpCode] = useState<string>("");
- const [gasQuote, setGasQuote] = useState<GasQuote | null>(null);
-
- const [gasQuoteLoading, setGasQuoteLoading] = useState(false);
- const [gasQuoteUpdatedAt, setGasQuoteUpdatedAt] = useState<number | null>(null);
+ // NOTE: External withdrawals are intentionally not supported in the wallet UI.
+ // Offloading/withdrawal flows should happen through P2P (creating ads and settling orders).
 
  const [transferGasQuoteLoading, setTransferGasQuoteLoading] = useState(false);
  const [transferGasQuoteUpdatedAt, setTransferGasQuoteUpdatedAt] = useState<number | null>(null);
@@ -202,6 +194,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [transferRecipientEmail, setTransferRecipientEmail] = useState<string>("");
  const [transferTotpCode, setTransferTotpCode] = useState<string>("");
  const [transferGasQuote, setTransferGasQuote] = useState<GasQuote | null>(null);
+
+ const [sendOpen, setSendOpen] = useState(false);
 
  const [depositSymbol, setDepositSymbol] = useState<string>("USDT");
  const [depositAmount, setDepositAmount] = useState<string>("25");
@@ -258,8 +252,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  const canUseHeader = actingUserId.trim() && isUuid(actingUserId.trim());
 
- const withdrawableAssets = useMemo(() => assets, [assets]);
-
  const assetById = useMemo(() => {
   const out = new Map<string, Asset>();
   for (const a of assets) out.set(a.id, a);
@@ -286,11 +278,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const transferableAssetIds = useMemo(() => {
   return new Set(transferableAssets.map((a) => a.id));
  }, [transferableAssets]);
-
- const selectedWithdrawAsset = useMemo(
- () => withdrawableAssets.find((asset) => asset.id === withdrawAssetId) ?? null,
- [withdrawableAssets, withdrawAssetId]
- );
 
  const selectedTransferAsset = useMemo(
  () => transferableAssets.find((asset) => asset.id === transferAssetId) ?? null,
@@ -342,22 +329,12 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return Number.isFinite(available) ? available : 0;
  }, [balances, selectedTransferAsset]);
 
- const selectedWithdrawAvailable = useMemo(() => {
-  if (!selectedWithdrawAsset) return 0;
-  const row = balances.find((b) => b.asset_id === selectedWithdrawAsset.id);
-  const available = Number(row?.available ?? NaN);
-  return Number.isFinite(available) ? available : 0;
- }, [balances, selectedWithdrawAsset]);
 
  const transferAmountNumber = Number(transferAmount);
  const isTransferAmountValid = Number.isFinite(transferAmountNumber) && transferAmountNumber > 0;
  const isTransferAmountTooHigh = isTransferAmountValid && transferAmountNumber > selectedTransferAvailable;
  const isRecipientEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(transferRecipientEmail.trim());
 
- const withdrawAmountNumber = Number(withdrawAmount);
- const isWithdrawAmountValid = Number.isFinite(withdrawAmountNumber) && withdrawAmountNumber > 0;
- const isWithdrawAmountTooHigh = isWithdrawAmountValid && withdrawAmountNumber > selectedWithdrawAvailable;
- const isWithdrawDestinationValid = /^0x[a-fA-F0-9]{40}$/.test(withdrawDestination.trim());
 
  const convertAmountBig = useMemo(() => {
   try {
@@ -432,6 +409,43 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   return fiatAmount >= 1 ? String(fiatAmount) : "";
  }, [convertQuote, localValueReady, assetLocalRates]);
 
+    useEffect(() => {
+      if (depositAddress || depositAddressLoading) return;
+      if (authMode === "header" && !canUseHeader) return;
+
+      let cancelled = false;
+      (async () => {
+        setDepositAddressLoading(true);
+        try {
+          const res = await fetchJsonOrThrow<{ address: string; chain?: string; is_new?: boolean }>(
+            "/api/exchange/deposit/address",
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                ...(requestHeaders ?? {}),
+              },
+              body: JSON.stringify({ chain: "bsc" }),
+            },
+          );
+          if (cancelled) return;
+          setDepositAddress(res.address);
+        } catch (e) {
+          if (cancelled) return;
+          // If the user is not logged in (or header auth not set), don’t spam an error.
+          if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) {
+            return;
+          }
+        } finally {
+          if (!cancelled) setDepositAddressLoading(false);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [authMode, canUseHeader, requestHeaders, depositAddress, depositAddressLoading]);
+
  const balancesToDisplay = useMemo(() => {
   return nonZeroBalances.length > 0 ? nonZeroBalances : balances;
  }, [nonZeroBalances, balances]);
@@ -497,6 +511,16 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   return { assetCount: balancesToDisplay.length, activeHolds, totalLocal: hasAny ? total : null };
   }, [holds, balancesToDisplay, localValueReady, assetLocalRates]);
 
+ const assetsWithPendingDepositConfirmations = useMemo(() => {
+  const out = new Set<string>();
+  for (const h of holds) {
+   if (String(h.status ?? "").toLowerCase() !== "active") continue;
+   const reason = String(h.reason ?? "");
+   if (reason.startsWith("deposit_pending:")) out.add(String(h.asset_id));
+  }
+  return out;
+ }, [holds]);
+
  async function loadAssetLocalRates(fiat: string) {
  const fetchWithTimeout = async <T,>(url: string, timeoutMs = 4000): Promise<T> => {
  const controller = new AbortController();
@@ -514,13 +538,42 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  try {
  const q = new URLSearchParams({ fiat });
  const market = await fetchWithTimeout<{
- assets?: Array<{ symbol: string; index_fiat?: string | null; index_usdt?: string | null }>;
- fx?: { usdt_fiat?: { mid?: number | string } | null };
+  assets?: Array<{ symbol: string; index_fiat?: string | null; index_usdt?: string | null }>;
+  markets?: Array<{
+   base_symbol?: string | null;
+   quote_symbol?: string | null;
+   index?: { price_fiat?: string | null; price_usdt?: string | null } | null;
+   last_fiat?: { fiat?: string | null; value?: string | null } | null;
+  }>;
+  fx?: { usdt_fiat?: { mid?: number | string } | null };
  }>(`/api/exchange/markets/overview?${q.toString()}`, 4500);
 
  const rates: Record<string, number> = {};
  const rateSource: Record<string, string> = {};
  const indexUsdtBySymbol: Record<string, number> = {};
+
+  // Primary: derive fiat rates from enabled markets (base/USDT), using internal last/index.
+  // This tends to cover far more assets than the limited external index asset list.
+  for (const m of market.markets ?? []) {
+   const base = String(m.base_symbol ?? "").trim().toUpperCase();
+   const quote = String(m.quote_symbol ?? "").trim().toUpperCase();
+   if (!base || base === "USDT") continue;
+   if (quote !== "USDT") continue;
+
+   const idxFiat = Number(m.index?.price_fiat ?? NaN);
+   const lastFiat = Number(m.last_fiat?.value ?? NaN);
+
+   if (Number.isFinite(idxFiat) && idxFiat > 0) {
+    rates[base] = idxFiat;
+    rateSource[base] = "Market index";
+    continue;
+   }
+
+   if (Number.isFinite(lastFiat) && lastFiat > 0) {
+    rates[base] = lastFiat;
+    rateSource[base] = "Market last";
+   }
+  }
 
  for (const a of market.assets ?? []) {
  const sym = String(a.symbol ?? "").trim().toUpperCase();
@@ -528,8 +581,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  const fiatVal = Number(a.index_fiat ?? NaN);
  if (Number.isFinite(fiatVal) && fiatVal > 0) {
- rates[sym] = fiatVal;
- rateSource[sym] = "Market index";
+  // Prefer market-derived for the same symbol if already present.
+  if (!(Number.isFinite(rates[sym]) && (rates[sym] as number) > 0)) {
+   rates[sym] = fiatVal;
+   rateSource[sym] = "Market index";
+  }
  }
 
  const usdtVal = Number(a.index_usdt ?? NaN);
@@ -608,6 +664,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }
  return out;
  });
+
+ setLastPricesRefreshAt(Date.now());
  } catch {
  // Keep previous rates on transient failures to avoid flicker/jumps.
  }
@@ -632,6 +690,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }
  );
  setBalances(b.balances ?? []);
+ setLastBalancesRefreshAt(Date.now());
 
  try {
  const h = await fetchJsonOrThrow<{ holds: Hold[] }>("/api/exchange/holds?status=all", {
@@ -644,25 +703,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }
 
  // Withdrawals are behind auth; keep them best-effort so balances still load.
- try {
- const wl = await fetchJsonOrThrow<{ addresses: AllowlistRow[] }>(
-"/api/exchange/withdrawals/allowlist",
- { cache:"no-store", headers: requestHeaders }
- );
- setAllowlist(wl.addresses ?? []);
- } catch {
- setAllowlist([]);
- }
-
- try {
- const w = await fetchJsonOrThrow<{ withdrawals: WithdrawalRow[] }>(
-"/api/exchange/withdrawals",
- { cache:"no-store", headers: requestHeaders }
- );
- setWithdrawals(w.withdrawals ?? []);
- } catch {
- setWithdrawals([]);
- }
+ // NOTE: external withdrawals are intentionally not surfaced here.
 
  try {
  const p = await fetchJsonOrThrow<ProfileResponse>("/api/account/profile", {
@@ -688,10 +729,6 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return Number.isFinite(available) && available > 0;
  })?.id;
  if (firstTransferable) setTransferAssetId(firstTransferable);
- }
- if (!withdrawAssetId && a.assets?.length) {
- const defaultWithdrawAsset = a.assets[0]?.id;
- if (defaultWithdrawAsset) setWithdrawAssetId(defaultWithdrawAsset);
  }
  } catch (e) {
  if (e instanceof ApiError) {
@@ -746,66 +783,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }, [isProd]);
 
  useEffect(() => {
- if (!withdrawAssetId || withdrawableAssets.some((asset) => asset.id === withdrawAssetId)) return;
- setWithdrawAssetId(withdrawableAssets[0]?.id ?? "");
- }, [withdrawAssetId, withdrawableAssets]);
-
- useEffect(() => {
  if (!transferAssetId || transferableAssets.some((asset) => asset.id === transferAssetId)) return;
  setTransferAssetId(transferableAssets[0]?.id ?? "");
  }, [transferAssetId, transferableAssets]);
-
- useEffect(() => {
- if (authMode ==="header"&& !canUseHeader) {
-  setGasQuote(null);
-  setGasQuoteLoading(false);
-  setGasQuoteUpdatedAt(null);
-  return;
- }
- if (!selectedWithdrawAsset) {
-  setGasQuote(null);
-  setGasQuoteLoading(false);
-  setGasQuoteUpdatedAt(null);
-  return;
- }
-
-  let cancelled = false;
-  const chain = selectedWithdrawAsset.chain;
-  const sym = selectedWithdrawAsset.symbol;
-
-  const timer = window.setTimeout(() => {
-  void (async () => {
-   setGasQuoteLoading(true);
-   try {
-    const qs = new URLSearchParams({
-    action: "withdrawal_request",
-    chain,
-    asset_symbol: sym,
-    });
-    const json = await fetchJsonOrThrow<{ quote: GasQuote }>(
-    `/api/exchange/gas/quote?${qs.toString()}`,
-    {
-     cache: "no-store",
-     headers: requestHeaders,
-    },
-    );
-    if (!cancelled) {
-    setGasQuote(json.quote ?? null);
-    setGasQuoteUpdatedAt(Date.now());
-    }
-   } catch {
-    if (!cancelled) setGasQuote(null);
-   } finally {
-    if (!cancelled) setGasQuoteLoading(false);
-   }
-  })();
-  }, 250);
-
-  return () => {
-  cancelled = true;
-  window.clearTimeout(timer);
-  };
- }, [authMode, canUseHeader, requestHeaders, selectedWithdrawAsset?.chain, selectedWithdrawAsset?.symbol]);
 
  useEffect(() => {
   if (isConverting) return;
@@ -967,101 +947,199 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   };
 
  return (
- <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-6">
+ <section
+   className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]"
+   style={{ clipPath: "polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%)" }}
+ >
+ <div
+   className="pointer-events-none absolute inset-0 opacity-70"
+   aria-hidden
+   style={{
+     backgroundImage:
+       "radial-gradient(circle at 18% 20%, color-mix(in srgb, var(--ring) 85%, transparent) 0, transparent 55%), radial-gradient(circle at 86% 75%, color-mix(in srgb, var(--accent-2) 18%, transparent) 0, transparent 60%)",
+   }}
+ />
+
  <Toast message={toastMessage} kind={toastKind} onDone={() => setToastMessage(null)} />
 
- <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
- <div className="min-w-0">
- <h2 className="text-lg font-medium">Trading Balance (P2P & Spot)</h2>
- <p className="mt-1 text-sm text-[var(--muted)]">
- Funds available for P2P trading and spot markets.
- </p>
+ <div className="relative border-b border-[var(--border)] bg-[var(--card-2)] px-5 py-4">
+   <div
+     className="pointer-events-none absolute inset-0 opacity-55"
+     aria-hidden
+     style={{
+       backgroundImage:
+         "radial-gradient(circle at 18% 40%, var(--ring) 0, transparent 55%), radial-gradient(circle at 78% 60%, color-mix(in srgb, var(--accent-2) 18%, transparent) 0, transparent 60%)",
+     }}
+   />
+
+   <div className="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+     <div className="flex min-w-0 items-start gap-3">
+       <span className="relative mt-1 inline-flex h-3 w-3 shrink-0 items-center justify-center">
+         <span className="absolute inline-flex h-3 w-3 rounded-full bg-[var(--accent)]" />
+         <span className="absolute inline-flex h-5 w-5 rounded-full bg-[var(--ring)]" />
+       </span>
+       <div className="min-w-0">
+         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">Wallet</div>
+         <h2 className="-mt-0.5 truncate text-lg font-extrabold tracking-tight text-[var(--foreground)]">
+           Trading Balance
+         </h2>
+         <p className="mt-1 text-sm text-[var(--muted)]">Funds available for P2P trading and spot markets.</p>
+         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+           <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[var(--muted)]">
+             Fiat <span className="font-mono text-[var(--foreground)]">{localFiat}</span>
+           </span>
+           <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[var(--muted)]">
+             Balances <span className="font-mono text-[var(--foreground)]">{lastBalancesRefreshAt ? new Date(lastBalancesRefreshAt).toLocaleTimeString() : "—"}</span>
+           </span>
+           <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[var(--muted)]">
+             Prices <span className="font-mono text-[var(--foreground)]">{lastPricesRefreshAt ? new Date(lastPricesRefreshAt).toLocaleTimeString() : "—"}</span>
+           </span>
+           <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[var(--muted)]">
+             Auto <span className="font-mono text-[var(--foreground)]">20s</span>
+           </span>
+         </div>
+       </div>
+     </div>
+
+     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+       <button
+         type="button"
+         className="w-full whitespace-normal break-words sm:w-auto rounded-lg border border-[var(--border)] bg-[var(--card)]/25 px-4 py-2 text-xs font-bold text-[var(--foreground)] transition hover:bg-[var(--card)] disabled:opacity-60"
+         disabled={loadingAction === "refresh"}
+         onClick={() => void refreshAll()}
+       >
+         {loadingAction === "refresh" ? "Refreshing…" : "Refresh"}
+       </button>
+       <button
+         type="button"
+         onClick={() => void runEvacuation()}
+         disabled={loadingAction === "evacuate" || (authMode === "header" && !canUseHeader)}
+         className="w-full whitespace-normal break-words sm:w-auto rounded-lg bg-[linear-gradient(90deg,var(--accent),var(--accent-2))] px-4 py-2 text-xs font-extrabold text-[var(--background)] transition hover:brightness-110 disabled:opacity-60"
+       >
+         {loadingAction === "evacuate" ? "Processing…" : "Add funds"}
+       </button>
+     </div>
+   </div>
  </div>
 
- <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
-   <button
-   type="button"
-   className="w-full whitespace-normal break-words sm:w-auto rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-   disabled={loadingAction === "refresh"}
-   onClick={() => void refreshAll()}
-   >
-   {loadingAction === "refresh" ?"Refreshing…":"Refresh"}
-   </button>
-   <button
-   type="button"
-  onClick={() => void runEvacuation()}
-  disabled={loadingAction === "evacuate" || (authMode === "header" && !canUseHeader)}
-  className="w-full whitespace-normal break-words sm:w-auto rounded border border-[var(--up)]/30 bg-[var(--up)]/10 px-3 py-2 text-xs font-bold text-[var(--up)] hover:bg-[var(--up)]/20"
-   >
-  {loadingAction === "evacuate" ? "Processing…" : "Add funds"}
-   </button>
- </div>
- </div>
-
- <div className="mt-4 grid min-w-0 gap-3">
- <ApiErrorBanner error={error} className="p-3"onRetry={() => void refreshAll()} />
+ <div className="relative grid min-w-0 gap-4 px-5 py-5">
+ <ApiErrorBanner error={error} className="p-3" onRetry={() => void refreshAll()} />
 
  {/* ── Deposit Address ─────────────────────────────── */}
- <div ref={depositSectionRef} className="mt-2 rounded border border-[var(--border)] bg-[var(--card)]/50 p-4">
- <h3 className="text-sm font-medium">Deposit (BSC)</h3>
- <p className="mt-1 text-[11px] text-[var(--muted)]">
- Send supported BEP-20 tokens or native BNB to your unique deposit address. The deposit watcher credits your ledger automatically.
- </p>
- {depositAddress ? (
- <div className="mt-2 flex flex-wrap items-center gap-2">
- <code className="min-w-0 break-all rounded bg-[var(--border)] px-2.5 py-1.5 font-mono text-xs text-[var(--foreground)]">
- {depositAddress}
- </code>
- <button
- type="button"
- className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--muted)] hover:bg-[color-mix(in_srgb,var(--card)_90%,transparent)]"
- onClick={() => {
- void navigator.clipboard.writeText(depositAddress);
- setDepositAddressCopied(true);
- setTimeout(() => setDepositAddressCopied(false), 2000);
- }}
+ <div
+   ref={depositSectionRef}
+   className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 p-4 shadow-[var(--shadow)]"
  >
- {depositAddressCopied ?"Copied!":"Copy"}
- </button>
+ <div
+   className="pointer-events-none absolute inset-0 opacity-60"
+   aria-hidden
+   style={{
+     backgroundImage:
+       "radial-gradient(circle at 20% 30%, color-mix(in srgb, var(--accent) 18%, transparent) 0, transparent 55%), radial-gradient(circle at 90% 15%, color-mix(in srgb, var(--accent-2) 14%, transparent) 0, transparent 55%)",
+   }}
+ />
+ <div className="relative">
+ <div className="flex flex-wrap items-center justify-between gap-2">
+   <h3 className="text-sm font-semibold">Deposit address</h3>
+   <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
+     <span className="rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[var(--muted)]">BSC</span>
+     <span className="rounded-full border border-[var(--border)] bg-[var(--up-bg)] px-2 py-1 text-[var(--up)]">Permanent</span>
+   </div>
  </div>
+ <p className="mt-1 text-[11px] text-[var(--muted)]">
+   This address is unique to your account and does not change. Send native <span className="font-semibold text-[var(--foreground)]">BNB</span> or supported <span className="font-semibold text-[var(--foreground)]">BEP-20</span> tokens on the <span className="font-semibold text-[var(--foreground)]">BSC</span> network.
+ </p>
+
+ {depositAddress ? (
+   <div className="mt-2 flex flex-wrap items-center gap-2">
+     <code className="min-w-0 break-all rounded bg-[var(--border)] px-2.5 py-1.5 font-mono text-xs text-[var(--foreground)]">
+       {depositAddress}
+     </code>
+     <button
+       type="button"
+       className={buttonClassName({ variant: "secondary", size: "xs" })}
+       onClick={() => {
+         void navigator.clipboard.writeText(depositAddress);
+         setDepositAddressCopied(true);
+         setTimeout(() => setDepositAddressCopied(false), 2000);
+       }}
+     >
+       {depositAddressCopied ? "Copied!" : "Copy"}
+     </button>
+   </div>
+ ) : depositAddressLoading ? (
+   <div className="mt-2 flex flex-wrap items-center gap-2">
+     <code className="min-w-0 break-all rounded bg-[var(--border)] px-2.5 py-1.5 font-mono text-xs text-[var(--muted)]">
+       Fetching your permanent address…
+     </code>
+     <span className="text-[11px] font-semibold text-[var(--muted)]">Please wait</span>
+   </div>
+ ) : authMode === "header" && !canUseHeader ? (
+   <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+     Sign in to view your deposit address.
+     <Link
+       href="/login?next=%2Fwallet"
+       className="ml-2 font-semibold text-[var(--accent-2)] hover:underline"
+     >
+       Go to login →
+     </Link>
+   </div>
  ) : (
- <button
- type="button"
- className="mt-2 rounded bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--background)] disabled:opacity-60"
- disabled={depositAddressLoading || (authMode ==="header"&& !canUseHeader)}
- onClick={async () => {
- setDepositAddressLoading(true);
- setError(null);
- try {
- const res = await fetchJsonOrThrow<{ address: string }>(
-"/api/exchange/deposit/address",
- {
- method:"POST",
- headers: {
-"content-type":"application/json",
- ...(requestHeaders ?? {}),
- },
- }
- );
- setDepositAddress(res.address);
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setDepositAddressLoading(false);
- }
- }}
- >
- {depositAddressLoading ?"Generating…":"Generate deposit address"}
- </button>
+   <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+     Your permanent deposit address will appear here once fetched.
+   </div>
  )}
+
+ <details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
+   <summary className="cursor-pointer text-[11px] font-semibold text-[var(--foreground)]">
+     Advanced deposit guidance
+   </summary>
+   <div className="mt-2 grid gap-2 text-[11px] text-[var(--muted)]">
+     <div>
+       <span className="font-semibold text-[var(--foreground)]">Network:</span> BSC only. Do not send ERC-20/ETH or other networks to this address.
+     </div>
+     <div>
+       <span className="font-semibold text-[var(--foreground)]">Assets:</span> Native BNB + supported BEP-20 tokens listed in your wallet.
+     </div>
+     <div>
+       <span className="font-semibold text-[var(--foreground)]">Finality:</span> deposits may show as <span className="font-semibold text-[var(--warn)]">Pending confirmations</span> (credited but locked) until confirmations are met.
+     </div>
+     <div>
+       <span className="font-semibold text-[var(--foreground)]">Safety:</span> always test with a small amount first and keep your transaction hash.
+     </div>
+   </div>
+ </details>
+ </div>
  </div>
 
- <div className="mt-2 min-w-0">
- <h3 className="text-sm font-medium">Balances</h3>
+ <div className="min-w-0">
+ <div className="flex flex-wrap items-center justify-between gap-2">
+   <h3 className="text-sm font-medium">Balances</h3>
+   <div className="flex flex-wrap items-center gap-2">
+     <button
+       type="button"
+       className={buttonClassName({ variant: "secondary", size: "xs" })}
+       onClick={() => scrollToSection(depositSectionRef)}
+     >
+       Deposit
+     </button>
+     <button
+       type="button"
+       className="rounded-lg border border-[var(--border)] bg-[var(--ring)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--foreground)] hover:brightness-110 disabled:opacity-60"
+       disabled={transferableAssets.length === 0}
+       onClick={() => {
+         const preferred = transferableAssets.find((a) => a.symbol.toUpperCase() !== "USDT") ?? transferableAssets[0] ?? null;
+         if (!preferred) return;
+         setConvertFromSymbol(preferred.symbol.toUpperCase());
+         setConvertToSymbol("USDT");
+         setConvertAmountIn("");
+         scrollToSection(convertSectionRef);
+       }}
+     >
+       Convert
+     </button>
+   </div>
+ </div>
 
  {nonZeroBalances.length === 0 ? (
    <div className="mt-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)]/50 px-4 py-4 text-xs">
@@ -1072,169 +1150,231 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    </div>
  ) : null}
 
- <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
- <span className="rounded border border-[var(--border)] px-2 py-1">Assets: {balancesSummary.assetCount}</span>
- <span className="rounded border border-[var(--border)] px-2 py-1">Active holds: {balancesSummary.activeHolds}</span>
- <span className="rounded border border-[var(--border)] px-2 py-1">
- Est. total (available): {!localValueReady ? "Updating…" : balancesSummary.totalLocal == null ? `— ${localFiat}` : fmtFiat(balancesSummary.totalLocal, localFiat)}
- </span>
- </div>
-
- {/* Mobile layout (no horizontal scrolling) */}
- {/* Wallet-style card grid (all breakpoints) */}
- <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-   {sortedBalances.length === 0 ? (
-     <div className="rounded border border-[var(--border)] px-3 py-3 text-xs text-[var(--muted)]">
-       No balances available.
+ <div className="mt-3 grid gap-2 sm:grid-cols-3">
+   <div
+     className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/45 px-3 py-2 shadow-[var(--shadow)]"
+     style={{
+       backgroundImage:
+         "radial-gradient(circle at 18% 30%, color-mix(in srgb, var(--accent) 16%, transparent) 0, transparent 58%)",
+     }}
+   >
+     <div className="text-[10px] text-[var(--muted)]">Assets</div>
+     <div className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">{balancesSummary.assetCount}</div>
+   </div>
+   <div
+     className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/45 px-3 py-2 shadow-[var(--shadow)]"
+     style={{ backgroundImage: "radial-gradient(circle at 18% 30%, var(--up-bg) 0, transparent 60%)" }}
+   >
+     <div className="text-[10px] text-[var(--muted)]">Active holds</div>
+     <div className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">{balancesSummary.activeHolds}</div>
+   </div>
+   <div
+     className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/45 px-3 py-2 shadow-[var(--shadow)]"
+     style={{
+       backgroundImage:
+         "radial-gradient(circle at 18% 30%, color-mix(in srgb, var(--accent-2) 16%, transparent) 0, transparent 58%)",
+     }}
+   >
+     <div className="text-[10px] text-[var(--muted)]">Est. total (available)</div>
+     <div className="mt-0.5 text-sm font-semibold text-[var(--foreground)]">
+       {!localValueReady ? "Updating…" : balancesSummary.totalLocal == null ? "—" : fmtFiat(balancesSummary.totalLocal, localFiat)}
      </div>
-   ) : (
-     sortedBalances.map((b) => {
-       const meta = assetById.get(b.asset_id) ?? null;
-       const symbol = String(b.symbol ?? "").toUpperCase();
-       const displayName = String(meta?.name ?? "").trim() || symbol;
-       const chain = String(b.chain ?? meta?.chain ?? "").toUpperCase();
+   </div>
+ </div>
 
-       const availableNum = Number(b.available);
-       const rate = assetLocalRates[symbol] ?? null;
-       const rowLocalEquivalent =
-         Number.isFinite(availableNum) && rate != null ? availableNum * rate : null;
+ {/* Wallet-style list (readable with many assets) */}
+ <div
+   className="mt-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 shadow-[var(--shadow)]"
+   style={{ clipPath: "polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)" }}
+ >
+   <div className="sticky top-0 z-10 hidden border-b border-[var(--border)] bg-[var(--card)]/70 px-3 py-2 text-[10px] font-medium text-[var(--muted)] backdrop-blur md:grid md:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+     <div>Asset</div>
+     <div className="text-right">Available</div>
+     <div className="text-right">Value</div>
+     <div className="text-right">Actions</div>
+   </div>
+   <div className="max-h-[640px] overflow-y-auto">
+     {sortedBalances.length === 0 ? (
+       <div className="px-3 py-3 text-xs text-[var(--muted)]">No balances available.</div>
+     ) : (
+       sortedBalances.map((b) => {
+         const meta = assetById.get(b.asset_id) ?? null;
+         const symbol = String(b.symbol ?? "").toUpperCase();
+         const displayName = String(meta?.name ?? "").trim() || symbol;
+         const chain = String(b.chain ?? meta?.chain ?? "").toUpperCase();
 
-       const canSend = transferableAssetIds.has(b.asset_id);
-       const canWithdraw = Number.isFinite(availableNum) && availableNum > 0;
-      const canSellP2p = canWithdraw && (symbol === "USDT" || symbol === "BNB");
-      const canConvertToUsdt = canWithdraw && symbol !== "USDT";
+         const availableNum = Number(b.available);
+         const heldNum = Number(b.held);
+         const hasLocked = Number.isFinite(heldNum) && heldNum > 0;
 
-      const sellP2pAmountParam = (() => {
-        if (!localValueReady) return "";
-        if (rowLocalEquivalent == null || !Number.isFinite(rowLocalEquivalent) || rowLocalEquivalent <= 0) return "";
-        const fiatAmount = Math.floor(rowLocalEquivalent);
-        return fiatAmount >= 1 ? String(fiatAmount) : "";
-      })();
+         const rate = assetLocalRates[symbol] ?? null;
+         const rowLocalEquivalent =
+           Number.isFinite(availableNum) && rate != null ? availableNum * rate : null;
 
-       return (
-        <div key={b.asset_id} className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--card)]/50 p-4">
-           <div className="flex min-w-0 items-start justify-between gap-4">
-             <div className="min-w-0">
-               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                 <div className="min-w-0 truncate text-sm font-semibold text-[var(--foreground)]">{displayName}</div>
-                 <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
-                   {symbol}
-                 </span>
-                 {chain ? (
-                   <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
-                     {chain}
-                   </span>
-                 ) : null}
-               </div>
-               {localValueReady && assetLocalRateSource[symbol] ? (
-                 <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
-                   {assetLocalRateSource[symbol]}
+         const canSend = transferableAssetIds.has(b.asset_id);
+         const canWithdraw = Number.isFinite(availableNum) && availableNum > 0;
+         const canSellP2p = canWithdraw && (symbol === "USDT" || symbol === "BNB");
+         const canConvertToUsdt = canWithdraw && symbol !== "USDT";
+
+         const sellP2pAmountParam = (() => {
+           if (!localValueReady) return "";
+           if (rowLocalEquivalent == null || !Number.isFinite(rowLocalEquivalent) || rowLocalEquivalent <= 0) return "";
+           const fiatAmount = Math.floor(rowLocalEquivalent);
+           return fiatAmount >= 1 ? String(fiatAmount) : "";
+         })();
+
+         return (
+           <div
+             key={b.asset_id}
+             className="group border-b border-[var(--border)] bg-[var(--card)]/20 px-3 py-3 transition-colors hover:bg-[var(--card)]/35 last:border-b-0"
+             style={{ contentVisibility: "auto" }}
+           >
+             <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+               <div className="min-w-0">
+                 <div className="flex min-w-0 items-center gap-2">
+                   <AssetIcon symbol={symbol} size={18} />
+                   <div className="min-w-0">
+                     <div className="flex min-w-0 items-center gap-2">
+                       <div className="min-w-0 truncate text-sm font-semibold text-[var(--foreground)]">{symbol}</div>
+                       {displayName && displayName !== symbol ? (
+                         <span className="min-w-0 truncate text-[11px] text-[var(--muted)]">{displayName}</span>
+                       ) : null}
+                       {chain && chain !== "BSC" ? (
+                         <span className="shrink-0 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)]">
+                           {chain}
+                         </span>
+                       ) : null}
+                     </div>
+                     {hasLocked ? (
+                       <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                         Locked: <span className="break-all font-mono">{fmtAmount(b.held, b.decimals)}</span>
+                         {assetsWithPendingDepositConfirmations.has(b.asset_id) ? (
+                           <span
+                             className="ml-2 inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--warn-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--warn)]"
+                             title="Deposit detected — funds unlock after confirmations"
+                           >
+                             Pending confirmations
+                           </span>
+                         ) : null}
+                       </div>
+                     ) : null}
+                   </div>
                  </div>
-               ) : null}
-             </div>
-
-             <div className="shrink-0 text-right">
-               <div className="text-[10px] text-[var(--muted)]">Available</div>
-               <div className="mt-0.5 break-all font-mono text-sm font-bold text-[var(--foreground)]">
-                 {fmtAmount(b.available, b.decimals)} {symbol}
                </div>
-               <div className="mt-0.5 text-[11px] text-[var(--muted)]">
-                 ≈ {!localValueReady
-                   ? "Updating…"
-                   : rowLocalEquivalent == null
-                     ? `— ${localFiat}`
-                     : fmtFiat(rowLocalEquivalent, localFiat)}
+
+               <div className="text-right">
+                 <div className="break-all font-mono text-sm font-bold text-[var(--foreground)]">
+                   {fmtAmount(b.available, b.decimals)}
+                 </div>
+                 <div className="text-[11px] text-[var(--muted)]">{symbol}</div>
+               </div>
+
+               <div
+                 className={
+                   "text-right text-[11px] " +
+                   (!localValueReady || rowLocalEquivalent == null ? "text-[var(--muted)]" : "font-medium text-[var(--foreground)]")
+                 }
+               >
+                 {!localValueReady ? "Updating…" : rowLocalEquivalent == null ? "—" : fmtFiat(rowLocalEquivalent, localFiat)}
+               </div>
+
+               <div className="flex flex-wrap justify-end gap-2 md:opacity-80 md:transition-opacity md:group-hover:opacity-100">
+                 {canSellP2p ? (
+                   <Link
+                     className="rounded-lg border border-[var(--border)] bg-[var(--down-bg)] px-2 py-1 text-[11px] font-semibold text-[var(--down)] hover:brightness-110"
+                     href={`/p2p?side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}${sellP2pAmountParam ? `&amount=${encodeURIComponent(sellP2pAmountParam)}` : ""}`}
+                   >
+                     Sell (P2P)
+                   </Link>
+                 ) : null}
+
+                 {canConvertToUsdt ? (
+                   <button
+                     type="button"
+                     className="rounded-lg border border-[var(--border)] bg-[var(--ring)] px-2 py-1 text-[11px] font-semibold text-[var(--foreground)] hover:brightness-110"
+                     onClick={() => {
+                       setConvertFromSymbol(symbol);
+                       setConvertToSymbol("USDT");
+                       setConvertAmountIn(String(b.available));
+                       scrollToSection(convertSectionRef);
+                     }}
+                   >
+                     Convert
+                   </button>
+                 ) : null}
+
+                 <button
+                   type="button"
+                   className={buttonClassName({
+                     variant: "secondary",
+                     size: "xs",
+                     className: "bg-[var(--ring)]/20 hover:bg-[var(--ring)]/30",
+                   })}
+                   disabled={!canSend}
+                   onClick={() => {
+                     if (!canSend) return;
+                     setTransferAssetId(b.asset_id);
+                     setSendOpen(true);
+                     scrollToSection(sendSectionRef);
+                   }}
+                 >
+                   Send
+                 </button>
+
+                 <Link
+                   className="rounded-lg bg-[var(--accent)] px-2 py-1 text-[11px] font-semibold text-[var(--background)] hover:opacity-90"
+                   href={`/p2p?new_ad=1&side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}`}
+                 >
+                   Post ad
+                 </Link>
                </div>
              </div>
            </div>
-
-           <div className="mt-3 flex flex-wrap gap-2">
-             <button
-               type="button"
-               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
-               onClick={() => scrollToSection(depositSectionRef)}
-             >
-               Deposit
-             </button>
-
-             {canSellP2p ? (
-               <Link
-                 className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
-                 href={`/p2p?side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}${sellP2pAmountParam ? `&amount=${encodeURIComponent(sellP2pAmountParam)}` : ""}`}
-               >
-                 Sell (P2P)
-               </Link>
-             ) : null}
-
-             {canConvertToUsdt ? (
-               <button
-                 type="button"
-                 className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)]"
-                 onClick={() => {
-                   setConvertFromSymbol(symbol);
-                   setConvertToSymbol("USDT");
-                   setConvertAmountIn(String(b.available));
-                   scrollToSection(convertSectionRef);
-                 }}
-               >
-                 Convert to USDT
-               </button>
-             ) : null}
-
-             <button
-               type="button"
-               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-50"
-               disabled={!canSend}
-               onClick={() => {
-                 if (!canSend) return;
-                 setTransferAssetId(b.asset_id);
-                 scrollToSection(sendSectionRef);
-               }}
-             >
-               Send
-             </button>
-             <button
-               type="button"
-               className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-50"
-               disabled={!canWithdraw}
-               onClick={() => {
-                 if (!canWithdraw) return;
-                 setWithdrawAssetId(b.asset_id);
-                 scrollToSection(withdrawSectionRef);
-               }}
-             >
-               Withdraw
-             </button>
-           </div>
-
-           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-             <div className="min-w-0">
-               <div className="text-[10px] text-[var(--muted)]">Total</div>
-               <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.posted, b.decimals)}</div>
-             </div>
-             <div className="min-w-0 text-right">
-               <div className="text-[10px] text-[var(--muted)]">Locked</div>
-               <div className="break-all font-mono text-[var(--muted)]">{fmtAmount(b.held, b.decimals)}</div>
-             </div>
-           </div>
-         </div>
-       );
-     })
-   )}
+         );
+       })
+     )}
+   </div>
  </div>
  </div>
 
- <div className="mt-2 grid min-w-0 gap-3 md:grid-cols-2">
- <div ref={sendSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
- <h3 className="text-sm font-medium">Send funds to another user</h3>
- <p className="mt-1 text-xs text-[var(--muted)]">
- Instant internal transfer by recipient email. Network fee is estimated in BNB and may be charged in the asset you send.
- </p>
- <div className="mt-3 grid gap-2">
+ <div className="mt-4 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,420px)] md:items-start">
+ <div
+   ref={sendSectionRef}
+   className="relative min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 p-4 shadow-[var(--shadow)]"
+ >
+ <div
+   className="pointer-events-none absolute inset-0 opacity-60"
+   aria-hidden
+   style={{ backgroundImage: "radial-gradient(circle at 18% 22%, var(--ring) 0, transparent 58%)" }}
+ />
+ <div className="relative">
+ <div className="mb-3 flex items-start justify-between gap-3">
+   <div className="min-w-0">
+     <div className="flex items-center gap-2">
+       <h3 className="text-sm font-semibold">Send</h3>
+       <span className="rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">
+         Internal
+       </span>
+     </div>
+     <p className="mt-1 text-xs text-[var(--muted)]">Transfer to another user (email).</p>
+   </div>
+
+   <button
+     type="button"
+     className={buttonClassName({ variant: "secondary", size: "xs", className: "shrink-0" })}
+     onClick={() => setSendOpen((v) => !v)}
+   >
+     {sendOpen ? "Hide" : "Open"}
+   </button>
+ </div>
+
+ {sendOpen ? (
+ <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--background)]/20 p-3">
+ <div className="grid gap-2">
  <label className="grid gap-1">
  <span className="text-[11px] text-[var(--muted)]">Asset</span>
  <select
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+ className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 text-xs text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
  value={transferAssetId}
  onChange={(e) => setTransferAssetId(e.target.value)}
  >
@@ -1256,7 +1396,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <span className="text-[11px] text-[var(--muted)]">Amount</span>
  <div className="flex items-center gap-2">
  <input
- className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+ className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 font-mono text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
  value={transferAmount}
  onChange={(e) => setTransferAmount(e.target.value)}
  placeholder="e.g. 100"
@@ -1264,7 +1404,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  />
  <button
  type="button"
- className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+ className="rounded-xl border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-[11px] font-semibold text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
  disabled={!selectedTransferAsset || selectedTransferAvailable <= 0}
  onClick={() => setTransferAmount(String(selectedTransferAvailable))}
  >
@@ -1279,7 +1419,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <label className="grid gap-1">
  <span className="text-[11px] text-[var(--muted)]">Recipient email</span>
  <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+ className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
  value={transferRecipientEmail}
  onChange={(e) => setTransferRecipientEmail(e.target.value)}
  placeholder="user@example.com"
@@ -1295,7 +1435,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <label className="grid gap-1">
  <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
  <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+ className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 font-mono text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
  value={transferTotpCode}
  onChange={(e) => setTransferTotpCode(e.target.value.replace(/\D/g,"").slice(0, 6))}
  placeholder="6-digit code"
@@ -1305,7 +1445,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  />
  </label>
 
- <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+ <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
  {transferGasQuoteLoading ? (
  <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
  ) : null}
@@ -1353,7 +1493,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  </div>
  <button
  type="button"
- className="mt-1 w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+ className="mt-2 w-full sm:w-fit rounded-lg bg-[linear-gradient(90deg,var(--accent),var(--accent-2))] px-4 py-2 text-xs font-extrabold text-[var(--background)] transition hover:brightness-110 disabled:opacity-60"
  disabled={
  loadingAction === "transfer:request" ||
  !transferAssetId ||
@@ -1442,12 +1582,36 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  </button>
  </div>
  </div>
+ ) : (
+   <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+     Tap <span className="font-semibold text-[var(--foreground)]">Open</span> or use <span className="font-semibold text-[var(--foreground)]">Send</span> on an asset to start.
+   </div>
+ )}
+ </div>
+ </div>
 
- <div ref={convertSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
-   <h3 className="text-sm font-medium">Convert</h3>
-   <p className="mt-1 text-xs text-[var(--muted)]">
-     Convert one asset to another instantly using a quoted rate (updates automatically). Best for turning non-P2P assets into USDT for offloading.
-   </p>
+ <div className="grid min-w-0 gap-3 md:sticky md:top-4 md:self-start">
+ {(convertFromSymbol.trim() || convertLockedQuote || convertQuote || convertLastReceiptQuote) ? (
+ <div
+   ref={convertSectionRef}
+   className="relative min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 p-4 shadow-[var(--shadow)]"
+ >
+   <div
+     className="pointer-events-none absolute inset-0 opacity-60"
+     aria-hidden
+     style={{
+       backgroundImage:
+         "radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--accent-2) 18%, transparent) 0, transparent 58%)",
+     }}
+   />
+   <div className="relative">
+   <div className="mb-3 flex items-center justify-between gap-3">
+     <h3 className="text-sm font-semibold">Quick convert</h3>
+     <span className="rounded-full border border-[var(--border)] bg-[var(--card)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">
+       Spot
+     </span>
+   </div>
+  <p className="mt-1 text-xs text-[var(--muted)]">Convert into USDT for P2P.</p>
 
    {(() => {
      const q = convertLockedQuote ?? convertLastReceiptQuote;
@@ -1471,12 +1635,13 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      );
    })()}
 
-   <div className="mt-3 grid gap-2">
+   <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--background)]/20 p-3">
+   <div className="grid gap-2">
     <div className="grid gap-2 sm:grid-cols-2">
        <label className="grid gap-1">
          <span className="text-[11px] text-[var(--muted)]">From</span>
          <select
-           className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+           className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 text-xs text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
            value={convertFromSymbol}
            disabled={isConverting}
            onChange={(e) => setConvertFromSymbol(e.target.value)}
@@ -1514,7 +1679,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
        <label className="grid gap-1">
          <span className="text-[11px] text-[var(--muted)]">To</span>
          <select
-           className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
+           className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 text-xs text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
            value={convertToSymbol}
            disabled={isConverting}
            onChange={(e) => setConvertToSymbol(e.target.value)}
@@ -1534,7 +1699,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+         className="rounded-xl border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-[11px] font-semibold text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
         disabled={isConverting || !convertFromSymbol || !convertToSymbol}
         onClick={() => {
           const from = convertFromSymbol;
@@ -1551,7 +1716,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
       <button
         type="button"
-        className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+         className="rounded-xl border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-[11px] font-semibold text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
         disabled={isConverting || !!convertDisableReason}
         onClick={() => setConvertQuoteNonce((n) => n + 1)}
       >
@@ -1563,7 +1728,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
        <span className="text-[11px] text-[var(--muted)]">Amount</span>
        <div className="flex items-center gap-2">
          <input
-           className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+           className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 font-mono text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
            value={convertAmountIn}
            disabled={isConverting}
            onChange={(e) => setConvertAmountIn(e.target.value)}
@@ -1572,7 +1737,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          />
          <button
            type="button"
-           className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
+           className="rounded-xl border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-[11px] font-semibold text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
            disabled={isConverting || !selectedConvertFromAsset || selectedConvertAvailableBig <= 0n}
           onClick={() => setConvertAmountIn(selectedConvertAvailable)}
          >
@@ -1587,7 +1752,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      <label className="grid gap-1">
        <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
        <input
-         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
+         className="rounded-xl border border-[var(--border)] bg-[var(--card-2)]/60 px-3 py-2 font-mono text-xs text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
          value={convertTotpCode}
          disabled={isConverting}
          onChange={(e) => setConvertTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -1598,7 +1763,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
        />
      </label>
 
-     <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
+     <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
        {convertLockedQuote ? (
          <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Locked quote • executing…</div>
        ) : convertQuoteLoading ? (
@@ -1626,9 +1791,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
              </span>
              <span className="ml-1">(fee {fmtAmount(displayQuote.feeIn, selectedConvertFromAsset?.decimals ?? 6)} {displayQuote.fromSymbol})</span>
            </div>
-          <div className="mt-1 break-words text-[10px] text-[var(--muted)]">
-            Price source: {displayQuote.priceSource.kind}
-          </div>
+          {null}
            </>
          );
        })()}
@@ -1637,7 +1800,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      <div className="flex flex-wrap gap-2">
        <button
          type="button"
-         className="w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
+         className="w-full sm:w-fit rounded-lg bg-[linear-gradient(90deg,var(--accent-2),var(--accent))] px-4 py-2 text-xs font-extrabold text-[var(--background)] transition hover:brightness-110 disabled:opacity-60"
          disabled={
            loadingAction === "convert:execute" ||
            !selectedConvertFromAsset ||
@@ -1746,14 +1909,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
       {convertQuote && (convertQuote.toSymbol === "USDT" || convertQuote.toSymbol === "BNB") ? (
         <Link
-          className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
+          className="w-full sm:w-fit rounded-lg border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
           href={`/p2p?side=SELL&asset=${encodeURIComponent(convertQuote.toSymbol)}&fiat=${encodeURIComponent(localFiat)}${sellConvertP2pAmountParam ? `&amount=${encodeURIComponent(sellConvertP2pAmountParam)}` : ""}`}
         >
           Sell {convertQuote.toSymbol} (P2P)
         </Link>
       ) : (
         <Link
-          className="w-full sm:w-fit rounded border border-[var(--border)] px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
+          className="w-full sm:w-fit rounded-lg border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
           href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
         >
           Sell USDT (P2P)
@@ -1761,685 +1924,66 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
       )}
      </div>
    </div>
- </div>
-
- <div ref={withdrawSectionRef} className="min-w-0 rounded-xl border border-[var(--border)] p-4">
-   <h3 className="text-sm font-medium">Withdraw to external address</h3>
-   <p className="mt-1 text-xs text-[var(--muted)]">
-     Withdrawals require an allowlisted destination address (BSC). Network fee is estimated in BNB and may be charged in the asset you withdraw.
-   </p>
-
-   <div className="mt-3 grid gap-2">
-     <label className="grid gap-1">
-       <span className="text-[11px] text-[var(--muted)]">Asset</span>
-       <select
-         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
-         value={withdrawAssetId}
-         onChange={(e) => setWithdrawAssetId(e.target.value)}
-       >
-         <option value="">(select)</option>
-         {withdrawableAssets.map((a) => (
-           <option key={a.id} value={a.id}>
-             {a.symbol} ({a.chain})
-           </option>
-         ))}
-       </select>
-       {selectedWithdrawAsset ? (
-         <span className="break-words text-[11px] text-[var(--muted)]">
-           Available:{" "}
-           <span className="break-all font-mono text-[var(--foreground)]">
-             {fmtAmount(String(selectedWithdrawAvailable), selectedWithdrawAsset.decimals)} {selectedWithdrawAsset.symbol.toUpperCase()}
-           </span>
-         </span>
-       ) : null}
-     </label>
-
-     <label className="grid gap-1">
-       <span className="text-[11px] text-[var(--muted)]">Amount</span>
-       <div className="flex items-center gap-2">
-         <input
-           className="flex-1 rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
-           value={withdrawAmount}
-           onChange={(e) => setWithdrawAmount(e.target.value)}
-           placeholder="e.g. 25"
-           inputMode="decimal"
-         />
-         <button
-           type="button"
-           className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
-           disabled={!selectedWithdrawAsset || selectedWithdrawAvailable <= 0}
-           onClick={() => setWithdrawAmount(String(selectedWithdrawAvailable))}
-         >
-           Max
-         </button>
-       </div>
-       {isWithdrawAmountTooHigh ? (
-         <span className="text-[11px] text-[var(--down)]">Amount exceeds available balance.</span>
-       ) : null}
-     </label>
-
-     <label className="grid gap-1">
-       <span className="text-[11px] text-[var(--muted)]">Destination address (BSC)</span>
-       <input
-         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
-         value={withdrawDestination}
-         onChange={(e) => setWithdrawDestination(e.target.value)}
-         placeholder="0x…"
-         autoCapitalize="none"
-         autoCorrect="off"
-         spellCheck={false}
-       />
-       {withdrawDestination && !isWithdrawDestinationValid ? (
-         <span className="text-[11px] text-[var(--down)]">Enter a valid 0x address.</span>
-       ) : null}
-
-       {allowlist.filter((a) => String(a.status ?? "").toLowerCase() === "active").length > 0 ? (
-         <div className="mt-1 text-[11px] text-[var(--muted)]">
-           Allowlisted:{" "}
-           {allowlist
-             .filter((a) => String(a.status ?? "").toLowerCase() === "active")
-             .slice(0, 3)
-             .map((a) => a.address)
-             .join(" • ")}
-           {allowlist.filter((a) => String(a.status ?? "").toLowerCase() === "active").length > 3 ? " …" : ""}
-         </div>
-       ) : isProd ? (
-         <div className="mt-1 text-[11px] text-[var(--muted)]">No allowlisted addresses found. Ask support/admin to add one.</div>
-       ) : (
-         <div className="mt-1 text-[11px] text-[var(--muted)]">No allowlisted addresses found (dev). Add one via the withdrawals allowlist API.</div>
-       )}
-     </label>
-
-     <label className="grid gap-1">
-       <span className="text-[11px] text-[var(--muted)]">2FA Code (if enabled)</span>
-       <input
-         className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
-         value={withdrawTotpCode}
-         onChange={(e) => setWithdrawTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-         placeholder="6-digit code"
-         inputMode="numeric"
-         maxLength={6}
-         autoComplete="one-time-code"
-       />
-     </label>
-
-     <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
-       {gasQuoteLoading ? (
-         <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
-       ) : null}
-       {gasQuote && !gasQuote.enabled ? (
-         <div className="break-words">
-           {Number(gasQuote.amount) > 0 ? (
-             <>
-               Estimated network fee:{" "}
-               <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
-               <span className="ml-1">(waived)</span>
-             </>
-           ) : (
-             <>
-               Network fee: <span className="font-mono text-[var(--foreground)]">off</span>
-               <span className="ml-1">({gasQuote.gasSymbol})</span>
-             </>
-           )}
-         </div>
-       ) : gasQuote?.enabled && Number(gasQuote.amount) > 0 ? (
-         <>
-           <div className="break-words">
-             Estimated network fee:{" "}
-             <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
-             <span className="ml-1">({gasQuote.mode === "realtime" ? "live" : "fixed"})</span>
-             {typeof gasQuoteUpdatedAt === "number" ? (
-               <span className="ml-1">• updated {new Date(gasQuoteUpdatedAt).toLocaleTimeString()}</span>
-             ) : null}
-           </div>
-           {gasQuote.chargeAmount && gasQuote.chargeSymbol && selectedWithdrawAsset ? (
-             <div className="break-words text-[11px] text-[var(--muted)]">
-               Charged as{" "}
-               <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.chargeAmount, selectedWithdrawAsset.decimals)} {gasQuote.chargeSymbol.toUpperCase()}</span>
-             </div>
-           ) : (
-             <div className="break-words text-[11px] text-[var(--up)]">Covered by the platform (conversion unavailable)</div>
-           )}
-         </>
-       ) : (
-         <>Network fee: <span className="font-mono">—</span></>
-       )}
-     </div>
-
-     <button
-       type="button"
-       className="mt-1 w-full sm:w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
-       disabled={
-         loadingAction === "withdraw:request" ||
-         !withdrawAssetId ||
-         !withdrawableAssets.some((asset) => asset.id === withdrawAssetId) ||
-         !withdrawAmount ||
-         !isWithdrawAmountValid ||
-         isWithdrawAmountTooHigh ||
-         !withdrawDestination ||
-         !isWithdrawDestinationValid ||
-         (authMode === "header" && !canUseHeader)
-       }
-       onClick={async () => {
-         setLoadingAction("withdraw:request");
-         setError(null);
-         try {
-           const res = await fetchJsonOrThrow<{
-             withdrawal?: {
-               id: string;
-               symbol?: string;
-               amount?: string;
-               fees?: {
-                 network_fee_display_amount?: string;
-                 network_fee_display_symbol?: string;
-                 fee_charged_in_asset_amount?: string;
-                 fee_charged_in_asset_symbol?: string;
-               };
-             };
-           }>("/api/exchange/withdrawals/request", {
-             method: "POST",
-             headers: {
-               "content-type": "application/json",
-               ...(requestHeaders ?? {}),
-             },
-             body: JSON.stringify({
-               asset_id: withdrawAssetId,
-               amount: withdrawAmount,
-               destination_address: withdrawDestination.trim(),
-               ...(withdrawTotpCode.length === 6 ? { totp_code: withdrawTotpCode } : {}),
-             }),
-           });
-
-           setToastKind("success");
-           const sym = (res.withdrawal?.symbol ?? selectedWithdrawAsset?.symbol ?? "").toUpperCase();
-           const amt = res.withdrawal?.amount ?? withdrawAmount;
-           const feeAmt = res.withdrawal?.fees?.network_fee_display_amount;
-           const feeSym = res.withdrawal?.fees?.network_fee_display_symbol;
-           setToastMessage(
-             feeAmt && feeSym
-               ? `Withdrawal requested: ${amt} ${sym} • network ${feeAmt} ${feeSym}.`
-               : `Withdrawal requested: ${amt} ${sym}.`,
-           );
-           setWithdrawAmount("");
-           setWithdrawDestination("");
-           setWithdrawTotpCode("");
-           await refreshAll();
-         } catch (e) {
-           if (e instanceof ApiError) {
-             setError({ code: e.code, details: e.details });
-           } else {
-             setError({ code: e instanceof Error ? e.message : String(e) });
-           }
-         } finally {
-           setLoadingAction(null);
-         }
-       }}
-     >
-       {loadingAction === "withdraw:request" ? "Requesting…" : "Request withdrawal"}
-     </button>
+   </div>
    </div>
  </div>
-
- <div className="rounded-xl border border-[var(--border)] p-4 hidden">
- <h3 className="text-sm font-medium">Create hold</h3>
- <div className="mt-3 grid gap-2">
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Asset</span>
- <select
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={holdAssetId}
- onChange={(e) => setHoldAssetId(e.target.value)}
- >
- <option value="">(select)</option>
- {assets.map((a) => (
- <option key={a.id} value={a.id}>
- {a.symbol} ({a.chain})
- </option>
- ))}
- </select>
- </label>
-
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Amount</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={holdAmount}
- onChange={(e) => setHoldAmount(e.target.value)}
- placeholder="e.g. 25"
- inputMode="decimal"
- />
- </label>
-
- <div className="rounded border border-[var(--border)] px-2 py-2 text-[11px] text-[var(--muted)]">
- {gasQuoteLoading ? (
- <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
  ) : null}
- {gasQuote && !gasQuote.enabled ? (
- <div className="break-words">
- {Number(gasQuote.amount) > 0 ? (
- <>
- Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
- <span className="ml-1">(waived)</span>
- </>
- ) : (
- <>
- Network fee: <span className="font-mono text-[var(--foreground)]">off</span>
- <span className="ml-1">({gasQuote.gasSymbol})</span>
- </>
- )}
- </div>
- ) : gasQuote?.enabled && Number(gasQuote.amount) > 0 ? (
- <>
- <div className="break-words">
- Estimated network fee: <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.amount, 8)} {gasQuote.gasSymbol}</span>
- <span className="ml-1">({gasQuote.mode ==="realtime" ? "live" : "fixed"})</span>
- {typeof gasQuoteUpdatedAt === "number" ? (
- <span className="ml-1">• updated {new Date(gasQuoteUpdatedAt).toLocaleTimeString()}</span>
- ) : null}
- </div>
- {gasQuote.chargeAmount && gasQuote.chargeSymbol ? (
- <div className="mt-1 break-words text-[11px] text-[var(--muted)]">
- Charged as <span className="break-all font-mono text-[var(--foreground)]">{fmtAmount(gasQuote.chargeAmount, 8)} {gasQuote.chargeSymbol}</span>
- </div>
- ) : null}
- </>
- ) : (
- <>Network fee: <span className="font-mono">—</span></>
- )}
- </div>
 
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Reason</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={holdReason}
- onChange={(e) => setHoldReason(e.target.value)}
- placeholder="order_hold"
- />
- </label>
-
- <button
- type="button"
- className="mt-1 w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
- disabled={loadingAction === "hold:create" || !holdAssetId || !holdAmount || (authMode ==="header"&& !canUseHeader)}
- onClick={async () => {
- setLoadingAction("hold:create");
- setError(null);
- try {
- const res = await fetchJsonOrThrow<{ hold?: { id: string; asset_id: string; amount: string; reason: string; status: string } }>(
-"/api/exchange/holds",
- {
- method:"POST",
- headers: {
-"content-type":"application/json",
- ...(requestHeaders ?? {}),
- },
- body: JSON.stringify({
- asset_id: holdAssetId,
- amount: holdAmount,
- reason: holdReason,
- }),
- }
- );
-
- if (!res.hold?.id) throw new Error("hold_create_missing_id");
-
- setToastKind("success");
- setToastMessage("Hold created.");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Create hold
- </button>
- </div>
- </div>
-
- <div className="rounded-xl border border-[var(--border)] p-4 hidden">
- <h3 className="text-sm font-medium">Holds (this page)</h3>
- <p className="mt-1 text-xs text-[var(--muted)]">
- Holds are loaded from the server.
- </p>
-
- <div className="mt-3 grid gap-2">
- {holds.length === 0 ? (
- <div className="text-xs text-[var(--muted)]">No holds created yet.</div>
- ) : (
- holds.map((h) => (
  <div
- key={h.id}
- className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--border)] px-3 py-2 text-xs"
+   className="relative min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 p-4 shadow-[var(--shadow)]"
+   style={{ clipPath: "polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%)" }}
  >
- <div className="min-w-0 flex-1">
- <div className="font-medium">
- {h.symbol} {h.amount} <span className="text-[var(--muted)]">({h.status})</span>
- </div>
- <div className="truncate max-w-[8rem] font-mono text-[11px] text-[var(--muted)]" title={h.id}>{h.id}</div>
+   <div
+     className="pointer-events-none absolute inset-0 opacity-60"
+     aria-hidden
+     style={{
+       backgroundImage:
+         "radial-gradient(circle at 18% 28%, color-mix(in srgb, var(--accent) 18%, transparent) 0, transparent 58%), radial-gradient(circle at 86% 70%, color-mix(in srgb, var(--accent-2) 14%, transparent) 0, transparent 62%)",
+     }}
+   />
+  <div className="relative">
+    <div
+      className="-mx-4 -mt-4 mb-4 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--card-2)]/70 px-4 py-3"
+      style={{ clipPath: "polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%)" }}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+          <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+          <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">P2P Desk</div>
+          <h3 className="-mt-0.5 truncate text-sm font-extrabold tracking-tight text-[var(--foreground)]">Offload</h3>
+        </div>
+      </div>
+      <span className="shrink-0 rounded-full border border-[var(--border)] bg-[var(--card)]/25 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">
+        Local rail
+      </span>
+    </div>
+
+    <p className="text-xs text-[var(--muted)]">Sell through P2P and settle to your local rail.</p>
+
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <Link
+        className="w-full rounded-lg bg-[linear-gradient(90deg,var(--accent),var(--accent-2))] px-3 py-2 text-center text-xs font-extrabold text-[var(--background)] transition hover:brightness-110"
+        href={`/p2p?new_ad=1&side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}`}
+      >
+        Post SELL ad
+      </Link>
+      <Link
+        className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-center text-xs font-bold text-[var(--foreground)] transition hover:bg-[var(--card)]"
+        href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
+      >
+        Browse buyers
+      </Link>
+    </div>
+  </div>
  </div>
 
- <button
- type="button"
- className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={loadingAction === `hold:release:${h.id}` || h.status !=="active"|| (authMode ==="header"&& !canUseHeader)}
- onClick={async () => {
- setLoadingAction(`hold:release:${h.id}`);
- setError(null);
- try {
- await fetchJsonOrThrow<{ ok: true }>(`/api/exchange/holds/${h.id}`, {
- method:"DELETE",
- headers: requestHeaders,
- });
- setToastKind("success");
- setToastMessage("Hold released.");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Release
- </button>
- </div>
- ))
- )}
- </div>
- </div>
- </div>
 
  </div>
-
-{/* Dev tools removed */}
-
- {isAdmin ? (
- <div className="mt-2 rounded-xl border border-[var(--border)] p-4">
- <div>
- <h3 className="text-sm font-medium">Admin: Reverse transfer</h3>
- <p className="mt-1 text-xs text-[var(--muted)]">
- Creates a compensating ledger entry. Only succeeds if the recipient still has enough available balance.
- </p>
- </div>
-
- <div className="mt-3 grid gap-2 md:grid-cols-2">
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Transfer entry id</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={reverseTransferId}
- placeholder="uuid"
- onChange={(e) => setReverseTransferId(e.target.value)}
- />
- </label>
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">Reason (optional)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={reverseTransferReason}
- placeholder="customer_support"
- onChange={(e) => setReverseTransferReason(e.target.value)}
- />
- </label>
- </div>
-
- <button
- type="button"
- className="mt-3 w-fit rounded bg-[var(--foreground)] px-3 py-2 text-xs font-medium text-[var(--background)] disabled:opacity-60"
- disabled={
- loadingAction === "admin:transfer:reverse" ||
- !reverseTransferId.trim() ||
- !isUuid(reverseTransferId.trim()) ||
- (authMode === "header" && !canUseHeader)
- }
- onClick={async () => {
- const id = reverseTransferId.trim();
- if (!isUuid(id)) {
- setError({ code: "invalid_input", details: "transfer entry id must be a uuid" });
- return;
- }
-
- setLoadingAction("admin:transfer:reverse");
- setError(null);
- try {
- const res = await fetchJsonOrThrow<{ reversal?: { id: string; amount?: string; symbol?: string } }>(
- `/api/exchange/admin/transfers/${id}/reverse`,
- {
- method: "POST",
- headers: {
- "content-type": "application/json",
- ...(requestHeaders ?? {}),
- ...adminHeaders,
- },
- body: JSON.stringify({
- ...(reverseTransferReason.trim() ? { reason: reverseTransferReason.trim() } : {}),
- }),
- },
- );
-
- setToastKind("success");
- const sym = (res.reversal?.symbol ?? "").toUpperCase();
- const amt = res.reversal?.amount;
- setToastMessage(
- amt && sym
- ? `Transfer reversed. Returned ${amt} ${sym}.`
- : "Transfer reversed.",
- );
- setReverseTransferId("");
- setReverseTransferReason("");
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- {loadingAction === "admin:transfer:reverse" ? "Reversing…" : "Reverse transfer"}
- </button>
- </div>
- ) : null}
-
- {isAdmin && false ? (
- <div className="mt-2 rounded-xl border border-[var(--border)] p-4">
- <div className="flex flex-wrap items-center justify-between gap-2">
- <div>
- <h3 className="text-sm font-medium">Admin review</h3>
- <p className="mt-1 text-xs text-[var(--muted)]">
- Manual approval/rejection stub for withdrawal requests.
- </p>
- </div>
-
- <button
- type="button"
- className="rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={loadingAction === "admin:load"}
- onClick={async () => {
- setLoadingAction("admin:load");
- setError(null);
- try {
- const json = await fetchJsonOrThrow<{ withdrawals: AdminWithdrawalRow[] }>(
-"/api/exchange/admin/withdrawals?status=review",
- { cache:"no-store", headers: adminHeaders }
- );
- setAdminRequested(json.withdrawals ?? []);
- setToastKind("success");
- setToastMessage("Loaded requested withdrawals.");
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Load requested
- </button>
- </div>
-
- <div className="mt-3 grid gap-2 md:grid-cols-2">
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">x-admin-key (optional)</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 font-mono text-xs"
- value={adminKey}
- type="password"
- placeholder="EXCHANGE_ADMIN_KEY"
- onChange={(e) => setAdminKey(e.target.value)}
- />
- </label>
- <label className="grid gap-1">
- <span className="text-[11px] text-[var(--muted)]">x-admin-id</span>
- <input
- className="rounded border border-[var(--border)] bg-transparent px-2 py-2 text-xs"
- value={adminId}
- placeholder="admin@local"
- onChange={(e) => setAdminId(e.target.value)}
- />
- </label>
- </div>
-
- <div className="mt-3 grid gap-2">
- {adminRequested.length === 0 ? (
- <div className="text-xs text-[var(--muted)]">No requested withdrawals loaded.</div>
- ) : (
- adminRequested.map((w) => (
- <div
- key={w.id}
- className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--border)] px-3 py-2 text-xs"
- >
- <div className="min-w-0 flex-1">
- <div className="font-medium">
- {w.symbol} {w.amount} → <span className="truncate font-mono">{w.destination_address}</span>
- <span className="ml-2 rounded bg-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--foreground)]">
- {w.status}
- </span>
- </div>
- {typeof w.risk_score ==="number"? (
- <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
- <span className="text-[var(--muted)]">Risk</span>
- <span
- className={
-"rounded px-2 py-0.5 font-mono"+
- (w.risk_score >= 85
- ?" bg-[var(--down-bg)] text-[var(--down)]"
- : w.risk_score >= 60
- ?" bg-[var(--warn-bg)] text-[var(--warn)]"
- : w.risk_score >= 25
- ?" bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
- :" bg-[var(--up-bg)] text-[var(--up)]")
- }
- title={w.risk_model_version ? `model ${w.risk_model_version}` :"risk signal"}
- >
- {w.risk_score}
- {w.risk_recommended_action ? ` • ${w.risk_recommended_action}` :""}
- </span>
- {w.risk_created_at ? (
- <span className="text-[var(--muted)]"title={w.risk_created_at}>
- {new Date(w.risk_created_at).toLocaleTimeString([], {
- hour:"2-digit",
- minute:"2-digit",
- })}
- </span>
- ) : null}
- </div>
- ) : (
- <div className="mt-1 text-[11px] text-[var(--muted)]">
- No risk signal yet (run <span className="font-mono">npm run outbox:worker:once</span>).
- </div>
- )}
- <div className="font-mono text-[11px] text-[var(--muted)]">
- {w.id} <span className="ml-2">user {w.user_id}</span>
  </div>
  </div>
-
- <div className="flex items-center gap-2">
- <button
- type="button"
- className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={loadingAction === `admin:approve:${w.id}`}
- onClick={async () => {
- setLoadingAction(`admin:approve:${w.id}`);
- setError(null);
- try {
- await fetchJsonOrThrow(`/api/exchange/admin/withdrawals/${w.id}/approve`, {
- method:"POST",
- headers: {"content-type":"application/json", ...adminHeaders },
- body: JSON.stringify({ approved_by: adminId }),
- });
- setToastKind("success");
- setToastMessage("Approved.");
- setAdminRequested((prev) => prev.filter((x) => x.id !== w.id));
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Approve
- </button>
-
- <button
- type="button"
- className="rounded border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--card)] disabled:opacity-60"
- disabled={loadingAction === `admin:reject:${w.id}`}
- onClick={async () => {
- setLoadingAction(`admin:reject:${w.id}`);
- setError(null);
- try {
- await fetchJsonOrThrow(`/api/exchange/admin/withdrawals/${w.id}/reject`, {
- method:"POST",
- headers: {"content-type":"application/json", ...adminHeaders },
- body: JSON.stringify({ reason:"manual_reject", rejected_by: adminId }),
- });
- setToastKind("success");
- setToastMessage("Rejected.");
- setAdminRequested((prev) => prev.filter((x) => x.id !== w.id));
- await refreshAll();
- } catch (e) {
- if (e instanceof ApiError) {
- setError({ code: e.code, details: e.details });
- } else {
- setError({ code: e instanceof Error ? e.message : String(e) });
- }
- } finally {
- setLoadingAction(null);
- }
- }}
- >
- Reject
- </button>
- </div>
- </div>
- ))
- )}
- </div>
- </div>
- ) : null}
  </section>
  );
 }

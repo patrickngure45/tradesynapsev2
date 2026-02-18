@@ -92,6 +92,11 @@ function getBandPctForFiat(fiat: string): number {
   return Math.min(0.25, Math.max(0.001, n));
 }
 
+function isAtLeastBasicKyc(raw: unknown): boolean {
+  const v = String(raw ?? "").trim().toLowerCase();
+  return v === "basic" || v === "verified" || v === "full";
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -103,6 +108,13 @@ export async function GET(req: NextRequest) {
     
     const { side, asset, fiat, amount } = query.data;
     const sql = getSql();
+
+    const agentEmails = new Set(
+      String(process.env.P2P_AGENT_EMAILS ?? "")
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    );
 
     const fiatUpper = fiat.toUpperCase();
     const assetUpper = asset.toUpperCase();
@@ -177,6 +189,12 @@ export async function GET(req: NextRequest) {
         coalesce(rep.positive, 0)::int AS rep_positive,
         coalesce(rep.negative, 0)::int AS rep_negative,
         coalesce(rep.total, 0)::int AS rep_total,
+        (
+          SELECT count(*)::int
+          FROM p2p_order o
+          WHERE o.status = 'completed'
+            AND (o.buyer_id = ad.user_id OR o.seller_id = ad.user_id)
+        ) AS completed_count,
         ad.terms
       FROM p2p_ad ad
       JOIN app_user u ON ad.user_id = u.id
@@ -256,6 +274,7 @@ export async function GET(req: NextRequest) {
 
         return {
           ...ad,
+          is_verified_agent: agentEmails.size > 0 ? agentEmails.has(String(ad.email ?? "").toLowerCase()) : false,
           // Keep UI compatibility: provide a string price field.
           fixed_price: displayPrice !== null ? String(displayPrice) : null,
           _display_price: displayPrice,
@@ -292,8 +311,8 @@ export async function POST(req: NextRequest) {
     const activeErr = await requireActiveUser(sql, actingUserId);
     if (activeErr) return apiError(activeErr);
 
-    const userRows = await sql<{ country: string | null }[]>`
-      SELECT country
+    const userRows = await sql<{ country: string | null; email_verified: boolean | null; kyc_level: string | null }[]>`
+      SELECT country, email_verified, kyc_level
       FROM app_user
       WHERE id = ${actingUserId}::uuid
       LIMIT 1
@@ -311,12 +330,55 @@ export async function POST(req: NextRequest) {
     if (!payload.success) return apiZodError(payload.error) ?? apiError("invalid_input");
     const data = payload.data;
 
+    // Anti-spam: limit how many online ads a single user can have at once.
+    // Applies to both BUY and SELL ads.
+    const maxOnlineAds = Math.max(0, Math.min(100, Number(process.env.P2P_MAX_ONLINE_ADS_PER_USER ?? "3")));
+    if (maxOnlineAds > 0) {
+      const rows = await sql<{ n: number }[]>`
+        SELECT count(*)::int AS n
+        FROM p2p_ad
+        WHERE user_id = ${actingUserId}::uuid
+          AND status = 'online'
+      `;
+      const current = Number(rows[0]?.n ?? 0);
+      if (Number.isFinite(current) && current >= maxOnlineAds) {
+        return apiError("ad_limit_reached", {
+          status: 409,
+          details: { max_online_ads: maxOnlineAds },
+        });
+      }
+    }
+
+    // Posting gates (SELL ads only): offloading is the risky direction.
+    if (data.side === "SELL") {
+      const emailVerified = Boolean(userRows[0]?.email_verified);
+      if (!emailVerified) {
+        return apiError("email_not_verified", {
+          status: 403,
+          details: { message: "Verify your email before posting SELL ads." },
+        });
+      }
+      if (!isAtLeastBasicKyc(userRows[0]?.kyc_level)) {
+        return apiError("kyc_required", {
+          status: 403,
+          details: { message: "Complete Basic KYC before posting SELL ads." },
+        });
+      }
+    }
+
     const fiatUpper = data.fiat.toUpperCase();
 
     // Global limits (Binance-style): enforce a USD-based minimum/maximum per trade.
     // Defaults: min=$5, max=$2000. Can be overridden by env.
-    const minUsd = clamp(Number(process.env.P2P_MIN_TRADE_USD ?? "5"), 0.5, 10_000);
+    let minUsd = clamp(Number(process.env.P2P_MIN_TRADE_USD ?? "5"), 0.5, 10_000);
     const maxUsd = clamp(Number(process.env.P2P_MAX_TRADE_USD ?? "2000"), minUsd, 100_000);
+
+    // SELL ads (offloading) should be meaningfully sized to reduce spam & micro-ads.
+    // Default: $20-equivalent minimum per trade.
+    if (data.side === "SELL") {
+      const sellMinUsd = clamp(Number(process.env.P2P_MIN_SELL_AD_TRADE_USD ?? "20"), 0.5, 10_000);
+      minUsd = Math.max(minUsd, sellMinUsd);
+    }
 
     // Compute the fiat conversion for USDT (USDT≈USD). If unavailable, we can't safely enforce limits.
     const usdtFiat = await getOrComputeFxReferenceRate(sql as any, "USDT", fiatUpper);
@@ -328,6 +390,29 @@ export async function POST(req: NextRequest) {
     const maxFiat = Math.floor(maxUsd * usdtFiat.mid);
     if (!(Number.isFinite(minFiat) && Number.isFinite(maxFiat) && minFiat > 0 && maxFiat >= minFiat)) {
       return apiError("fx_unavailable", { status: 503, details: { base: "USDT", quote: fiatUpper } });
+    }
+
+    // Additional SELL-ad guardrail: require the *ad’s total liquidity* to be non-trivial.
+    // This reduces spam (micro-ads) while still allowing normal sellers.
+    // Default: $50-equivalent total notional.
+    if (data.side === "SELL") {
+      const minTotalUsd = clamp(Number(process.env.P2P_MIN_SELL_AD_TOTAL_USD ?? "50"), 0.5, 100_000);
+      const minTotalFiat = Math.ceil(minTotalUsd * usdtFiat.mid);
+      const totalFiat = Math.floor(data.total_amount * data.fixed_price);
+      if (!Number.isFinite(totalFiat) || totalFiat <= 0) {
+        return apiError("invalid_input", { details: { message: "Ad liquidity is too low." } });
+      }
+      if (totalFiat < minTotalFiat) {
+        return apiError("ad_liquidity_too_low", {
+          status: 409,
+          details: {
+            total_fiat: totalFiat,
+            required_min_total: minTotalFiat,
+            fiat: fiatUpper,
+            min_total_usd: minTotalUsd,
+          },
+        });
+      }
     }
 
     if (data.min_limit < minFiat) {

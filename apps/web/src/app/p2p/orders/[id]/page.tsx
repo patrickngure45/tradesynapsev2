@@ -7,6 +7,7 @@ import { getPaymentMethodName } from "@/lib/p2p/constants";
 import type { PaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
 import { fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
 import { Avatar } from "@/components/Avatar";
+import { buttonClassName } from "@/components/ui/Button";
 
 // Types matching API response
 type Order = {
@@ -474,13 +475,13 @@ export default function OrderPage() {
                     <div className="mt-4 flex items-center gap-3">
                         <Link
                             href="/login"
-                            className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--accent)] px-4 text-sm font-bold text-white hover:brightness-110"
+                            className={buttonClassName({ variant: "primary", size: "md", className: "h-9" })}
                         >
                             Go to Login
                         </Link>
                         <Link
                             href="/p2p/orders"
-                            className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--border)] bg-transparent px-4 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                            className={buttonClassName({ variant: "secondary", size: "md", className: "h-9" })}
                         >
                             My Orders
                         </Link>
@@ -861,7 +862,7 @@ export default function OrderPage() {
                 <button 
                     disabled={!canChat || !msgInput.trim()}
                     onClick={sendMessage}
-                    className="bg-[var(--accent)] text-white px-4 py-2 rounded-lg font-bold text-sm hover:brightness-110 disabled:opacity-50"
+                    className={buttonClassName({ variant: "primary", size: "md" })}
                 >
                     Send
                 </button>
@@ -1039,7 +1040,12 @@ export default function OrderPage() {
                         <button
                             disabled={disputeLoading}
                             onClick={openDispute}
-                            className="w-full rounded-xl bg-[color-mix(in_srgb,var(--warn)_85%,black)] px-4 py-2 text-sm font-extrabold text-white hover:brightness-110 disabled:opacity-50"
+                            className={buttonClassName({
+                                variant: "warning",
+                                size: "md",
+                                fullWidth: true,
+                                className: "rounded-xl",
+                            })}
                         >
                             {disputeLoading ? "Opening dispute..." : "Open Dispute"}
                         </button>
@@ -1109,7 +1115,12 @@ export default function OrderPage() {
                         <button
                             disabled={feedbackLoading}
                             onClick={submitFeedback}
-                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm font-extrabold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-50"
+                            className={buttonClassName({
+                                variant: "secondary",
+                                size: "md",
+                                fullWidth: true,
+                                className: "rounded-xl",
+                            })}
                         >
                             {feedbackLoading ? "Submitting..." : "Submit Feedback"}
                         </button>
@@ -1304,14 +1315,24 @@ export default function OrderPage() {
                         <button 
                             disabled={actionLoading || !paymentDetailsReady || isExpired}
                             onClick={() => openActionDialog("PAY_CONFIRMED")}
-                            className="w-full py-3 rounded-xl bg-[var(--warn)] text-white font-extrabold hover:brightness-110 disabled:opacity-50"
+                            className={buttonClassName({
+                                variant: "warning",
+                                size: "md",
+                                fullWidth: true,
+                                className: "rounded-xl py-3",
+                            })}
                         >
                             {isExpired ? "Payment window ended" : "Mark as Paid"}
                         </button>
                         <button 
                             disabled={actionLoading}
                             onClick={() => openActionDialog("CANCEL")}
-                            className="w-full py-2 rounded-xl border border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-transparent text-[var(--down)] font-extrabold hover:bg-[color-mix(in_srgb,var(--down-bg)_60%,var(--card-2))]"
+                            className={buttonClassName({
+                                variant: "danger",
+                                size: "md",
+                                fullWidth: true,
+                                className: "rounded-xl py-2",
+                            })}
                         >
                             Cancel Order
                         </button>
@@ -1339,7 +1360,12 @@ export default function OrderPage() {
                             <button
                                 disabled={actionLoading}
                                 onClick={() => openActionDialog("CANCEL")}
-                                className="w-full py-2 rounded-xl border border-[color-mix(in_srgb,var(--warn)_25%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)] font-extrabold hover:brightness-110 disabled:opacity-50"
+                                className={buttonClassName({
+                                    variant: "warning",
+                                    size: "md",
+                                    fullWidth: true,
+                                    className: "rounded-xl py-2",
+                                })}
                             >
                                 Cancel (timeout)
                             </button>
@@ -1353,12 +1379,17 @@ export default function OrderPage() {
                         <button 
                            disabled={actionLoading}
                                     onClick={() => openActionDialog("RELEASE")}
-                                    className="w-full py-3 rounded-xl bg-[var(--up)] text-white font-extrabold hover:brightness-110 disabled:opacity-50"
+                                    className={buttonClassName({
+                                        variant: "success",
+                                        size: "md",
+                                        fullWidth: true,
+                                        className: "rounded-xl py-3",
+                                    })}
                         >
                             Release Crypto ({order.amount_asset} {order.asset_symbol})
                         </button>
                                 <p className="text-xs text-[var(--muted)] text-center mt-2">
-                           Warning: Only release if you have confirmed receipt of funds in your bank account.
+                           Only release after you’ve confirmed you received the payment in your payout account.
                         </p>
                     </>
                 )}
@@ -1416,7 +1447,12 @@ export default function OrderPage() {
                                     type="button"
                                     disabled={actionLoading}
                                     onClick={() => setActionDialog(null)}
-                                    className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-sm font-extrabold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-50"
+                                    className={buttonClassName({
+                                        variant: "secondary",
+                                        size: "md",
+                                        fullWidth: true,
+                                        className: "rounded-xl text-[var(--muted)] hover:text-[var(--foreground)]",
+                                    })}
                                 >
                                     Back
                                 </button>
@@ -1436,16 +1472,30 @@ export default function OrderPage() {
                                             await runOpenDispute();
                                         }
                                     }}
-                                    className={
-                                        "w-full rounded-xl px-3 py-2 text-sm font-extrabold text-white hover:brightness-110 disabled:opacity-50 " +
-                                        (actionDialog.kind === "open_dispute"
-                                            ? "bg-[var(--warn)]"
-                                            : actionDialog.action === "RELEASE"
-                                                ? "bg-[var(--up)]"
-                                                : actionDialog.action === "PAY_CONFIRMED"
-                                                    ? "bg-[var(--warn)]"
-                                                    : "bg-[var(--foreground)]")
-                                    }
+                                    className={(() => {
+                                        const variant =
+                                            actionDialog.kind === "open_dispute"
+                                                ? ("warning" as const)
+                                                : actionDialog.action === "RELEASE"
+                                                    ? ("success" as const)
+                                                    : actionDialog.action === "PAY_CONFIRMED"
+                                                        ? ("warning" as const)
+                                                        : ("secondary" as const);
+
+                                        const extra =
+                                            actionDialog.kind === "open_dispute" ||
+                                            actionDialog.action === "RELEASE" ||
+                                            actionDialog.action === "PAY_CONFIRMED"
+                                                ? "rounded-xl"
+                                                : "rounded-xl bg-[var(--foreground)] text-white hover:brightness-110";
+
+                                        return buttonClassName({
+                                            variant,
+                                            size: "md",
+                                            fullWidth: true,
+                                            className: extra,
+                                        });
+                                    })()}
                                 >
                                     {actionLoading
                                         ? "Working…"
