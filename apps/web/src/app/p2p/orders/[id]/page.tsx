@@ -8,6 +8,7 @@ import type { PaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
 import { fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
 import { Avatar } from "@/components/Avatar";
 import { buttonClassName } from "@/components/ui/Button";
+import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 
 // Types matching API response
 type Order = {
@@ -64,6 +65,8 @@ export default function OrderPage() {
   const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<null | { code: string; message: string }>(null);
   const [msgInput, setMsgInput] = useState("");
+    const [chatSending, setChatSending] = useState(false);
+    const [chatError, setChatError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -212,22 +215,48 @@ export default function OrderPage() {
   }, [messages.length]);
 
   const sendMessage = async () => {
-    if (!msgInput.trim()) return;
-    try {
-      const txt = msgInput;
-      setMsgInput(""); // Optimistic clear
-      await fetch(`/api/p2p/orders/${id}/chat`, {
-        method: 'POST',
-                headers: {
-                    "Content-Type": "application/json",
-                },
+        const txt = msgInput.trim();
+        if (!txt) return;
+        if (chatSending) return;
+
+        setChatError(null);
+        setChatSending(true);
+        try {
+            const inserted = await fetchJsonOrThrow<Message>(`/api/p2p/orders/${id}/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ content: txt }),
-      });
-      // specific polling will catch it, or we insert locally?
-      // let's wait for poll
-    } catch (err) {
-      console.error(err);
-    }
+            });
+
+            setMsgInput("");
+            setMessages((prev) => {
+                if (prev.some((m) => m.id === inserted.id)) return prev;
+                return [...prev, inserted];
+            });
+        } catch (err) {
+            console.error(err);
+            if (err instanceof ApiError) {
+                if (err.code === "rate_limit_exceeded") {
+                    setChatError("You’re sending messages too fast. Please wait a moment and try again.");
+                } else if (
+                    err.code === "csrf_no_origin" ||
+                    err.code === "csrf_origin_mismatch" ||
+                    err.code === "csrf_referer_mismatch" ||
+                    err.code === "csrf_invalid_referer" ||
+                    err.code === "csrf_token_mismatch"
+                ) {
+                    setChatError("Security check failed. Refresh the page and try sending again.");
+                } else if (err.code === "unauthorized" || err.code === "missing_x_user_id" || err.code === "session_token_expired") {
+                    setChatError("Your session expired. Please log in again.");
+                } else {
+                    setChatError("Failed to send message. Please try again.");
+                }
+            } else {
+                setChatError("Failed to send message. Please try again.");
+            }
+        } finally {
+            setChatSending(false);
+        }
   };
 
     const counterparty = useMemo(() => {
@@ -844,7 +873,14 @@ export default function OrderPage() {
                 <div ref={bottomRef} />
             </div>
 
-            <div className="p-4 border-t border-[var(--border)] bg-[var(--card-2)] flex gap-2">
+            <div className="p-4 border-t border-[var(--border)] bg-[var(--card-2)]">
+                {chatError ? (
+                    <div className="mb-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                        {chatError}
+                    </div>
+                ) : null}
+
+                <div className="flex gap-2">
                 <input 
                     disabled={!canChat}
                     className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-60"
@@ -860,12 +896,13 @@ export default function OrderPage() {
                     onKeyDown={e => (e.key === 'Enter' && canChat ? sendMessage() : null)}
                 />
                 <button 
-                    disabled={!canChat || !msgInput.trim()}
+                    disabled={!canChat || !msgInput.trim() || chatSending}
                     onClick={sendMessage}
                     className={buttonClassName({ variant: "primary", size: "md" })}
                 >
-                    Send
+                    {chatSending ? "Sending…" : "Send"}
                 </button>
+                </div>
             </div>
         </div>
 
