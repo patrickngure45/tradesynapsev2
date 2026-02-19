@@ -37,6 +37,24 @@ function isRateLimitError(err: unknown): boolean {
   );
 }
 
+function isUnsupportedArrayParamError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("invalid params") &&
+    (lower.includes("variadic") || lower.includes("array type") || lower.includes("invalid variadic"))
+  );
+}
+
+function coerceTopicsForCompatibility(topics: (string | string[] | null)[]): (string | string[] | null)[] {
+  // Some RPC providers are picky about “OR” arrays with a single element.
+  // Coerce ["0x..."] -> "0x...".
+  return topics.map((t) => {
+    if (Array.isArray(t) && t.length === 1) return t[0] ?? null;
+    return t;
+  });
+}
+
 async function getLogsWithRetry(
   provider: ethers.JsonRpcProvider,
   args: ethers.Filter,
@@ -72,11 +90,12 @@ async function getLogsBatchedOrSplit(
   },
 ): Promise<ethers.Log[]> {
   const throttleMs = clamp(envInt("BSC_DEPOSIT_LOG_THROTTLE_MS", 0), 0, 10_000);
+  const topics = coerceTopicsForCompatibility(args.topics);
 
   const filterBase = {
     fromBlock: args.fromBlock,
     toBlock: args.toBlock,
-    topics: args.topics,
+    topics,
   } as const;
 
   // Fast path: try a single batched query (address array) if supported.
@@ -92,7 +111,9 @@ async function getLogsBatchedOrSplit(
     if (throttleMs) await sleep(throttleMs);
     return logs;
   } catch (e) {
-    if (!isRateLimitError(e)) throw e;
+    // Some providers (notably Ankr) reject address arrays for eth_getLogs.
+    // In that case, fall back to single-contract calls.
+    if (!isRateLimitError(e) && !isUnsupportedArrayParamError(e)) throw e;
   }
 
   // Slow path: split per contract. Many public RPCs rate-limit batched/array address calls.
