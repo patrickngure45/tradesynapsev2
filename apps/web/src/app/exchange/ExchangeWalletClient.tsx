@@ -1446,7 +1446,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                  {canSellP2p ? (
                    <Link
                      className="rounded-lg border border-[var(--border)] bg-[var(--down-bg)] px-2 py-1 text-[11px] font-semibold text-[var(--down)] hover:brightness-110"
-                     href={`/p2p?side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}${sellP2pAmountParam ? `&amount=${encodeURIComponent(sellP2pAmountParam)}` : ""}`}
+                     href={`/p2p?side=SELL&asset=${encodeURIComponent(symbol)}&fiat=${encodeURIComponent(localFiat)}&src=wallet${sellP2pAmountParam ? `&amount=${encodeURIComponent(sellP2pAmountParam)}` : ""}`}
                    >
                      Sell (P2P)
                    </Link>
@@ -2074,14 +2074,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
       {convertQuote && (convertQuote.toSymbol === "USDT" || convertQuote.toSymbol === "BNB") ? (
         <Link
           className="w-full sm:w-fit rounded-lg border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
-          href={`/p2p?side=SELL&asset=${encodeURIComponent(convertQuote.toSymbol)}&fiat=${encodeURIComponent(localFiat)}${sellConvertP2pAmountParam ? `&amount=${encodeURIComponent(sellConvertP2pAmountParam)}` : ""}`}
+          href={`/p2p?side=SELL&asset=${encodeURIComponent(convertQuote.toSymbol)}&fiat=${encodeURIComponent(localFiat)}&src=wallet${sellConvertP2pAmountParam ? `&amount=${encodeURIComponent(sellConvertP2pAmountParam)}` : ""}`}
         >
           Sell {convertQuote.toSymbol} (P2P)
         </Link>
       ) : (
         <Link
           className="w-full sm:w-fit rounded-lg border border-[var(--border)] bg-[var(--card)]/30 px-3 py-2 text-center text-xs font-medium text-[var(--foreground)] hover:bg-[var(--card)]"
-          href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
+          href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}&src=wallet${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
         >
           Sell USDT (P2P)
         </Link>
@@ -2136,7 +2136,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
       </Link>
       <Link
         className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-center text-xs font-bold text-[var(--foreground)] transition hover:bg-[var(--card)]"
-        href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
+        href={`/p2p?side=SELL&asset=USDT&fiat=${encodeURIComponent(localFiat)}&src=wallet${sellUsdtP2pAmountParam ? `&amount=${encodeURIComponent(sellUsdtP2pAmountParam)}` : ""}`}
       >
         Browse buyers
       </Link>

@@ -117,6 +117,9 @@ export function P2PMarketplace() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
 
+  const [otherSideHasAds, setOtherSideHasAds] = useState<boolean | null>(null);
+  const otherSideProbeKeyRef = useRef<string>("");
+
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -149,6 +152,7 @@ export function P2PMarketplace() {
   useEffect(() => {
     async function fetchAds() {
       setLoading(true);
+      setOtherSideHasAds(null);
       try {
         const query = new URLSearchParams({ side, asset, fiat, ...(amount ? { amount } : {}) });
         const res = await fetch(`/api/p2p/ads?${query.toString()}`);
@@ -170,19 +174,30 @@ export function P2PMarketplace() {
         setFetchError(null);
 
         if (normalized.length === 0 && !amount) {
-          const sideKey = `${asset.toUpperCase()}:${fiat.toUpperCase()}`;
-          if (!initSideFromQuery.current && didAutoSideRef.current !== sideKey) {
-            didAutoSideRef.current = sideKey;
-            const otherSide = side === "BUY" ? "SELL" : "BUY";
+          const otherSide = side === "BUY" ? "SELL" : "BUY";
+
+          const probeKey = `${side}:${asset}:${fiat}`;
+          if (otherSideProbeKeyRef.current !== probeKey) {
+            otherSideProbeKeyRef.current = probeKey;
             try {
               const otherQuery = new URLSearchParams({ side: otherSide, asset, fiat });
               const otherRes = await fetch(`/api/p2p/ads?${otherQuery.toString()}`);
               const otherJson = otherRes.ok ? await otherRes.json().catch(() => null) : null;
               const otherAds = Array.isArray(otherJson?.ads) ? otherJson.ads : [];
-              if (otherAds.length > 0) {
-                setSide(otherSide);
-                setFiatHint(`No ${side.toLowerCase()} ads available right now. Showing ${otherSide.toLowerCase()} ads instead.`);
-                return;
+              const hasOther = otherAds.length > 0;
+              setOtherSideHasAds(hasOther);
+
+              // If the user did NOT deep-link a specific side, prefer showing liquidity over an empty state.
+              if (!initSideFromQuery.current && hasOther) {
+                const sideKey = `${asset.toUpperCase()}:${fiat.toUpperCase()}`;
+                if (didAutoSideRef.current !== sideKey) {
+                  didAutoSideRef.current = sideKey;
+                  setSide(otherSide);
+                  setFiatHint(
+                    `No ${side.toLowerCase()} ads available right now. Showing ${otherSide.toLowerCase()} ads instead.`,
+                  );
+                  return;
+                }
               }
             } catch {
               // ignore
@@ -411,6 +426,27 @@ export function P2PMarketplace() {
                 <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
                   Try switching to <span className="font-semibold text-[var(--foreground)]">{side === "BUY" ? "Sell" : "Buy"}</span>,
                   or change the crypto, fiat, or amount.
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  {otherSideHasAds ? (
+                    <button
+                      type="button"
+                      className={buttonClassName({ variant: "secondary", size: "xs" })}
+                      onClick={() => setSide(side === "BUY" ? "SELL" : "BUY")}
+                    >
+                      Show available {side === "BUY" ? "sell" : "buy"} ads
+                    </button>
+                  ) : null}
+
+                  {String(params.get("src") ?? "").trim().toLowerCase() === "wallet" ? (
+                    <Link
+                      className={buttonClassName({ variant: "primary", size: "xs" })}
+                      href={`/p2p?new_ad=1&side=${encodeURIComponent(side)}&asset=${encodeURIComponent(asset)}&fiat=${encodeURIComponent(fiat)}`}
+                    >
+                      Post ad
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             ) : (
