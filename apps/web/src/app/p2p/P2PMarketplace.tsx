@@ -49,8 +49,12 @@ export function P2PMarketplace() {
   const [assetOptions, setAssetOptions] = useState<string[]>(["USDT"]);
   const [fiatHint, setFiatHint] = useState<string | null>(null);
   const didAutoFiatRef = useRef<string>("");
+  const didAutoSideRef = useRef<string>("");
 
   const didInitFromQuery = useRef(false);
+  const initSideFromQuery = useRef(false);
+  const initAssetFromQuery = useRef(false);
+  const initFiatFromQuery = useRef(false);
   useEffect(() => {
     if (didInitFromQuery.current) return;
     didInitFromQuery.current = true;
@@ -60,9 +64,18 @@ export function P2PMarketplace() {
     const qFiat = (params.get("fiat") ?? "").toUpperCase();
     const qAmount = params.get("amount") ?? "";
 
-    if (qSide === "BUY" || qSide === "SELL") setSide(qSide);
-    if (qAsset) setAsset(qAsset);
-    if (qFiat) setFiat(qFiat);
+    if (qSide === "BUY" || qSide === "SELL") {
+      initSideFromQuery.current = true;
+      setSide(qSide);
+    }
+    if (qAsset) {
+      initAssetFromQuery.current = true;
+      setAsset(qAsset);
+    }
+    if (qFiat) {
+      initFiatFromQuery.current = true;
+      setFiat(qFiat);
+    }
     if (qAmount) setAmount(qAmount);
   }, [params]);
 
@@ -157,6 +170,25 @@ export function P2PMarketplace() {
         setFetchError(null);
 
         if (normalized.length === 0 && !amount) {
+          const sideKey = `${asset.toUpperCase()}:${fiat.toUpperCase()}`;
+          if (!initSideFromQuery.current && didAutoSideRef.current !== sideKey) {
+            didAutoSideRef.current = sideKey;
+            const otherSide = side === "BUY" ? "SELL" : "BUY";
+            try {
+              const otherQuery = new URLSearchParams({ side: otherSide, asset, fiat });
+              const otherRes = await fetch(`/api/p2p/ads?${otherQuery.toString()}`);
+              const otherJson = otherRes.ok ? await otherRes.json().catch(() => null) : null;
+              const otherAds = Array.isArray(otherJson?.ads) ? otherJson.ads : [];
+              if (otherAds.length > 0) {
+                setSide(otherSide);
+                setFiatHint(`No ${side.toLowerCase()} ads available right now. Showing ${otherSide.toLowerCase()} ads instead.`);
+                return;
+              }
+            } catch {
+              // ignore
+            }
+          }
+
           const key = `${side}:${asset}:${fiat}`;
           if (didAutoFiatRef.current !== key) {
             didAutoFiatRef.current = key;
