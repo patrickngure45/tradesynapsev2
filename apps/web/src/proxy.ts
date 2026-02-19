@@ -212,7 +212,7 @@ export default async function proxy(request: NextRequest) {
     // Cron endpoints are not browser-driven; they won't have Origin/Referer and
     // should not be forced through the CSRF double-submit flow.
     // They are authenticated separately (e.g. x-cron-secret) in production.
-    if (pathname.startsWith("/api/p2p/cron/")) {
+    if (pathname.startsWith("/api/p2p/cron/") || pathname.startsWith("/api/exchange/cron/")) {
       // no-op
     } else {
     // 1. Origin / Referer check
