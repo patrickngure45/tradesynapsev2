@@ -76,6 +76,7 @@ type MarketPollState = {
   lastDepthKey: string;
   tradesCursorCreatedAt: string | null;
   tradesCursorId: string | null;
+  lastPolledAtMs: number;
 };
 
 const marketPollStates = new Map<string, MarketPollState>();
@@ -100,40 +101,36 @@ function broadcast(marketId: string, msg: ServerMessage) {
  * Returns the set of unique market IDs that at least one client is
  * subscribed to, along with the most-generous parameters.
  */
-function activeMarkets(): Map<string, { levels: number; trades_limit: number }> {
-  const result = new Map<string, { levels: number; trades_limit: number }>();
+function activeMarkets(): Map<string, { levels: number; trades_limit: number; poll_ms: number }> {
+  const result = new Map<string, { levels: number; trades_limit: number; poll_ms: number }>();
   for (const cs of clients) {
     if (!cs.marketSub) continue;
     const { market_id, levels, trades_limit } = cs.marketSub;
+    const poll_ms = cs.marketSub.poll_ms;
     const existing = result.get(market_id);
     if (existing) {
       existing.levels = Math.max(existing.levels, levels);
       existing.trades_limit = Math.max(existing.trades_limit, trades_limit);
+      existing.poll_ms = Math.min(existing.poll_ms, poll_ms);
     } else {
-      result.set(market_id, { levels, trades_limit });
+      result.set(market_id, { levels, trades_limit, poll_ms });
     }
   }
   return result;
 }
 
-/**
- * The minimum poll_ms across all subscriptions for a given market.
- */
-function minPollMsForMarket(marketId: string): number {
-  let min = 5000;
-  for (const cs of clients) {
-    if (cs.marketSub?.market_id === marketId) {
-      min = Math.min(min, cs.marketSub.poll_ms);
-    }
-  }
-  return min;
-}
+let pollInFlight = false;
 
 async function pollMarkets(sql: ReturnType<typeof postgres>) {
   const markets = activeMarkets();
   if (markets.size === 0) return;
 
   const now = Date.now();
+
+  // Garbage-collect poll state for markets that no longer have subscribers.
+  for (const marketId of marketPollStates.keys()) {
+    if (!markets.has(marketId)) marketPollStates.delete(marketId);
+  }
 
   for (const [marketId, params] of markets) {
     let ps = marketPollStates.get(marketId);
@@ -144,9 +141,17 @@ async function pollMarkets(sql: ReturnType<typeof postgres>) {
         lastDepthKey: "",
         tradesCursorCreatedAt: null,
         tradesCursorId: null,
+        lastPolledAtMs: 0,
       };
       marketPollStates.set(marketId, ps);
     }
+
+    // Respect the minimum poll interval requested across subscribers.
+    if (ps.lastPolledAtMs > 0 && now - ps.lastPolledAtMs < params.poll_ms) {
+      continue;
+    }
+    // Set early to avoid stampeding if the DB is slow.
+    ps.lastPolledAtMs = now;
 
     try {
       // ── top ──
@@ -324,8 +329,12 @@ export function startPolling(sql: ReturnType<typeof postgres>) {
 
   // Poll at the fastest requested cadence (re-evaluated each tick)
   pollTimer = setInterval(() => {
-    void pollMarkets(sql);
-  }, 500); // base tick — actual per-market cadence is limited by change detection
+    if (pollInFlight) return;
+    pollInFlight = true;
+    void pollMarkets(sql).finally(() => {
+      pollInFlight = false;
+    });
+  }, 250); // base tick — actual per-market cadence is limited by per-market poll_ms + change detection
 
   heartbeatTimer = setInterval(() => {
     for (const cs of clients) {
@@ -342,6 +351,7 @@ export function startPolling(sql: ReturnType<typeof postgres>) {
 export function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  pollInFlight = false;
 }
 
 // ── Message handler ───────────────────────────────────────────────
@@ -394,6 +404,7 @@ export function handleMessage(cs: ClientState, raw: string) {
           lastDepthKey: "",
           tradesCursorCreatedAt: null,
           tradesCursorId: null,
+          lastPolledAtMs: 0,
         });
       }
 
