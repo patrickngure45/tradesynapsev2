@@ -10,6 +10,48 @@ import { Avatar } from "@/components/Avatar";
 import { buttonClassName } from "@/components/ui/Button";
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 
+function formatFiatMoney(
+    value: string | number,
+    currency: string,
+    opts?: { minimumFractionDigits?: number; maximumFractionDigits?: number },
+): string {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return `${value} ${currency}`;
+
+    try {
+        return new Intl.NumberFormat(undefined, {
+            style: "currency",
+            currency,
+            currencyDisplay: "code",
+            minimumFractionDigits: opts?.minimumFractionDigits ?? 2,
+            maximumFractionDigits: opts?.maximumFractionDigits ?? 2,
+        }).format(n);
+    } catch {
+        return `${n.toLocaleString()} ${currency}`;
+    }
+}
+
+function formatAssetAmount(value: string | number, symbol: string): string {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return `${value} ${symbol}`;
+
+    // Crypto amounts often need more precision than fiat, but should still look money-like.
+    const formatted = new Intl.NumberFormat(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 8,
+    }).format(n);
+    return `${formatted} ${symbol}`;
+}
+
+function formatNumber(value: string | number, opts?: { minimumFractionDigits?: number; maximumFractionDigits?: number }): string {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return String(value);
+    return new Intl.NumberFormat(undefined, {
+        minimumFractionDigits: opts?.minimumFractionDigits,
+        maximumFractionDigits: opts?.maximumFractionDigits,
+    }).format(n);
+}
+
 function withDevUserHeader(init?: RequestInit): RequestInit {
     const headers = new Headers(init?.headers);
     if (typeof window !== "undefined") {
@@ -534,9 +576,9 @@ export default function OrderPage() {
     const isSeller = !!currentUser && currentUser.id === order.seller_id;
     const displayRole = isBuyer ? "BUYER" : isSeller ? "SELLER" : "";
     const paymentDetailsReady = Boolean(order.payment_details_ready);
-        const isTerminal = order.status === "completed" || order.status === "cancelled";
-        const canChat = (isBuyer || isSeller) && !isTerminal;
-        const myLabel = isBuyer ? order.buyer_email : isSeller ? order.seller_email : "";
+    const isTerminal = order.status === "completed" || order.status === "cancelled";
+    const canChat = (isBuyer || isSeller) && !isTerminal;
+    const myLabel = isBuyer ? order.buyer_email : isSeller ? order.seller_email : "";
 
     const cancelMeta = (() => {
         const recentSystem = [...messages]
@@ -606,6 +648,10 @@ export default function OrderPage() {
         if (i === 3) return "Completed";
         return "";
     };
+    const fiatMoney = formatFiatMoney(order.amount_fiat, order.fiat_currency);
+    const assetMoney = formatAssetAmount(order.amount_asset, order.asset_symbol);
+    const unitPrice = formatNumber(order.price, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+
     const nextStepText = (() => {
         if (!isBuyer && !isSeller) return "Log in to view your role for this order.";
         if (order.status === "disputed") return "This order is in dispute. Keep communication in chat while support reviews.";
@@ -613,7 +659,7 @@ export default function OrderPage() {
         if (order.status === "cancelled") return "Order cancelled. No further actions are available.";
 
         if (isBuyer && order.status === "created") {
-            return `Pay the seller ${order.amount_fiat} ${order.fiat_currency} using the payout details on this page, then mark as paid.`;
+            return `Pay the seller ${fiatMoney} using the payout details on this page, then mark as paid.`;
         }
         if (isBuyer && order.status === "paid_confirmed") {
             return "You marked payment as sent. Wait for the seller to verify and release crypto.";
@@ -666,15 +712,11 @@ export default function OrderPage() {
                             <div className="flex items-center gap-3">
                                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
                                     <div className="text-[10px] font-semibold text-[var(--muted)]">Fiat</div>
-                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">
-                                        {Number(order.amount_fiat).toLocaleString()} {order.fiat_currency}
-                                    </div>
+                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">{fiatMoney}</div>
                                 </div>
                                 <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
                                     <div className="text-[10px] font-semibold text-[var(--muted)]">Crypto</div>
-                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">
-                                        {Number(order.amount_asset).toLocaleString()} {order.asset_symbol}
-                                    </div>
+                                    <div className="text-sm font-extrabold text-[var(--foreground)] tabular-nums">{assetMoney}</div>
                                 </div>
                             </div>
                         </div>
@@ -799,7 +841,7 @@ export default function OrderPage() {
 
                             <div className="relative flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <h2 className="font-extrabold text-[var(--foreground)]">Synapse Chat</h2>
+                                    <h2 className="text-sm md:text-base font-extrabold tracking-tight text-[var(--foreground)]">Synapse Chat</h2>
                                     <div className="mt-1 text-xs text-[var(--muted)]">
                                         Keep it factual: timestamps, references, and confirmations.
                                     </div>
@@ -811,14 +853,14 @@ export default function OrderPage() {
                             </div>
                         </div>
             
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        <div className="flex-1 overflow-y-auto bg-[var(--background)] p-4 space-y-3">
                 {messages.map((m) => {
                     const isMe = !!m.sender_id && !!currentUser && m.sender_id === currentUser.id;
                     const isSystem = m.sender_id === null;
                     if (isSystem) {
                         return (
                             <div key={m.id} className="flex justify-center my-4">
-                                <span className="text-xs rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-[var(--muted)]">
+                                <span className="text-xs rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-[var(--muted)]">
                                     {m.content}
                                 </span>
                             </div>
@@ -853,16 +895,16 @@ export default function OrderPage() {
                                 )}
                                 <div
                                     className={
-                                        "rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words " +
+                                        "rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words border " +
                                         (isMe
-                                            ? "bg-[var(--accent)] text-white"
-                                            : "border border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)]")
+                                            ? "bg-[var(--accent)] text-white border-[color-mix(in_srgb,var(--accent)_50%,var(--border))] rounded-br-md"
+                                            : "bg-[var(--bg)] text-[var(--foreground)] border-[var(--border)] rounded-bl-md")
                                     }
                                 >
                                     {m.content}
                                 </div>
                                 <div className={`mt-1 text-[10px] text-[var(--muted)] ${isMe ? "text-right" : "text-left"}`}>
-                                    {new Date(m.created_at).toLocaleTimeString()}
+                                    {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                 </div>
                             </div>
                         </div>
@@ -873,33 +915,33 @@ export default function OrderPage() {
 
             <div className="p-4 border-t border-[var(--border)] bg-[var(--card-2)]">
                 {chatError ? (
-                    <div className="mb-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    <div className="mb-2 rounded-lg border border-[color-mix(in_srgb,var(--down)_25%,var(--border))] bg-[color-mix(in_srgb,var(--down-bg)_70%,var(--bg))] px-3 py-2 text-xs text-[var(--foreground)]">
                         {chatError}
                     </div>
                 ) : null}
 
                 <div className="flex gap-2">
-                <input 
-                    disabled={!canChat}
-                    className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2 text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-60"
-                    placeholder={
-                        !isBuyer && !isSeller
-                            ? "Log in to chat"
-                            : isTerminal
-                                ? "Chat is closed for finished orders"
-                                : "Type a message…"
-                    }
-                    value={msgInput}
-                    onChange={e => setMsgInput(e.target.value)}
-                    onKeyDown={e => (e.key === 'Enter' && canChat ? sendMessage() : null)}
-                />
-                <button 
-                    disabled={!canChat || !msgInput.trim() || chatSending}
-                    onClick={sendMessage}
-                    className={buttonClassName({ variant: "primary", size: "md" })}
-                >
-                    {chatSending ? "Sending…" : "Send"}
-                </button>
+                    <input
+                        disabled={!canChat}
+                        className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)] disabled:opacity-60"
+                        placeholder={
+                            !isBuyer && !isSeller
+                                ? "Log in to chat"
+                                : isTerminal
+                                    ? "Chat is closed for finished orders"
+                                    : "Type a message…"
+                        }
+                        value={msgInput}
+                        onChange={(e) => setMsgInput(e.target.value)}
+                        onKeyDown={(e) => (e.key === "Enter" && canChat ? sendMessage() : null)}
+                    />
+                    <button
+                        disabled={!canChat || !msgInput.trim() || chatSending}
+                        onClick={sendMessage}
+                        className={buttonClassName({ variant: "primary", size: "md", className: "rounded-xl" })}
+                    >
+                        {chatSending ? "Sending…" : "Send"}
+                    </button>
                 </div>
             </div>
         </div>
@@ -998,27 +1040,29 @@ export default function OrderPage() {
                     )}
                     <div className="flex justify-between">
                         <span className="text-[var(--muted)]">Fiat Amount</span>
-                        <span className="font-bold text-[var(--foreground)] text-lg">
-                            {Number(order.amount_fiat).toLocaleString()} {order.fiat_currency}
+                        <span className="font-bold text-[var(--foreground)] text-lg tabular-nums">
+                            {fiatMoney}
                         </span>
                     </div>
                     <div className="flex justify-between">
                         <span className="text-[var(--muted)]">Crypto Amount</span>
-                        <span className="font-bold text-[var(--foreground)]">
-                            {Number(order.amount_asset).toLocaleString()} {order.asset_symbol}
+                        <span className="font-bold text-[var(--foreground)] tabular-nums">
+                            {assetMoney}
                         </span>
                     </div>
                     <div className="flex justify-between">
                         <span className="text-[var(--muted)]">Price per unit</span>
-                        <span className="text-[var(--foreground)]">
-                            {Number(order.price).toLocaleString()} {fiatFlag(order.fiat_currency) ? `${fiatFlag(order.fiat_currency)} ` : ""}{order.fiat_currency}/{order.asset_symbol}
+                        <span className="text-[var(--foreground)] tabular-nums">
+                            {unitPrice}{" "}
+                            {fiatFlag(order.fiat_currency) ? `${fiatFlag(order.fiat_currency)} ` : ""}
+                            {order.fiat_currency}/{order.asset_symbol}
                         </span>
                     </div>
                     {refMid && (
                         <div className="flex justify-between">
                             <span className="text-[var(--muted)]">Reference</span>
-                            <span className="text-[var(--muted)] text-xs">
-                                ~{refMid.toLocaleString()} {order.fiat_currency}/{order.asset_symbol}
+                            <span className="text-[var(--muted)] text-xs tabular-nums">
+                                ~{formatNumber(refMid, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} {order.fiat_currency}/{order.asset_symbol}
                             </span>
                         </div>
                     )}
