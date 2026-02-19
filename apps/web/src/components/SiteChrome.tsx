@@ -114,7 +114,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         onClick={onClick}
         className={
           (className ? className + " " : "") +
-          "rounded-lg px-2 py-1 text-sm font-semibold transition-colors " +
+          "rounded-lg px-2 py-1 text-sm font-semibold whitespace-nowrap transition-colors " +
           (active
             ? "bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
             : "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]")
@@ -135,9 +135,9 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           }}
         />
 
-        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 lg:gap-x-4 lg:px-6 xl:flex-nowrap">
+        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 lg:flex-nowrap lg:gap-x-4 lg:px-6">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
+          <Link href="/" className="flex shrink-0 items-center gap-2 transition hover:opacity-80">
             <div
               className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--accent)]"
               style={{
@@ -152,7 +152,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </Link>
 
           {/* Desktop Product Nav */}
-          <nav className="hidden items-center gap-1 md:flex lg:gap-1.5">
+          <nav className="hidden min-w-0 flex-1 items-center gap-1 md:flex lg:gap-1.5 overflow-hidden">
             {products.map((p) => (
               <NLink
                 key={p.href}
@@ -169,7 +169,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           </nav>
 
           {/* Desktop User Nav */}
-          <nav className="hidden ml-auto items-center gap-2 md:flex lg:gap-3">
+          <nav className="hidden shrink-0 ml-auto items-center gap-2 md:flex lg:gap-3">
             {tools.map((t) => (
               <NLink
                 key={t.href}
