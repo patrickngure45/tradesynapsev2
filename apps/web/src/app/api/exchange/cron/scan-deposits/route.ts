@@ -45,11 +45,16 @@ export async function POST(req: NextRequest) {
   const maxBlocksRaw = url.searchParams.get("max_blocks");
   const confirmationsRaw = url.searchParams.get("confirmations");
   const blocksPerBatchRaw = url.searchParams.get("blocks_per_batch");
+  const tokensRaw = url.searchParams.get("tokens");
+  const nativeRaw = url.searchParams.get("native");
 
   const fromBlock = fromBlockRaw ? Number(fromBlockRaw) : undefined;
   const maxBlocks = maxBlocksRaw ? Number(maxBlocksRaw) : undefined;
   const confirmations = confirmationsRaw ? Number(confirmationsRaw) : undefined;
   const blocksPerBatch = blocksPerBatchRaw ? Number(blocksPerBatchRaw) : undefined;
+
+  const scanTokens = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
+  const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
 
   try {
     await beat({ event: "start" });
@@ -68,6 +73,8 @@ export async function POST(req: NextRequest) {
       maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,
       confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
       blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
+      scanTokens,
+      scanNative,
     });
 
     await beat({ event: "done", ...result });

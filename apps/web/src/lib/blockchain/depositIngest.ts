@@ -610,6 +610,8 @@ export async function scanAndCreditBscDeposits(
     maxBlocks?: number;
     confirmations?: number;
     blocksPerBatch?: number;
+    scanNative?: boolean;
+    scanTokens?: boolean;
   },
 ): Promise<{
   ok: true;
@@ -620,6 +622,8 @@ export async function scanAndCreditBscDeposits(
   confirmations: number;
   batches: number;
   assets: number;
+  scanNative: boolean;
+  scanTokens: boolean;
   checkedLogs: number;
   matchedDeposits: number;
   credited: number;
@@ -633,6 +637,9 @@ export async function scanAndCreditBscDeposits(
   const confirmations = clamp(opts?.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
   const blocksPerBatch = clamp(opts?.blocksPerBatch ?? envInt("BSC_DEPOSIT_BLOCKS_PER_BATCH", 1200), 10, 10_000);
   const maxBlocks = clamp(opts?.maxBlocks ?? envInt("BSC_DEPOSIT_MAX_BLOCKS_PER_RUN", 15_000), 10, 200_000);
+
+  const scanNative = opts?.scanNative ?? true;
+  const scanTokens = opts?.scanTokens ?? true;
 
   const tip = await provider.getBlockNumber();
   const safeTip = Math.max(0, tip - confirmations);
@@ -695,28 +702,35 @@ export async function scanAndCreditBscDeposits(
     };
   }
 
-  const tokenAssets = await sql<DepositAsset[]>`
-    SELECT id::text AS id, symbol, decimals, contract_address
-    FROM ex_asset
-    WHERE chain = ${chain}
-      AND is_enabled = true
-      AND contract_address IS NOT NULL
-    ORDER BY symbol ASC
-  `;
+  const tokenAssets = scanTokens
+    ? await sql<DepositAsset[]>`
+        SELECT id::text AS id, symbol, decimals, contract_address
+        FROM ex_asset
+        WHERE chain = ${chain}
+          AND is_enabled = true
+          AND contract_address IS NOT NULL
+        ORDER BY symbol ASC
+      `
+    : ([] as DepositAsset[]);
 
   // Native BNB support (direct transfers). This does NOT require traces;
   // it covers the common “send BNB to address” case. Internal transfers
   // (contract sends) require trace APIs and are handled separately.
-  const nativeRows = await sql<NativeAsset[]>`
-    SELECT id::text AS id, symbol, decimals
-    FROM ex_asset
-    WHERE chain = ${chain}
-      AND is_enabled = true
-      AND contract_address IS NULL
-      AND upper(symbol) = 'BNB'
-    LIMIT 1
-  `;
-  const nativeBnb = nativeRows[0] ?? null;
+  const nativeBnb = scanNative
+    ? (
+        (
+          await sql<NativeAsset[]>`
+            SELECT id::text AS id, symbol, decimals
+            FROM ex_asset
+            WHERE chain = ${chain}
+              AND is_enabled = true
+              AND contract_address IS NULL
+              AND upper(symbol) = 'BNB'
+            LIMIT 1
+          `
+        )[0] ?? null
+      )
+    : null;
 
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
   const toTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
@@ -768,6 +782,11 @@ export async function scanAndCreditBscDeposits(
           else duplicates += 1;
         }
       }
+    }
+
+    if (!scanTokens) {
+      await updateCursor(sql, chain, end);
+      continue;
     }
 
     const addressChunkSize = clamp(envInt("BSC_DEPOSIT_LOG_ADDRESS_CHUNK", 25), 5, 250);
@@ -848,6 +867,8 @@ export async function scanAndCreditBscDeposits(
     confirmations,
     batches,
     assets: tokenAssets.length + (nativeBnb ? 1 : 0),
+    scanNative,
+    scanTokens,
     checkedLogs,
     matchedDeposits,
     credited,
