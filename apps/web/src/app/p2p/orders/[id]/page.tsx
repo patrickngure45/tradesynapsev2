@@ -673,6 +673,24 @@ export default function OrderPage() {
         return "";
     })();
 
+    const systemChipClassName = (content: string) => {
+        const t = (content || "").toLowerCase();
+        const isCreated = /order\s+created|escrow\s+secured|proceed\s+with\s+payment|payment\s+window/i.test(content) || /created|escrow/.test(t);
+        const isPaid = /marked\s+as\s+paid|buyer\s+has\s+marked\s+as\s+paid|paid\b/.test(t);
+        const isReleased = /crypto\s+released|order\s+completed|completed\b/.test(t);
+
+        if (isReleased) {
+            return "border-[color-mix(in_srgb,var(--up)_28%,var(--border))] bg-[color-mix(in_srgb,var(--up-bg)_70%,var(--bg))] text-[var(--foreground)]";
+        }
+        if (isPaid) {
+            return "border-[color-mix(in_srgb,var(--warn)_28%,var(--border))] bg-[color-mix(in_srgb,var(--warn-bg)_70%,var(--bg))] text-[var(--foreground)]";
+        }
+        if (isCreated) {
+            return "border-[color-mix(in_srgb,var(--accent)_28%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg))] text-[var(--foreground)]";
+        }
+        return "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)]";
+    };
+
   return (
         <div className="min-h-screen bg-[var(--background)] p-4 md:p-8">
             <div className="mx-auto max-w-6xl">
@@ -853,14 +871,26 @@ export default function OrderPage() {
                             </div>
                         </div>
             
-                        <div className="flex-1 overflow-y-auto bg-[var(--background)] p-4 space-y-3">
+                        <div className="relative flex-1 overflow-y-auto bg-[var(--background)] p-4 space-y-3">
+                            <div
+                                className="pointer-events-none absolute inset-0 opacity-70"
+                                style={{
+                                    background:
+                                        "radial-gradient(900px 420px at 12% 0%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 60%), radial-gradient(720px 380px at 88% 10%, color-mix(in oklab, var(--accent-2) 8%, transparent) 0%, transparent 55%), repeating-linear-gradient(0deg, color-mix(in oklab, var(--border) 8%, transparent) 0px, transparent 28px), repeating-linear-gradient(90deg, color-mix(in oklab, var(--border) 6%, transparent) 0px, transparent 34px)",
+                                }}
+                            />
                 {messages.map((m) => {
                     const isMe = !!m.sender_id && !!currentUser && m.sender_id === currentUser.id;
                     const isSystem = m.sender_id === null;
                     if (isSystem) {
                         return (
                             <div key={m.id} className="flex justify-center my-4">
-                                <span className="text-xs rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-[var(--muted)]">
+                                <span
+                                    className={
+                                        "text-[11px] rounded-full border px-3 py-1.5 font-semibold tracking-wide " +
+                                        systemChipClassName(m.content)
+                                    }
+                                >
                                     {m.content}
                                 </span>
                             </div>
