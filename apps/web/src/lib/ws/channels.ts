@@ -123,7 +123,10 @@ let pollInFlight = false;
 
 async function pollMarkets(sql: ReturnType<typeof postgres>) {
   const markets = activeMarkets();
-  if (markets.size === 0) return;
+  if (markets.size === 0) {
+    marketPollStates.clear();
+    return;
+  }
 
   const now = Date.now();
 
@@ -411,7 +414,12 @@ export function handleMessage(cs: ClientState, raw: string) {
       send(cs.ws, { type: "subscribed", channel: "market", market_id: msg.market_id });
 
       // Trigger an immediate poll for this market
-      if (sqlInstance) void pollMarkets(sqlInstance);
+      if (sqlInstance && !pollInFlight) {
+        pollInFlight = true;
+        void pollMarkets(sqlInstance).finally(() => {
+          pollInFlight = false;
+        });
+      }
       break;
     }
 
