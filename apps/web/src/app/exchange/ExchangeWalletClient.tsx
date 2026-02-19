@@ -213,6 +213,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [depositTxHash, setDepositTxHash] = useState<string>("");
  const [depositAddress, setDepositAddress] = useState<string | null>(null);
  const [depositAddressLoading, setDepositAddressLoading] = useState(false);
+ const [depositAddressError, setDepositAddressError] = useState<string | null>(null);
  const [depositAddressCopied, setDepositAddressCopied] = useState(false);
 
  const [convertFromSymbol, setConvertFromSymbol] = useState<string>("");
@@ -419,42 +420,49 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   return fiatAmount >= 1 ? String(fiatAmount) : "";
  }, [convertQuote, localValueReady, assetLocalRates]);
 
-    useEffect(() => {
-      if (depositAddress || depositAddressLoading) return;
-      if (authMode === "header" && !canUseHeader) return;
+ const fetchDepositAddress = async (opts?: { force?: boolean }) => {
+  if (!opts?.force) {
+   if (depositAddress || depositAddressLoading) return;
+  }
+  if (authMode === "header" && !canUseHeader) return;
 
-      let cancelled = false;
-      (async () => {
-        setDepositAddressLoading(true);
-        try {
-          const res = await fetchJsonOrThrow<{ address: string; chain?: string; is_new?: boolean }>(
-            "/api/exchange/deposit/address",
-            {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                ...(requestHeaders ?? {}),
-              },
-              body: JSON.stringify({ chain: "bsc" }),
-            },
-          );
-          if (cancelled) return;
-          setDepositAddress(res.address);
-        } catch (e) {
-          if (cancelled) return;
-          // If the user is not logged in (or header auth not set), don’t spam an error.
-          if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) {
-            return;
-          }
-        } finally {
-          if (!cancelled) setDepositAddressLoading(false);
-        }
-      })();
+  setDepositAddressError(null);
+  setDepositAddressLoading(true);
+  try {
+   const res = await fetchJsonOrThrow<{ address: string; chain?: string; is_new?: boolean }>(
+    "/api/exchange/deposit/address",
+    {
+     method: "POST",
+     headers: {
+      "content-type": "application/json",
+      ...(requestHeaders ?? {}),
+     },
+     body: JSON.stringify({ chain: "bsc" }),
+    },
+   );
+   setDepositAddress(res.address);
+  } catch (e) {
+   // If the user is not logged in (or header auth not set), don’t spam an error.
+   if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) {
+    return;
+   }
+   setDepositAddressError(e instanceof Error ? e.message : String(e));
+  } finally {
+   setDepositAddressLoading(false);
+  }
+ };
 
-      return () => {
-        cancelled = true;
-      };
-    }, [authMode, canUseHeader, requestHeaders, depositAddress, depositAddressLoading]);
+ useEffect(() => {
+  let cancelled = false;
+  void (async () => {
+   if (cancelled) return;
+   await fetchDepositAddress();
+  })();
+  return () => {
+   cancelled = true;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [authMode, canUseHeader, requestHeaders]);
 
  const balancesToDisplay = useMemo(() => {
   return nonZeroBalances.length > 0 ? nonZeroBalances : balances;
@@ -1141,10 +1149,26 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    </div>
  ) : depositAddressLoading ? (
    <div className="mt-2 flex flex-wrap items-center gap-2">
-     <code className="min-w-0 break-all rounded bg-[var(--border)] px-2.5 py-1.5 font-mono text-xs text-[var(--muted)]">
-       Fetching your permanent address…
+     <code
+       className="min-w-0 break-all rounded bg-[var(--border)] px-2.5 py-1.5 font-mono text-xs text-[var(--muted)] animate-pulse"
+       aria-busy="true"
+     >
+       0x········································
      </code>
-     <span className="text-[11px] font-semibold text-[var(--muted)]">Please wait</span>
+     <span className="text-[11px] font-semibold text-[var(--muted)]">Fetching…</span>
+   </div>
+ ) : depositAddressError ? (
+   <div className="mt-2 flex flex-wrap items-center gap-2">
+     <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+       Couldn’t fetch your permanent deposit address.
+     </div>
+     <button
+       type="button"
+       className={buttonClassName({ variant: "secondary", size: "xs" })}
+       onClick={() => void fetchDepositAddress({ force: true })}
+     >
+       Retry
+     </button>
    </div>
  ) : authMode === "header" && !canUseHeader ? (
    <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
