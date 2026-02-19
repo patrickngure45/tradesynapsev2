@@ -24,6 +24,7 @@ import {
   handleMessage,
   startPolling,
   stopPolling,
+  getClients,
   type ClientState,
 } from "./src/lib/ws/channels";
 
@@ -58,6 +59,13 @@ app
   .then(() => {
   handleUpgrade = (app as any).getUpgradeHandler ? (app as any).getUpgradeHandler() : undefined;
   const sql = createSql();
+
+  const bytesToMb = (b: number) => Math.round((b / 1024 / 1024) * 10) / 10;
+  const shouldLogMemory =
+    String(process.env.LOG_MEMORY ?? process.env.MEM_LOG ?? "").trim() === "1" ||
+    String(process.env.LOG_MEMORY ?? process.env.MEM_LOG ?? "").trim().toLowerCase() === "true";
+  const memoryLogIntervalMs = Math.max(10_000, Number(process.env.MEM_LOG_INTERVAL_MS ?? 60_000) || 60_000);
+  let memTimer: ReturnType<typeof setInterval> | null = null;
 
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url ?? "/", true);
@@ -132,6 +140,20 @@ app
   // Start the shared market-data poll loop
   startPolling(sql);
 
+  // Lightweight operational logging (opt-in) for diagnosing memory growth/OOM.
+  if (shouldLogMemory) {
+    memTimer = setInterval(() => {
+      const m = process.memoryUsage();
+      const wsClients = getClients().size;
+      console.log(
+        `🧠 mem rss=${bytesToMb(m.rss)}MB heapUsed=${bytesToMb(m.heapUsed)}MB heapTotal=${bytesToMb(m.heapTotal)}MB ` +
+          `ext=${bytesToMb(m.external)}MB ab=${bytesToMb((m as any).arrayBuffers ?? 0)}MB wsClients=${wsClients}`,
+      );
+    }, memoryLogIntervalMs);
+    // Don't keep the process alive purely because of this timer.
+    (memTimer as any).unref?.();
+  }
+
   server.listen(port, bindHost, () => {
     console.log(`  ▲ TradeSynapse ready on http://${publicHost}:${port}`);
     console.log(`  ⚡ WebSocket endpoint: ws://${publicHost}:${port}/ws`);
@@ -144,6 +166,11 @@ app
   const shutdown = () => {
     console.log("\n  Shutting down...");
     stopPolling();
+
+    if (memTimer) {
+      clearInterval(memTimer);
+      memTimer = null;
+    }
 
     wss.clients.forEach((ws: WebSocket) => ws.close());
     wss.close();
