@@ -34,6 +34,12 @@ type DepositAsset = {
   contract_address: string;
 };
 
+type NativeAsset = {
+  id: string;
+  symbol: string;
+  decimals: number;
+};
+
 async function ensureSystemUser(sql: Sql): Promise<void> {
   await sql`
     INSERT INTO app_user (id, status, kyc_level, country)
@@ -252,7 +258,7 @@ export async function scanAndCreditBscDeposits(
     addressToUser.set(address, String(row.user_id));
   }
 
-  const assets = await sql<DepositAsset[]>`
+  const tokenAssets = await sql<DepositAsset[]>`
     SELECT id::text AS id, symbol, decimals, contract_address
     FROM ex_asset
     WHERE chain = ${chain}
@@ -260,6 +266,20 @@ export async function scanAndCreditBscDeposits(
       AND contract_address IS NOT NULL
     ORDER BY symbol ASC
   `;
+
+  // Native BNB support (direct transfers). This does NOT require traces;
+  // it covers the common “send BNB to address” case. Internal transfers
+  // (contract sends) require trace APIs and are handled separately.
+  const nativeRows = await sql<NativeAsset[]>`
+    SELECT id::text AS id, symbol, decimals
+    FROM ex_asset
+    WHERE chain = ${chain}
+      AND is_enabled = true
+      AND contract_address IS NULL
+      AND upper(symbol) = 'BNB'
+    LIMIT 1
+  `;
+  const nativeBnb = nativeRows[0] ?? null;
 
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
 
@@ -273,7 +293,45 @@ export async function scanAndCreditBscDeposits(
     const end = Math.min(toBlock, start + blocksPerBatch - 1);
     batches += 1;
 
-    for (const asset of assets) {
+    if (nativeBnb) {
+      for (let blockNo = start; blockNo <= end; blockNo += 1) {
+        const block = await provider.getBlock(blockNo, true);
+        if (!block) continue;
+
+        const txs = Array.isArray((block as any).transactions) ? ((block as any).transactions as ethers.TransactionResponse[]) : [];
+        for (const tx of txs) {
+          const to = tx.to ? normalizeAddress(tx.to) : "";
+          if (!to) continue;
+          const userId = addressToUser.get(to);
+          if (!userId) continue;
+
+          const value = tx.value ?? 0n;
+          if (typeof value !== "bigint" || value <= 0n) continue;
+
+          matchedDeposits += 1;
+          const amount = ethers.formatUnits(value, nativeBnb.decimals);
+
+          // Use log_index = -1 to avoid collisions with ERC20 log indexes (0..N) for the same tx hash.
+          const outcome = await creditDepositEvent(sql as any, {
+            chain,
+            txHash: String(tx.hash),
+            logIndex: -1,
+            blockNumber: Number(block.number),
+            fromAddress: tx.from ? normalizeAddress(tx.from) : null,
+            toAddress: to,
+            userId,
+            assetId: nativeBnb.id,
+            assetSymbol: nativeBnb.symbol,
+            amount,
+          });
+
+          if (outcome === "credited") credited += 1;
+          else duplicates += 1;
+        }
+      }
+    }
+
+    for (const asset of tokenAssets) {
       const contract = normalizeAddress(asset.contract_address);
       if (!contract) continue;
 
@@ -330,7 +388,7 @@ export async function scanAndCreditBscDeposits(
     tip,
     confirmations,
     batches,
-    assets: assets.length,
+    assets: tokenAssets.length + (nativeBnb ? 1 : 0),
     checkedLogs,
     matchedDeposits,
     credited,
