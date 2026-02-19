@@ -6,6 +6,61 @@ import { createNotification } from "@/lib/notifications";
 
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 
+let _depositEventCols:
+  | null
+  | {
+      hasStatus: boolean;
+      hasCreditedAt: boolean;
+      hasConfirmedAt: boolean;
+    } = null;
+
+async function getDepositEventCols(sql: Sql): Promise<{
+  hasStatus: boolean;
+  hasCreditedAt: boolean;
+  hasConfirmedAt: boolean;
+}> {
+  if (_depositEventCols) return _depositEventCols;
+
+  const rows = await sql<
+    {
+      has_status: boolean;
+      has_credited_at: boolean;
+      has_confirmed_at: boolean;
+    }[]
+  >`
+    SELECT
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'ex_chain_deposit_event'
+          AND column_name = 'status'
+      ) AS has_status,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'ex_chain_deposit_event'
+          AND column_name = 'credited_at'
+      ) AS has_credited_at,
+      EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'ex_chain_deposit_event'
+          AND column_name = 'confirmed_at'
+      ) AS has_confirmed_at
+  `;
+
+  const row = rows[0];
+  _depositEventCols = {
+    hasStatus: Boolean(row?.has_status),
+    hasCreditedAt: Boolean(row?.has_credited_at),
+    hasConfirmedAt: Boolean(row?.has_confirmed_at),
+  };
+  return _depositEventCols;
+}
+
 function envInt(name: string, fallback: number): number {
   const raw = (process.env[name] ?? "").trim();
   const n = Number(raw);
@@ -316,6 +371,7 @@ export async function ingestNativeBnbDepositTx(
   if (!nativeBnb) return { ok: false, error: "bnb_asset_missing", txHash };
 
   const amount = ethers.formatUnits(value, nativeBnb.decimals);
+  const cols = await getDepositEventCols(sql);
   const outcome = await creditDepositEvent(sql as any, {
     chain,
     txHash,
@@ -327,6 +383,7 @@ export async function ingestNativeBnbDepositTx(
     assetId: nativeBnb.id,
     assetSymbol: nativeBnb.symbol,
     amount,
+    cols,
   });
 
   return {
@@ -365,6 +422,7 @@ async function creditDepositEvent(
     assetId: string;
     assetSymbol: string;
     amount: string;
+    cols?: { hasStatus: boolean; hasCreditedAt: boolean; hasConfirmedAt: boolean };
   },
 ): Promise<"credited" | "duplicate"> {
   // Full idempotency is provided by ex_chain_deposit_event_uniq (chain, tx_hash, log_index).
@@ -450,6 +508,35 @@ async function creditDepositEvent(
         AND log_index = ${args.logIndex}
     `;
 
+    // Optional bookkeeping columns (added by later migrations).
+    if (args.cols?.hasStatus) {
+      await txSql`
+        UPDATE ex_chain_deposit_event
+        SET status = 'confirmed'
+        WHERE chain = ${args.chain}
+          AND tx_hash = ${args.txHash}
+          AND log_index = ${args.logIndex}
+      `;
+    }
+    if (args.cols?.hasCreditedAt) {
+      await txSql`
+        UPDATE ex_chain_deposit_event
+        SET credited_at = coalesce(credited_at, now())
+        WHERE chain = ${args.chain}
+          AND tx_hash = ${args.txHash}
+          AND log_index = ${args.logIndex}
+      `;
+    }
+    if (args.cols?.hasConfirmedAt) {
+      await txSql`
+        UPDATE ex_chain_deposit_event
+        SET confirmed_at = coalesce(confirmed_at, now())
+        WHERE chain = ${args.chain}
+          AND tx_hash = ${args.txHash}
+          AND log_index = ${args.logIndex}
+      `;
+    }
+
     await createNotification(txSql as any, {
       userId: args.userId,
       type: "deposit_credited",
@@ -521,6 +608,8 @@ export async function scanAndCreditBscDeposits(
 }> {
   const provider = getBscProvider();
   const chain: "bsc" = "bsc";
+
+  const cols = await getDepositEventCols(sql);
 
   const confirmations = clamp(opts?.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
   const blocksPerBatch = clamp(opts?.blocksPerBatch ?? envInt("BSC_DEPOSIT_BLOCKS_PER_BATCH", 1200), 10, 10_000);
@@ -653,6 +742,7 @@ export async function scanAndCreditBscDeposits(
             assetId: nativeBnb.id,
             assetSymbol: nativeBnb.symbol,
             amount,
+            cols,
           });
 
           if (outcome === "credited") credited += 1;
@@ -717,6 +807,7 @@ export async function scanAndCreditBscDeposits(
             assetId: asset.id,
             assetSymbol: asset.symbol,
             amount,
+            cols,
           });
 
           if (outcome === "credited") credited += 1;

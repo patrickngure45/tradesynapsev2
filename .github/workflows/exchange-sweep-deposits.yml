@@ -1,0 +1,40 @@
+name: Exchange - Sweep Deposits
+
+on:
+  schedule:
+    # Sweeping is heavier and (when enabled) moves funds; run less frequently.
+    - cron: "0 */2 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: exchange-sweep-deposits
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Call sweep-deposits cron endpoint
+        env:
+          BASE_URL: ${{ secrets.RAILWAY_BASE_URL }}
+          EXCHANGE_CRON_SECRET: ${{ secrets.EXCHANGE_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing secret: RAILWAY_BASE_URL" >&2
+            exit 2
+          fi
+          if [ -z "${EXCHANGE_CRON_SECRET:-}" ]; then
+            echo "Missing secret: EXCHANGE_CRON_SECRET" >&2
+            exit 2
+          fi
+
+          URL="${BASE_URL%/}/api/exchange/cron/sweep-deposits"
+          echo "POST $URL"
+          curl -fsS -X POST "$URL" \
+            -H "x-cron-secret: $EXCHANGE_CRON_SECRET" \
+            -H "content-type: application/json" \
+            --data '{}' \
+            | head -c 6000
+          echo

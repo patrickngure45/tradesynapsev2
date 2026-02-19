@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
 
 export const runtime = "nodejs";
@@ -26,6 +27,18 @@ export async function POST(req: NextRequest) {
 
   const sql = getSql();
 
+  const beat = async (details?: Record<string, unknown>) => {
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "deposit-scan:bsc",
+        status: "ok",
+        details: { ...(details ?? {}) },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   const url = new URL(req.url);
   const nativeTx = url.searchParams.get("native_tx") ?? url.searchParams.get("tx_hash");
   const fromBlockRaw = url.searchParams.get("from_block");
@@ -39,11 +52,13 @@ export async function POST(req: NextRequest) {
   const blocksPerBatch = blocksPerBatchRaw ? Number(blocksPerBatchRaw) : undefined;
 
   try {
+    await beat({ event: "start" });
     if (nativeTx) {
       const out = await ingestNativeBnbDepositTx(sql as any, {
         txHash: nativeTx,
         confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
       });
+      await beat({ event: "native_tx", ok: out.ok, tx_hash: nativeTx });
       const status = out.ok ? 200 : out.error === "tx_not_confirmed" ? 202 : 400;
       return NextResponse.json(out, { status });
     }
@@ -55,9 +70,12 @@ export async function POST(req: NextRequest) {
       blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
     });
 
+    await beat({ event: "done", ...result });
+
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    await beat({ event: "error", message });
     return NextResponse.json(
       {
         ok: false,
@@ -70,3 +88,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
