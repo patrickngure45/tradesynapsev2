@@ -62,6 +62,57 @@ async function getLogsWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
+async function getLogsBatchedOrSplit(
+  provider: ethers.JsonRpcProvider,
+  args: {
+    addresses: string[];
+    fromBlock: number;
+    toBlock: number;
+    topics: (string | string[] | null)[];
+  },
+): Promise<ethers.Log[]> {
+  const throttleMs = clamp(envInt("BSC_DEPOSIT_LOG_THROTTLE_MS", 0), 0, 10_000);
+
+  const filterBase = {
+    fromBlock: args.fromBlock,
+    toBlock: args.toBlock,
+    topics: args.topics,
+  } as const;
+
+  // Fast path: try a single batched query (address array) if supported.
+  try {
+    const logs = await getLogsWithRetry(
+      provider,
+      {
+        ...filterBase,
+        address: args.addresses,
+      },
+      { maxAttempts: 6, baseDelayMs: 800 },
+    );
+    if (throttleMs) await sleep(throttleMs);
+    return logs;
+  } catch (e) {
+    if (!isRateLimitError(e)) throw e;
+  }
+
+  // Slow path: split per contract. Many public RPCs rate-limit batched/array address calls.
+  const out: ethers.Log[] = [];
+  for (const addr of args.addresses) {
+    if (!addr) continue;
+    const logs = await getLogsWithRetry(
+      provider,
+      {
+        ...filterBase,
+        address: addr,
+      },
+      { maxAttempts: 6, baseDelayMs: 900 },
+    );
+    out.push(...logs);
+    if (throttleMs) await sleep(throttleMs);
+  }
+  return out;
+}
+
 function normalizeAddress(addr: string): string {
   return String(addr || "").trim().toLowerCase();
 }
@@ -425,18 +476,14 @@ export async function scanAndCreditBscDeposits(
       for (const toTopics of toTopicChunks) {
         if (!toTopics.length) continue;
 
-        const logs = await getLogsWithRetry(
-          provider,
-          {
-            address: contracts,
-            fromBlock: start,
-            toBlock: end,
-            // Filter by recipient to avoid fetching *all* transfers for the token.
-            // topics[2] is `to` in the Transfer event.
-            topics: [transferTopic, null, toTopics],
-          },
-          { maxAttempts: 6, baseDelayMs: 800 },
-        );
+        const logs = await getLogsBatchedOrSplit(provider, {
+          addresses: contracts,
+          fromBlock: start,
+          toBlock: end,
+          // Filter by recipient to avoid fetching *all* transfers for the token.
+          // topics[2] is `to` in the Transfer event.
+          topics: [transferTopic, null, toTopics],
+        });
 
         checkedLogs += logs.length;
 
