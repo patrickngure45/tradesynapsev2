@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toast } from "@/components/Toast";
 import { fetchJsonOrThrow } from "@/lib/api/client";
@@ -94,6 +95,7 @@ function colorForType(type: string) {
 }
 
 export function NotificationBell() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -101,6 +103,8 @@ export function NotificationBell() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const prevUnreadRef = useRef<number>(0);
   const panelRef = useRef<HTMLDivElement>(null);
+  const loadInFlightRef = useRef(false);
+  const lastLoadAtRef = useRef(0);
 
   const markRead = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
@@ -124,6 +128,12 @@ export function NotificationBell() {
   }, []);
 
   const load = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    const now = Date.now();
+    // Avoid bursts (e.g., focus + interval at the same moment).
+    if (now - lastLoadAtRef.current < 750) return;
+    loadInFlightRef.current = true;
+    lastLoadAtRef.current = now;
     try {
       const fetchWithTimeout = async <T,>(url: string, timeoutMs: number): Promise<T> => {
         const controller = new AbortController();
@@ -177,13 +187,30 @@ export function NotificationBell() {
       prevUnreadRef.current = nextUnread;
     } catch {
       // silent
+    } finally {
+      loadInFlightRef.current = false;
     }
   }, [open]);
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 30_000);
+    const isP2POrder = pathname?.startsWith("/p2p/orders");
+    const intervalMs = isP2POrder ? 8_000 : 30_000;
+    const interval = setInterval(load, intervalMs);
     return () => clearInterval(interval);
+  }, [load, pathname]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const onFocus = () => load();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [load]);
 
   useEffect(() => {
