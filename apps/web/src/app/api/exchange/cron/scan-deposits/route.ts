@@ -37,12 +37,26 @@ export async function POST(req: NextRequest) {
   const confirmations = confirmationsRaw ? Number(confirmationsRaw) : undefined;
   const blocksPerBatch = blocksPerBatchRaw ? Number(blocksPerBatchRaw) : undefined;
 
-  const result = await scanAndCreditBscDeposits(sql as any, {
-    fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
-    maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,
-    confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
-    blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
-  });
+  try {
+    const result = await scanAndCreditBscDeposits(sql as any, {
+      fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
+      maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,
+      confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
+      blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
+    });
 
-  return NextResponse.json(result);
+    return NextResponse.json(result);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "scan_failed",
+        message,
+        hint:
+          "Check BSC RPC connectivity (BSC_RPC_URL) and that DATABASE_URL is reachable. See Railway logs for full stack.",
+      },
+      { status: 500 },
+    );
+  }
 }
