@@ -46,6 +46,13 @@ function isUnsupportedArrayParamError(err: unknown): boolean {
   );
 }
 
+function isUnsupportedTopicsShapeError(err: unknown): boolean {
+  // Some RPC providers reject `topics` arrays that include `null` placeholders
+  // or mixed (string|null|array) entries, despite being valid per JSON-RPC.
+  // We treat these similarly and fall back to `topics: [topic0]`.
+  return isUnsupportedArrayParamError(err);
+}
+
 function coerceTopicsForCompatibility(topics: (string | string[] | null)[]): (string | string[] | null)[] {
   // Some RPC providers are picky about “OR” arrays with a single element.
   // Coerce ["0x..."] -> "0x...".
@@ -91,6 +98,7 @@ async function getLogsBatchedOrSplit(
 ): Promise<ethers.Log[]> {
   const throttleMs = clamp(envInt("BSC_DEPOSIT_LOG_THROTTLE_MS", 0), 0, 10_000);
   const topics = coerceTopicsForCompatibility(args.topics);
+  const topic0 = typeof topics[0] === "string" ? (topics[0] as string) : null;
 
   const filterBase = {
     fromBlock: args.fromBlock,
@@ -113,21 +121,60 @@ async function getLogsBatchedOrSplit(
   } catch (e) {
     // Some providers (notably Ankr) reject address arrays for eth_getLogs.
     // In that case, fall back to single-contract calls.
-    if (!isRateLimitError(e) && !isUnsupportedArrayParamError(e)) throw e;
+    if (!isRateLimitError(e) && !isUnsupportedArrayParamError(e)) {
+      // Another common incompatibility: reject complex topics shapes.
+      if (topic0 && isUnsupportedTopicsShapeError(e)) {
+        try {
+          const logs = await getLogsWithRetry(
+            provider,
+            {
+              fromBlock: args.fromBlock,
+              toBlock: args.toBlock,
+              address: args.addresses,
+              topics: [topic0],
+            },
+            { maxAttempts: 6, baseDelayMs: 800 },
+          );
+          if (throttleMs) await sleep(throttleMs);
+          return logs;
+        } catch (e2) {
+          if (!isRateLimitError(e2) && !isUnsupportedArrayParamError(e2)) throw e2;
+          // Continue to split fallback.
+        }
+      } else {
+        throw e;
+      }
+    }
   }
 
   // Slow path: split per contract. Many public RPCs rate-limit batched/array address calls.
   const out: ethers.Log[] = [];
   for (const addr of args.addresses) {
     if (!addr) continue;
-    const logs = await getLogsWithRetry(
-      provider,
-      {
-        ...filterBase,
-        address: addr,
-      },
-      { maxAttempts: 6, baseDelayMs: 900 },
-    );
+    let logs: ethers.Log[];
+    try {
+      logs = await getLogsWithRetry(
+        provider,
+        {
+          ...filterBase,
+          address: addr,
+        },
+        { maxAttempts: 6, baseDelayMs: 900 },
+      );
+    } catch (e) {
+      if (!topic0 || !isUnsupportedTopicsShapeError(e)) throw e;
+      // Retry with only the event signature topic.
+      logs = await getLogsWithRetry(
+        provider,
+        {
+          fromBlock: args.fromBlock,
+          toBlock: args.toBlock,
+          address: addr,
+          topics: [topic0],
+        },
+        { maxAttempts: 6, baseDelayMs: 900 },
+      );
+    }
     out.push(...logs);
     if (throttleMs) await sleep(throttleMs);
   }
