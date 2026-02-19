@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
-import { scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
+import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
   const sql = getSql();
 
   const url = new URL(req.url);
+  const nativeTx = url.searchParams.get("native_tx") ?? url.searchParams.get("tx_hash");
   const fromBlockRaw = url.searchParams.get("from_block");
   const maxBlocksRaw = url.searchParams.get("max_blocks");
   const confirmationsRaw = url.searchParams.get("confirmations");
@@ -38,6 +39,15 @@ export async function POST(req: NextRequest) {
   const blocksPerBatch = blocksPerBatchRaw ? Number(blocksPerBatchRaw) : undefined;
 
   try {
+    if (nativeTx) {
+      const out = await ingestNativeBnbDepositTx(sql as any, {
+        txHash: nativeTx,
+        confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
+      });
+      const status = out.ok ? 200 : out.error === "tx_not_confirmed" ? 202 : 400;
+      return NextResponse.json(out, { status });
+    }
+
     const result = await scanAndCreditBscDeposits(sql as any, {
       fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
       maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,

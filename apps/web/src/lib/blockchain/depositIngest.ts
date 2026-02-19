@@ -212,6 +212,138 @@ type NativeAsset = {
   decimals: number;
 };
 
+export async function ingestNativeBnbDepositTx(
+  sql: Sql,
+  args: {
+    chain?: "bsc";
+    txHash: string;
+    confirmations?: number;
+  },
+): Promise<
+  | {
+      ok: true;
+      chain: "bsc";
+      txHash: string;
+      blockNumber: number;
+      confirmations: number;
+      safeTip: number;
+      toAddress: string;
+      userId: string;
+      assetSymbol: "BNB";
+      amount: string;
+      outcome: "credited" | "duplicate";
+    }
+  | {
+      ok: false;
+      error:
+        | "tx_not_found"
+        | "tx_not_confirmed"
+        | "tx_failed"
+        | "not_a_native_transfer"
+        | "unknown_deposit_address"
+        | "bnb_asset_missing";
+      txHash: string;
+      details?: any;
+    }
+> {
+  const provider = getBscProvider();
+  const chain: "bsc" = args.chain ?? "bsc";
+
+  const confirmations = clamp(args.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
+  const tip = await provider.getBlockNumber();
+  const safeTip = Math.max(0, tip - confirmations);
+
+  const txHash = String(args.txHash || "").trim();
+  if (!txHash.startsWith("0x") || txHash.length < 10) {
+    return { ok: false, error: "tx_not_found", txHash };
+  }
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) return { ok: false, error: "tx_not_found", txHash };
+  const blockNumber = Number(receipt.blockNumber);
+  if (!Number.isFinite(blockNumber) || blockNumber <= 0) {
+    return { ok: false, error: "tx_not_found", txHash, details: { blockNumber: receipt.blockNumber } };
+  }
+
+  if (blockNumber > safeTip) {
+    return {
+      ok: false,
+      error: "tx_not_confirmed",
+      txHash,
+      details: { blockNumber, tip, safeTip, confirmations },
+    };
+  }
+
+  if (typeof receipt.status === "number" && receipt.status !== 1) {
+    return { ok: false, error: "tx_failed", txHash, details: { status: receipt.status } };
+  }
+
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) return { ok: false, error: "tx_not_found", txHash };
+
+  const toAddress = tx.to ? normalizeAddress(tx.to) : "";
+  const value = tx.value ?? 0n;
+  if (!toAddress || typeof value !== "bigint" || value <= 0n) {
+    return {
+      ok: false,
+      error: "not_a_native_transfer",
+      txHash,
+      details: { to: tx.to, value: String(value) },
+    };
+  }
+
+  const rows = await sql<{ user_id: string }[]>`
+    SELECT user_id::text AS user_id
+    FROM ex_deposit_address
+    WHERE chain = ${chain} AND status = 'active' AND lower(address) = ${toAddress}
+    LIMIT 1
+  `;
+  const userId = rows[0]?.user_id ? String(rows[0].user_id) : "";
+  if (!userId) {
+    return { ok: false, error: "unknown_deposit_address", txHash, details: { toAddress } };
+  }
+
+  const nativeRows = await sql<NativeAsset[]>`
+    SELECT id::text AS id, symbol, decimals
+    FROM ex_asset
+    WHERE chain = ${chain}
+      AND is_enabled = true
+      AND contract_address IS NULL
+      AND upper(symbol) = 'BNB'
+    LIMIT 1
+  `;
+  const nativeBnb = nativeRows[0] ?? null;
+  if (!nativeBnb) return { ok: false, error: "bnb_asset_missing", txHash };
+
+  const amount = ethers.formatUnits(value, nativeBnb.decimals);
+  const outcome = await creditDepositEvent(sql as any, {
+    chain,
+    txHash,
+    logIndex: -1,
+    blockNumber,
+    fromAddress: tx.from ? normalizeAddress(tx.from) : null,
+    toAddress,
+    userId,
+    assetId: nativeBnb.id,
+    assetSymbol: nativeBnb.symbol,
+    amount,
+  });
+
+  return {
+    ok: true,
+    chain,
+    txHash,
+    blockNumber,
+    confirmations,
+    safeTip,
+    toAddress,
+    userId,
+    assetSymbol: "BNB",
+    amount,
+    outcome,
+  };
+}
+
 async function ensureSystemUser(sql: Sql): Promise<void> {
   await sql`
     INSERT INTO app_user (id, status, kyc_level, country)
