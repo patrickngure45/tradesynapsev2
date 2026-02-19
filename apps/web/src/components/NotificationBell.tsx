@@ -16,6 +16,14 @@ type Notification = {
   metadata_json?: any;
 };
 
+function safeInternalHref(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  if (!v.startsWith("/")) return null;
+  // Prevent protocol-relative or malformed URLs.
+  if (v.startsWith("//")) return null;
+  return v;
+}
+
 function withDevUserHeader(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
   if (typeof window !== "undefined") {
@@ -322,6 +330,8 @@ export function NotificationBell() {
             ) : (
               notifications.map((n) => {
                 const orderId = n.metadata_json?.order_id;
+                const href =
+                  safeInternalHref(n.metadata_json?.href) ?? (orderId ? `/p2p/orders/${orderId}` : null);
                 const className =
                   "block w-full px-3 py-3 text-left transition hover:bg-[var(--card-2)] " + (n.read ? "opacity-60" : "");
 
@@ -343,11 +353,11 @@ export function NotificationBell() {
                   </div>
                 );
 
-                if (orderId) {
+                if (href) {
                   return (
                     <Link
                       key={n.id}
-                      href={`/p2p/orders/${orderId}`}
+                      href={href}
                       onClick={() => {
                         setOpen(false);
                         if (!n.read) void markRead([n.id]);

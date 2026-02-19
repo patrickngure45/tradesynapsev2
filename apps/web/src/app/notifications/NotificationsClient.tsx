@@ -15,6 +15,13 @@ type Notification = {
   metadata_json?: any;
 };
 
+function safeInternalHref(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  if (!v.startsWith("/")) return null;
+  if (v.startsWith("//")) return null;
+  return v;
+}
+
 /* ── helpers (mirrored from NotificationBell) ── */
 
 function withDevUserHeader(init?: RequestInit): RequestInit {
@@ -269,6 +276,7 @@ export function NotificationsClient() {
         <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
           {filtered.map((n) => {
             const orderId = n.metadata_json?.order_id;
+            const href = safeInternalHref(n.metadata_json?.href) ?? (orderId ? `/p2p/orders/${orderId}` : null);
             const content = (
               <>
                 {/* Icon */}
@@ -303,11 +311,11 @@ export function NotificationsClient() {
 
             const className = `flex gap-3 px-4 py-3.5 transition hover:bg-[var(--card-2)] ${n.read ? "opacity-60" : ""}`;
 
-            if (orderId) {
+            if (href) {
                 return (
                     <Link
                       key={n.id}
-                      href={`/p2p/orders/${orderId}`}
+                      href={href}
                       className={className}
                       onClick={() => {
                         if (!n.read) void markRead([n.id]);

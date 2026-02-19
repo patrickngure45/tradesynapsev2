@@ -1,5 +1,7 @@
 import type { Sql } from "postgres";
 
+export type NotificationSeverity = "info" | "success" | "warning" | "danger";
+
 export type NotificationType =
   | "order_filled"
   | "order_partially_filled"
@@ -20,6 +22,88 @@ export type NotificationType =
   | "p2p_feedback_received"
   | "system";
 
+function asRecord(v: unknown): Record<string, unknown> {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return {};
+}
+
+function getString(meta: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = meta[key];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return null;
+}
+
+function getSeverityForType(type: NotificationType): NotificationSeverity {
+  switch (type) {
+    case "deposit_credited":
+    case "withdrawal_completed":
+    case "order_filled":
+    case "p2p_order_completed":
+    case "p2p_feedback_received":
+      return "success";
+    case "p2p_order_expiring":
+    case "p2p_payment_confirmed":
+    case "withdrawal_approved":
+    case "order_partially_filled":
+      return "warning";
+    case "withdrawal_rejected":
+    case "order_canceled":
+    case "p2p_order_cancelled":
+    case "p2p_dispute_opened":
+      return "danger";
+    case "p2p_dispute_resolved":
+    case "p2p_order_created":
+    case "trade_won":
+    case "trade_lost":
+    case "system":
+    default:
+      return "info";
+  }
+}
+
+function deriveHref(type: NotificationType, meta: Record<string, unknown>): string | null {
+  const orderId = getString(meta, "order_id", "orderId");
+  const withdrawalId = getString(meta, "withdrawal_id", "withdrawalId");
+
+  if (orderId && type.startsWith("p2p_")) return `/p2p/orders/${orderId}`;
+
+  if (withdrawalId && type.startsWith("withdrawal_")) return "/wallet";
+
+  switch (type) {
+    case "deposit_credited":
+      return "/wallet";
+    case "order_filled":
+    case "order_partially_filled":
+    case "order_canceled":
+      return "/order-history";
+    default:
+      return null;
+  }
+}
+
+function applyNotificationPolicy(type: NotificationType, metadata: Record<string, unknown> | undefined) {
+  const meta = { ...(metadata ?? {}) } as Record<string, unknown>;
+
+  // Canonicalize common ids into snake_case so UI can be simple.
+  const orderId = getString(meta, "order_id", "orderId");
+  if (orderId) meta.order_id = orderId;
+
+  const withdrawalId = getString(meta, "withdrawal_id", "withdrawalId");
+  if (withdrawalId) meta.withdrawal_id = withdrawalId;
+
+  const txHash = getString(meta, "tx_hash", "txHash");
+  if (txHash) meta.tx_hash = txHash;
+
+  if (!getString(meta, "severity")) meta.severity = getSeverityForType(type);
+
+  const href = getString(meta, "href") ?? deriveHref(type, meta);
+  if (href && href.startsWith("/")) meta.href = href;
+
+  return meta;
+}
+
 export async function createNotification(
   sql: Sql,
   params: {
@@ -30,14 +114,18 @@ export async function createNotification(
     metadata?: Record<string, unknown>;
   },
 ): Promise<string> {
+  const title = String(params.title ?? "").trim() || "Notification";
+  const body = String(params.body ?? "");
+  const metadata = applyNotificationPolicy(params.type, params.metadata);
+
   const rows = await sql<{ id: string }[]>`
     INSERT INTO ex_notification (user_id, type, title, body, metadata_json)
     VALUES (
       ${params.userId}::uuid,
       ${params.type},
-      ${params.title},
-      ${params.body ?? ""},
-      ${(params.metadata ?? {}) as any}::jsonb
+      ${title},
+      ${body},
+      ${metadata as any}::jsonb
     )
     RETURNING id
   `;
