@@ -22,13 +22,13 @@
   },
   "include": [
     "server.ts",
+    "scripts/db-migrate.ts",
     "src/lib/db.ts",
     "src/lib/ws/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     ".next",
-    "scripts",
     "src/app",
     "src/pages",
     "src/components",

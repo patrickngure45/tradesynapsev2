@@ -1,12 +1,8 @@
 
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import postgres from "postgres";
 import "dotenv/config";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function main() {
   const dbUrl = process.env.DATABASE_URL;
@@ -73,10 +69,15 @@ async function main() {
     `;
 
     // 2. Read local migration files
-    // Assuming this script is at apps/web/scripts/db-migrate.ts
-    // And migrations are at db/migrations relative to repo root (../../db/migrations)
     console.log("📁 Locating migrations dir...");
-    const migrationsDir = path.resolve(__dirname, "../../../db/migrations");
+    // Prefer resolving from the current working directory (apps/web in both local + Docker).
+    // This keeps working even when the script is compiled to `.server/scripts/*`.
+    const candidates = [
+      path.resolve(process.cwd(), "../../db/migrations"),
+      path.resolve(process.cwd(), "../db/migrations"),
+      path.resolve(process.cwd(), "../../../db/migrations"),
+    ];
+    const migrationsDir = candidates.find((p) => fs.existsSync(p)) ?? candidates[0]!;
     
     if (!fs.existsSync(migrationsDir)) {
       throw new Error(`Migrations directory not found at: ${migrationsDir}`);

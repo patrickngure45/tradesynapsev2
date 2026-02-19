@@ -10,7 +10,12 @@ set -e
 
 if [ "$RUN_MIGRATIONS" = "1" ]; then
 	echo "📦 Running Database Migrations..."
-	npm run db:migrate
+	if [ -f ".server/scripts/db-migrate.js" ]; then
+		node .server/scripts/db-migrate.js
+	else
+		# Fallback for dev/local runs where build artifacts aren't present
+		npm run db:migrate
+	fi
 else
 	echo "↪️  Skipping migrations (RUN_MIGRATIONS=$RUN_MIGRATIONS)"
 fi
