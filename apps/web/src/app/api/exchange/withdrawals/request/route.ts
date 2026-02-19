@@ -13,6 +13,7 @@ import { checkWithdrawalVelocity } from "@/lib/exchange/withdrawalVelocity";
 import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
 import { chargeGasFeeFromQuote, quoteGasFee } from "@/lib/exchange/gas";
 import { add3818, toBigInt3818 } from "@/lib/exchange/fixed3818";
+import { createNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -222,6 +223,23 @@ export async function POST(request: Request) {
         withdrawal_id: withdrawalId,
         user_id: actingUserId,
         asset_id: asset.id,
+        asset_symbol: asset.symbol,
+        chain: asset.chain,
+        amount: input.amount,
+        destination_address: input.destination_address,
+      },
+    });
+
+    // Notify user immediately that a send request was accepted and is queued.
+    // We use the existing 'system' type to avoid widening the DB CHECK constraint.
+    const destinationShort = `${input.destination_address.slice(0, 6)}…${input.destination_address.slice(-4)}`;
+    await createNotification(txSql as any, {
+      userId: actingUserId,
+      type: "system",
+      title: "Withdrawal requested",
+      body: `You requested to send ${input.amount} ${asset.symbol} to ${destinationShort}. Processing will start after review/approval.`,
+      metadata: {
+        withdrawal_id: withdrawalId,
         asset_symbol: asset.symbol,
         chain: asset.chain,
         amount: input.amount,

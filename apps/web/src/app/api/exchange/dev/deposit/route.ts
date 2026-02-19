@@ -6,6 +6,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { amount3818PositiveSchema } from "@/lib/exchange/amount";
 import { responseForDbError } from "@/lib/dbTransient";
+import { createNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,6 +103,20 @@ export async function POST(request: Request) {
         (${entryId}, ${userAccountRows[0]!.id}, ${sourceAssetId}, (${creditedAmount}::numeric)),
         (${entryId}, ${systemAccountRows[0]!.id}, ${sourceAssetId}, ((${creditedAmount}::numeric) * -1))
     `;
+
+    await createNotification(txSql as any, {
+      userId,
+      type: "deposit_credited",
+      title: "Deposit credited",
+      body: `+${creditedAmount} ${input.asset_symbol} (${input.chain.toUpperCase()})`,
+      metadata: {
+        asset_symbol: input.asset_symbol,
+        chain: input.chain,
+        amount: creditedAmount,
+        tx_hash: input.tx_hash ?? null,
+        entry_id: entryId,
+      },
+    });
 
     return {
       status: 201 as const,

@@ -66,6 +66,7 @@ function getSeverityForType(type: NotificationType): NotificationSeverity {
 function deriveHref(type: NotificationType, meta: Record<string, unknown>): string | null {
   const orderId = getString(meta, "order_id", "orderId");
   const withdrawalId = getString(meta, "withdrawal_id", "withdrawalId");
+  const assetSymbol = getString(meta, "asset_symbol", "assetSymbol", "symbol");
 
   if (orderId && type.startsWith("p2p_")) return `/p2p/orders/${orderId}`;
 
@@ -73,7 +74,8 @@ function deriveHref(type: NotificationType, meta: Record<string, unknown>): stri
 
   switch (type) {
     case "deposit_credited":
-      return "/wallet";
+      // Nudge users toward offloading via P2P (no fiat specified so it auto-selects from /api/whoami).
+      return assetSymbol ? `/p2p?side=SELL&asset=${encodeURIComponent(assetSymbol)}&src=deposit` : "/wallet";
     case "order_filled":
     case "order_partially_filled":
     case "order_canceled":
