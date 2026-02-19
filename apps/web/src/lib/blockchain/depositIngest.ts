@@ -359,7 +359,9 @@ async function updateCursor(sql: Sql, chain: "bsc", lastScannedBlock: number): P
     INSERT INTO ex_chain_deposit_cursor (chain, last_scanned_block, updated_at)
     VALUES (${chain}, ${lastScannedBlock}, now())
     ON CONFLICT (chain)
-    DO UPDATE SET last_scanned_block = EXCLUDED.last_scanned_block, updated_at = now()
+    DO UPDATE SET
+      last_scanned_block = GREATEST(ex_chain_deposit_cursor.last_scanned_block, EXCLUDED.last_scanned_block),
+      updated_at = now()
   `;
 }
 
