@@ -212,12 +212,19 @@ export default async function proxy(request: NextRequest) {
     // Cron endpoints are not browser-driven; they won't have Origin/Referer and
     // should not be forced through the CSRF double-submit flow.
     // They are authenticated separately (e.g. x-cron-secret) in production.
-    if (pathname.startsWith("/api/p2p/cron/") || pathname.startsWith("/api/exchange/cron/")) {
-      // no-op
-    } else {
-    // 1. Origin / Referer check
-    const origin = request.headers.get("origin");
-    const referer = request.headers.get("referer");
+    const isKnownCronPath =
+      pathname.startsWith("/api/p2p/cron/") ||
+      pathname.startsWith("/api/exchange/cron/");
+
+    const configuredCronSecret = (process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
+    const providedCronSecret =
+      (request.headers.get("x-cron-secret") ?? request.nextUrl.searchParams.get("secret") ?? "").trim();
+    const hasValidCronSecret = Boolean(configuredCronSecret) && providedCronSecret === configuredCronSecret;
+
+    if (!isKnownCronPath && !hasValidCronSecret) {
+      // 1. Origin / Referer check
+      const origin = request.headers.get("origin");
+      const referer = request.headers.get("referer");
     
     // Resolve allowed origins - including CORS list from env
     const normalize = (u: string) => u?.trim().replace(/\/$/, "").toLowerCase();
@@ -309,34 +316,34 @@ export default async function proxy(request: NextRequest) {
       return attachCsrfCookieIfMissing(request, res);
     }
 
-    // 2. Double-submit CSRF token check (cookie must match header)
-    // Auth bootstrap endpoints can be called before the browser has a CSRF cookie.
-    // Keep the Origin/Referer check above, but do not require the token for these.
-    const isAuthBootstrap = pathname === "/api/auth/login" || pathname === "/api/auth/signup";
-    const csrfCookie = request.cookies.get(CSRF_COOKIE)?.value;
-    const csrfHeader = request.headers.get(CSRF_HEADER);
-    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-      // In dev, skip if client hasn't adopted CSRF tokens yet
-      if (isProd) {
-        if (isAuthBootstrap) return;
-        const res = NextResponse.json(
-          {
-            error: "csrf_token_mismatch",
-            details: {
-              hasCookie: Boolean(csrfCookie),
-              hasHeader: Boolean(csrfHeader),
-              cookieName: CSRF_COOKIE,
-              headerName: CSRF_HEADER,
-              origin,
-              referer,
-              requestOrigin: request.nextUrl.origin,
+      // 2. Double-submit CSRF token check (cookie must match header)
+      // Auth bootstrap endpoints can be called before the browser has a CSRF cookie.
+      // Keep the Origin/Referer check above, but do not require the token for these.
+      const isAuthBootstrap = pathname === "/api/auth/login" || pathname === "/api/auth/signup";
+      const csrfCookie = request.cookies.get(CSRF_COOKIE)?.value;
+      const csrfHeader = request.headers.get(CSRF_HEADER);
+      if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+        // In dev, skip if client hasn't adopted CSRF tokens yet
+        if (isProd) {
+          if (isAuthBootstrap) return;
+          const res = NextResponse.json(
+            {
+              error: "csrf_token_mismatch",
+              details: {
+                hasCookie: Boolean(csrfCookie),
+                hasHeader: Boolean(csrfHeader),
+                cookieName: CSRF_COOKIE,
+                headerName: CSRF_HEADER,
+                origin,
+                referer,
+                requestOrigin: request.nextUrl.origin,
+              },
             },
-          },
-          { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
-        );
-        return attachCsrfCookieIfMissing(request, res);
+            { status: 403, headers: { "x-request-id": requestId, ...SECURITY_HEADERS } },
+          );
+          return attachCsrfCookieIfMissing(request, res);
+        }
       }
-    }
     }
   }
 
