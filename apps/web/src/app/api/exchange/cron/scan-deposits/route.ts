@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
   const blocksPerBatchRaw = url.searchParams.get("blocks_per_batch");
   const tokensRaw = url.searchParams.get("tokens");
   const nativeRaw = url.searchParams.get("native");
+  const symbolsRaw = url.searchParams.get("symbols");
 
   const fromBlock = fromBlockRaw ? Number(fromBlockRaw) : undefined;
   const maxBlocks = maxBlocksRaw ? Number(maxBlocksRaw) : undefined;
@@ -55,6 +56,11 @@ export async function POST(req: NextRequest) {
 
   const scanTokens = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
   const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
+
+  const tokenSymbols = (symbolsRaw ?? "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
 
   try {
     await beat({ event: "start" });
@@ -75,6 +81,7 @@ export async function POST(req: NextRequest) {
       blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
       scanTokens,
       scanNative,
+      tokenSymbols: tokenSymbols.length ? tokenSymbols : undefined,
     });
 
     await beat({ event: "done", ...result });

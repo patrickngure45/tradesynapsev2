@@ -612,6 +612,7 @@ export async function scanAndCreditBscDeposits(
     blocksPerBatch?: number;
     scanNative?: boolean;
     scanTokens?: boolean;
+    tokenSymbols?: string[];
   },
 ): Promise<{
   ok: true;
@@ -640,6 +641,7 @@ export async function scanAndCreditBscDeposits(
 
   const scanNative = opts?.scanNative ?? true;
   const scanTokens = opts?.scanTokens ?? true;
+  const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
 
   const tip = await provider.getBlockNumber();
   const safeTip = Math.max(0, tip - confirmations);
@@ -709,6 +711,7 @@ export async function scanAndCreditBscDeposits(
         WHERE chain = ${chain}
           AND is_enabled = true
           AND contract_address IS NOT NULL
+          AND (${tokenSymbols.length === 0}::boolean OR upper(symbol) = ANY(${tokenSymbols}))
         ORDER BY symbol ASC
       `
     : ([] as DepositAsset[]);
