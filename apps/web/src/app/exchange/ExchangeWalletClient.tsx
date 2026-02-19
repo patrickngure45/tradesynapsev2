@@ -9,7 +9,7 @@ import { Toast, type ToastKind } from"@/components/Toast";
 import { AssetIcon } from "@/components/AssetIcon";
 import { buttonClassName } from "@/components/ui/Button";
 import { persistActingUserIdPreference, readActingUserIdPreference } from"@/lib/state/actingUser";
-import { formatTokenAmount, isNonZeroDecimalString } from "@/lib/format/amount";
+import { formatDecimalString, formatTokenAmount, isNonZeroDecimalString } from "@/lib/format/amount";
 import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 
 type Asset = {
@@ -127,6 +127,17 @@ function isUuid(value: string): boolean {
 
 function fmtAmount(value: string, decimals: number): string {
  return formatTokenAmount(value, decimals);
+}
+
+function fmtMoneyFixed(value: string, fractionDigits: number): string {
+ const base = formatDecimalString(value, fractionDigits);
+ if (base === "—") return base;
+ if (fractionDigits <= 0) return base;
+
+ const [head, frac = ""] = base.split(".");
+ if (!frac) return `${head}.${"0".repeat(fractionDigits)}`;
+ if (frac.length >= fractionDigits) return base;
+ return `${head}.${frac}${"0".repeat(fractionDigits - frac.length)}`;
 }
 
 function toNumberSafe(value: unknown): number {
@@ -1256,6 +1267,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          const symbol = String(b.symbol ?? "").toUpperCase();
          const displayName = String(meta?.name ?? "").trim() || symbol;
          const chain = String(b.chain ?? meta?.chain ?? "").toUpperCase();
+         const isMoneyLike = symbol === "USDT";
 
          const availableNum = Number(b.available);
          const heldNum = Number(b.held);
@@ -1304,18 +1316,50 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                          </span>
                        ) : null}
                      </div>
-                     <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                       Total: <span className="break-all font-mono">{fmtAmount(b.posted, b.decimals)}</span>
-                       {hasLocked ? (
-                         <>
-                           <span className="mx-2 text-[var(--border)]">•</span>
+                     {isMoneyLike ? (
+                       <div className="mt-0.5 grid gap-0.5 text-[10px] text-[var(--muted)]">
+                         <div>
+                           Total:{" "}
                            <span
-                             title="Reserved funds (includes active P2P ads inventory + active order escrow holds)"
+                             className="font-mono"
+                             title={fmtAmount(b.posted, b.decimals)}
                            >
-                             Reserved: <span className="break-all font-mono">{fmtAmount(b.held, b.decimals)}</span>
+                             {fmtMoneyFixed(b.posted, 2)}
                            </span>
-                         </>
-                       ) : null}
+                         </div>
+                         {hasLocked ? (
+                           <div title="Reserved funds (includes active P2P ads inventory + active order escrow holds)">
+                             Reserved:{" "}
+                             <span
+                               className="font-mono"
+                               title={fmtAmount(b.held, b.decimals)}
+                             >
+                               {fmtMoneyFixed(b.held, 2)}
+                             </span>
+                           </div>
+                         ) : null}
+                         {assetsWithPendingDepositConfirmations.has(b.asset_id) ? (
+                           <div>
+                             <span
+                               className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--warn-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--warn)]"
+                               title="Deposit detected — funds unlock after confirmations"
+                             >
+                               Pending confirmations
+                             </span>
+                           </div>
+                         ) : null}
+                       </div>
+                     ) : (
+                       <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                         Total: <span className="break-all font-mono">{fmtAmount(b.posted, b.decimals)}</span>
+                         {hasLocked ? (
+                           <>
+                             <span className="mx-2 text-[var(--border)]">•</span>
+                             <span title="Reserved funds (includes active P2P ads inventory + active order escrow holds)">
+                               Reserved: <span className="break-all font-mono">{fmtAmount(b.held, b.decimals)}</span>
+                             </span>
+                           </>
+                         ) : null}
                          {assetsWithPendingDepositConfirmations.has(b.asset_id) ? (
                            <span
                              className="ml-2 inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--warn-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--warn)]"
@@ -1324,14 +1368,18 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                              Pending confirmations
                            </span>
                          ) : null}
-                     </div>
+                       </div>
+                     )}
                    </div>
                  </div>
                </div>
 
                <div className="text-right">
-                 <div className="break-all font-mono text-sm font-bold text-[var(--foreground)]">
-                   {fmtAmount(b.available, b.decimals)}
+                 <div
+                   className="break-all font-mono text-sm font-bold text-[var(--foreground)]"
+                   title={isMoneyLike ? fmtAmount(b.available, b.decimals) : undefined}
+                 >
+                   {isMoneyLike ? fmtMoneyFixed(b.available, 2) : fmtAmount(b.available, b.decimals)}
                  </div>
                  <div className="text-[11px] text-[var(--muted)]">{symbol}</div>
                </div>
