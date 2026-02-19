@@ -181,6 +181,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [localFiat, setLocalFiat] = useState<string>("USD");
  const [assetLocalRates, setAssetLocalRates] = useState<Record<string, number>>({});
  const [assetLocalRateSource, setAssetLocalRateSource] = useState<Record<string, string>>({});
+ const [assetLocalRatesFiat, setAssetLocalRatesFiat] = useState<string>("");
  const [localValueReady, setLocalValueReady] = useState(false);
 
  const [lastBalancesRefreshAt, setLastBalancesRefreshAt] = useState<number | null>(null);
@@ -454,12 +455,15 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  useEffect(() => {
   let cancelled = false;
-  void (async () => {
-   if (cancelled) return;
-   await fetchDepositAddress();
-  })();
+  const t = window.setTimeout(() => {
+   void (async () => {
+    if (cancelled) return;
+    await fetchDepositAddress();
+   })();
+  }, 350);
   return () => {
    cancelled = true;
+   window.clearTimeout(t);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [authMode, canUseHeader, requestHeaders]);
@@ -519,7 +523,10 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     return acc + (Number.isFinite(held) && held > 0 ? 1 : 0);
   }, 0);
 
-  if (!localValueReady) {
+  const fiatUpper = String(localFiat ?? "").trim().toUpperCase();
+  const ratesMatchFiat = fiatUpper && assetLocalRatesFiat === fiatUpper;
+
+  if (!localValueReady || !ratesMatchFiat) {
     return { assetCount, activeHolds, totalLocal: null as number | null };
   }
 
@@ -533,7 +540,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     hasAny = true;
   }
   return { assetCount, activeHolds, totalLocal: hasAny ? total : null };
- }, [balancesToDisplay, localValueReady, assetLocalRates]);
+ }, [balancesToDisplay, localValueReady, assetLocalRates, assetLocalRatesFiat, localFiat]);
 
  const assetsWithPendingDepositConfirmations = useMemo(() => {
   const out = new Set<string>();
@@ -560,6 +567,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     return { ...prev, USDT: cached };
    });
    setAssetLocalRateSource((prev) => ({ ...prev, USDT: "Cached" }));
+    setAssetLocalRatesFiat(fiatUpper);
   }
  } catch {
   // ignore storage errors
@@ -723,6 +731,8 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  return out;
  });
 
+ setAssetLocalRatesFiat(fiatUpper);
+
  setAssetLocalRateSource((prev) => {
  const out: Record<string, string> = { ...prev };
  for (const [symbol, source] of Object.entries(rateSource)) {
@@ -744,6 +754,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     return { ...prev, USDT: cached };
    });
    setAssetLocalRateSource((prev) => ({ ...prev, USDT: "Cached" }));
+  setAssetLocalRatesFiat(fiatUpper);
   }
  } catch {
   // ignore storage errors
@@ -754,7 +765,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  async function refreshAll() {
  setLoadingAction("refresh");
  setError(null);
- setLocalValueReady(Object.keys(assetLocalRates).length > 0);
+ setLocalValueReady(false);
 
  try {
  const a = await fetchJsonOrThrow<{ assets?: Asset[] }>("/api/exchange/assets", {
@@ -798,11 +809,15 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  });
  const fiat = fiatForCountry(p.user?.country);
  setLocalFiat(fiat);
+ setAssetLocalRatesFiat("");
+ setLocalValueReady(false);
 
  await loadAssetLocalRates(fiat);
  setLocalValueReady(true);
  } catch {
  setLocalFiat("USD");
+ setAssetLocalRatesFiat("");
+ setLocalValueReady(false);
  await loadAssetLocalRates("USD");
  setLocalValueReady(true);
  }
@@ -1299,6 +1314,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          const displayName = String(meta?.name ?? "").trim() || symbol;
          const chain = String(b.chain ?? meta?.chain ?? "").toUpperCase();
          const isMoneyLike = symbol === "USDT";
+         const ratesMatchFiat = assetLocalRatesFiat === String(localFiat ?? "").trim().toUpperCase();
 
          const availableNum = Number(b.available);
          const heldNum = Number(b.held);
@@ -1307,7 +1323,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
          const rate = assetLocalRates[symbol] ?? null;
          const rowLocalEquivalent = (() => {
            if (!Number.isFinite(availableNum)) return null;
-           if (rate != null && Number.isFinite(rate) && rate > 0) return availableNum * rate;
+           if (ratesMatchFiat && rate != null && Number.isFinite(rate) && rate > 0) return availableNum * rate;
            // USDT feels like money; if fiat is USD we can display a sane fallback even if rates are still loading.
            if (symbol === "USDT" && String(localFiat ?? "").toUpperCase() === "USD") return availableNum;
            return null;
