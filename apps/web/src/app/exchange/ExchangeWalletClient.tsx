@@ -678,8 +678,21 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const out: Record<string, number> = { ...prev };
  for (const [symbol, next] of nextEntries) {
  if (symbol === "USDT") {
- // For the anchor currency, always use freshest authoritative quote (no damping).
- out[symbol] = next;
+ // USDT is money-like; apply a tiny hysteresis so the UI doesn't "dance".
+ const previous = prev[symbol];
+ if (Number.isFinite(previous) && (previous as number) > 0) {
+  const prevValue = previous as number;
+  const relativeDelta = Math.abs(next - prevValue) / Math.max(prevValue, 1e-9);
+
+  // Ignore tiny noise (e.g. FX/p2p rounding) to keep the displayed fiat amount stable.
+  if (relativeDelta < 0.001) {
+   out[symbol] = prevValue;
+  } else {
+   out[symbol] = prevValue * 0.85 + next * 0.15;
+  }
+ } else {
+  out[symbol] = next;
+ }
  continue;
  }
  const previous = prev[symbol];
@@ -814,15 +827,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  useEffect(() => {
  if (!localFiat) return;
  let cancelled = false;
-
- const tick = async () => {
- if (cancelled) return;
- await loadAssetLocalRates(localFiat);
- };
-
- void tick();
  const timer = window.setInterval(() => {
- void tick();
+ if (cancelled) return;
+ void loadAssetLocalRates(localFiat);
  }, 20_000);
 
  return () => {
