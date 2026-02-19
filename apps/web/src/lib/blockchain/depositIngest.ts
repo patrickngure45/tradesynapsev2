@@ -16,6 +16,52 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const s = Math.max(1, Math.floor(size));
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += s) out.push(items.slice(i, i + s));
+  return out;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.floor(ms))));
+}
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("rate limit") ||
+    lower.includes("triggered rate limit") ||
+    lower.includes("-32005")
+  );
+}
+
+async function getLogsWithRetry(
+  provider: ethers.JsonRpcProvider,
+  args: ethers.Filter,
+  opts?: { maxAttempts?: number; baseDelayMs?: number },
+): Promise<ethers.Log[]> {
+  const maxAttempts = clamp(opts?.maxAttempts ?? 4, 1, 8);
+  const baseDelayMs = clamp(opts?.baseDelayMs ?? 500, 50, 10_000);
+
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await provider.getLogs(args);
+    } catch (e) {
+      lastErr = e;
+      if (!isRateLimitError(e) || attempt === maxAttempts) throw e;
+      // Exponential backoff with small jitter.
+      const jitter = Math.floor(Math.random() * 150);
+      const delay = baseDelayMs * attempt * attempt + jitter;
+      await sleep(delay);
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 function normalizeAddress(addr: string): string {
   return String(addr || "").trim().toLowerCase();
 }
@@ -258,6 +304,26 @@ export async function scanAndCreditBscDeposits(
     addressToUser.set(address, String(row.user_id));
   }
 
+  // If we have no addresses to watch, don't hammer the RPC provider.
+  // Still advance the cursor so subsequent runs start from a recent block.
+  if (addressToUser.size === 0) {
+    await updateCursor(sql, chain, toBlock);
+    return {
+      ok: true,
+      chain,
+      fromBlock,
+      toBlock,
+      tip,
+      confirmations,
+      batches: 0,
+      assets: 0,
+      checkedLogs: 0,
+      matchedDeposits: 0,
+      credited: 0,
+      duplicates: 0,
+    };
+  }
+
   const tokenAssets = await sql<DepositAsset[]>`
     SELECT id::text AS id, symbol, decimals, contract_address
     FROM ex_asset
@@ -331,20 +397,35 @@ export async function scanAndCreditBscDeposits(
       }
     }
 
+    const addressChunkSize = clamp(envInt("BSC_DEPOSIT_LOG_ADDRESS_CHUNK", 40), 5, 250);
+    const contractToAsset = new Map<string, DepositAsset>();
     for (const asset of tokenAssets) {
       const contract = normalizeAddress(asset.contract_address);
       if (!contract) continue;
+      contractToAsset.set(contract, asset);
+    }
 
-      const logs = await provider.getLogs({
-        address: contract,
-        fromBlock: start,
-        toBlock: end,
-        topics: [transferTopic],
-      });
+    const contractChunks = chunk(Array.from(contractToAsset.keys()), addressChunkSize);
+    for (const contracts of contractChunks) {
+      if (!contracts.length) continue;
+
+      const logs = await getLogsWithRetry(
+        provider,
+        {
+          address: contracts,
+          fromBlock: start,
+          toBlock: end,
+          topics: [transferTopic],
+        },
+        { maxAttempts: 5, baseDelayMs: 600 },
+      );
 
       checkedLogs += logs.length;
 
       for (const log of logs) {
+        const asset = contractToAsset.get(normalizeAddress(String((log as any)?.address ?? "")));
+        if (!asset) continue;
+
         // Transfer(address indexed from, address indexed to, uint256 value)
         const to = decodeTopicAddress(log.topics?.[2] ?? "");
         if (!to) continue;
