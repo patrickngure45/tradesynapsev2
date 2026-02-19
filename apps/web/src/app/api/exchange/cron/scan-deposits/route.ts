@@ -89,3 +89,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// Allow simple cron providers that only support GET.
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
