@@ -73,6 +73,13 @@ function decodeTopicAddress(topic: string): string {
   return "0x" + t.slice(-40).toLowerCase();
 }
 
+function encodeTopicAddress(addr: string): string {
+  const a = normalizeAddress(addr);
+  if (!a.startsWith("0x") || a.length !== 42) return "0x" + "0".repeat(64);
+  // 32-byte topic, right-aligned address (last 20 bytes)
+  return "0x" + "0".repeat(24 * 2) + a.slice(2);
+}
+
 type DepositAsset = {
   id: string;
   symbol: string;
@@ -271,7 +278,10 @@ export async function scanAndCreditBscDeposits(
 
   const cursor = await getOrInitCursor(sql, chain);
   const startFromCursor = cursor + 1;
-  const fromBlock = Math.max(0, Math.min(safeTip, opts?.fromBlock ?? startFromCursor));
+  // If the cursor is brand new (0) and the caller didn't specify a fromBlock,
+  // start at the safe tip to avoid an accidental genesis-to-tip backfill.
+  const defaultFrom = cursor === 0 && typeof opts?.fromBlock !== "number" ? safeTip : startFromCursor;
+  const fromBlock = Math.max(0, Math.min(safeTip, opts?.fromBlock ?? defaultFrom));
   const toBlock = Math.min(safeTip, fromBlock + maxBlocks - 1);
 
   // Nothing to do.
@@ -348,6 +358,7 @@ export async function scanAndCreditBscDeposits(
   const nativeBnb = nativeRows[0] ?? null;
 
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
+  const toTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
 
   let batches = 0;
   let checkedLogs = 0;
@@ -397,7 +408,7 @@ export async function scanAndCreditBscDeposits(
       }
     }
 
-    const addressChunkSize = clamp(envInt("BSC_DEPOSIT_LOG_ADDRESS_CHUNK", 40), 5, 250);
+    const addressChunkSize = clamp(envInt("BSC_DEPOSIT_LOG_ADDRESS_CHUNK", 25), 5, 250);
     const contractToAsset = new Map<string, DepositAsset>();
     for (const asset of tokenAssets) {
       const contract = normalizeAddress(asset.contract_address);
@@ -409,51 +420,59 @@ export async function scanAndCreditBscDeposits(
     for (const contracts of contractChunks) {
       if (!contracts.length) continue;
 
-      const logs = await getLogsWithRetry(
-        provider,
-        {
-          address: contracts,
-          fromBlock: start,
-          toBlock: end,
-          topics: [transferTopic],
-        },
-        { maxAttempts: 5, baseDelayMs: 600 },
-      );
+      const toTopicsAll = Array.from(addressToUser.keys()).map(encodeTopicAddress);
+      const toTopicChunks = chunk(toTopicsAll, toTopicChunkSize);
+      for (const toTopics of toTopicChunks) {
+        if (!toTopics.length) continue;
 
-      checkedLogs += logs.length;
+        const logs = await getLogsWithRetry(
+          provider,
+          {
+            address: contracts,
+            fromBlock: start,
+            toBlock: end,
+            // Filter by recipient to avoid fetching *all* transfers for the token.
+            // topics[2] is `to` in the Transfer event.
+            topics: [transferTopic, null, toTopics],
+          },
+          { maxAttempts: 6, baseDelayMs: 800 },
+        );
 
-      for (const log of logs) {
-        const asset = contractToAsset.get(normalizeAddress(String((log as any)?.address ?? "")));
-        if (!asset) continue;
+        checkedLogs += logs.length;
 
-        // Transfer(address indexed from, address indexed to, uint256 value)
-        const to = decodeTopicAddress(log.topics?.[2] ?? "");
-        if (!to) continue;
-        const userId = addressToUser.get(to);
-        if (!userId) continue;
+        for (const log of logs) {
+          const asset = contractToAsset.get(normalizeAddress(String((log as any)?.address ?? "")));
+          if (!asset) continue;
 
-        const from = decodeTopicAddress(log.topics?.[1] ?? "") || null;
-        const amountRaw = BigInt(log.data);
-        if (amountRaw <= 0n) continue;
+          // Transfer(address indexed from, address indexed to, uint256 value)
+          const to = decodeTopicAddress(log.topics?.[2] ?? "");
+          if (!to) continue;
+          const userId = addressToUser.get(to);
+          if (!userId) continue;
 
-        matchedDeposits += 1;
-        const amount = ethers.formatUnits(amountRaw, asset.decimals);
+          const from = decodeTopicAddress(log.topics?.[1] ?? "") || null;
+          const amountRaw = BigInt(log.data);
+          if (amountRaw <= 0n) continue;
 
-        const outcome = await creditDepositEvent(sql as any, {
-          chain,
-          txHash: String(log.transactionHash),
-          logIndex: Number(log.index),
-          blockNumber: Number(log.blockNumber),
-          fromAddress: from,
-          toAddress: to,
-          userId,
-          assetId: asset.id,
-          assetSymbol: asset.symbol,
-          amount,
-        });
+          matchedDeposits += 1;
+          const amount = ethers.formatUnits(amountRaw, asset.decimals);
 
-        if (outcome === "credited") credited += 1;
-        else duplicates += 1;
+          const outcome = await creditDepositEvent(sql as any, {
+            chain,
+            txHash: String(log.transactionHash),
+            logIndex: Number(log.index),
+            blockNumber: Number(log.blockNumber),
+            fromAddress: from,
+            toAddress: to,
+            userId,
+            assetId: asset.id,
+            assetSymbol: asset.symbol,
+            amount,
+          });
+
+          if (outcome === "credited") credited += 1;
+          else duplicates += 1;
+        }
       }
     }
 
