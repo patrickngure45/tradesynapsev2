@@ -108,6 +108,41 @@ function isUnsupportedTopicsShapeError(err: unknown): boolean {
   return isUnsupportedArrayParamError(err);
 }
 
+function isBlockRangeTooLargeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("block range is too large") ||
+    lower.includes("range is too large") ||
+    lower.includes("block range too large") ||
+    lower.includes("fromblock") && lower.includes("toblock") && lower.includes("too large")
+  );
+}
+
+async function getLogsRangeSafe(
+  provider: ethers.JsonRpcProvider,
+  filter: Omit<ethers.Filter, "fromBlock" | "toBlock"> & { fromBlock: number; toBlock: number },
+  opts?: { maxDepth?: number },
+): Promise<ethers.Log[]> {
+  const maxDepth = clamp(opts?.maxDepth ?? 12, 4, 24);
+
+  const walk = async (fromBlock: number, toBlock: number, depth: number): Promise<ethers.Log[]> => {
+    try {
+      return await getLogsWithRetry(provider, { ...filter, fromBlock, toBlock }, { maxAttempts: 6, baseDelayMs: 800 });
+    } catch (e) {
+      if (!isBlockRangeTooLargeError(e) || fromBlock >= toBlock || depth >= maxDepth) throw e;
+      const mid = Math.floor((fromBlock + toBlock) / 2);
+      const [a, b] = await Promise.all([
+        walk(fromBlock, mid, depth + 1),
+        walk(mid + 1, toBlock, depth + 1),
+      ]);
+      return [...a, ...b];
+    }
+  };
+
+  return await walk(filter.fromBlock, filter.toBlock, 0);
+}
+
 function coerceTopicsForCompatibility(topics: (string | string[] | null)[]): (string | string[] | null)[] {
   // Some RPC providers are picky about “OR” arrays with a single element.
   // Coerce ["0x..."] -> "0x...".
@@ -163,14 +198,10 @@ async function getLogsBatchedOrSplit(
 
   // Fast path: try a single batched query (address array) if supported.
   try {
-    const logs = await getLogsWithRetry(
-      provider,
-      {
-        ...filterBase,
-        address: args.addresses,
-      },
-      { maxAttempts: 6, baseDelayMs: 800 },
-    );
+    const logs = await getLogsRangeSafe(provider, {
+      ...filterBase,
+      address: args.addresses,
+    } as any);
     if (throttleMs) await sleep(throttleMs);
     return logs;
   } catch (e) {
@@ -180,16 +211,12 @@ async function getLogsBatchedOrSplit(
       // Another common incompatibility: reject complex topics shapes.
       if (topic0 && isUnsupportedTopicsShapeError(e)) {
         try {
-          const logs = await getLogsWithRetry(
-            provider,
-            {
-              fromBlock: args.fromBlock,
-              toBlock: args.toBlock,
-              address: args.addresses,
-              topics: [topic0],
-            },
-            { maxAttempts: 6, baseDelayMs: 800 },
-          );
+          const logs = await getLogsRangeSafe(provider, {
+            fromBlock: args.fromBlock,
+            toBlock: args.toBlock,
+            address: args.addresses,
+            topics: [topic0],
+          } as any);
           if (throttleMs) await sleep(throttleMs);
           return logs;
         } catch (e2) {
@@ -208,27 +235,19 @@ async function getLogsBatchedOrSplit(
     if (!addr) continue;
     let logs: ethers.Log[];
     try {
-      logs = await getLogsWithRetry(
-        provider,
-        {
-          ...filterBase,
-          address: addr,
-        },
-        { maxAttempts: 6, baseDelayMs: 900 },
-      );
+      logs = await getLogsRangeSafe(provider, {
+        ...filterBase,
+        address: addr,
+      } as any);
     } catch (e) {
       if (!topic0 || !isUnsupportedTopicsShapeError(e)) throw e;
       // Retry with only the event signature topic.
-      logs = await getLogsWithRetry(
-        provider,
-        {
-          fromBlock: args.fromBlock,
-          toBlock: args.toBlock,
-          address: addr,
-          topics: [topic0],
-        },
-        { maxAttempts: 6, baseDelayMs: 900 },
-      );
+      logs = await getLogsRangeSafe(provider, {
+        fromBlock: args.fromBlock,
+        toBlock: args.toBlock,
+        address: addr,
+        topics: [topic0],
+      } as any);
     }
     out.push(...logs);
     if (throttleMs) await sleep(throttleMs);
