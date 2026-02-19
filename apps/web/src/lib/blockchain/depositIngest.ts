@@ -132,11 +132,11 @@ async function getLogsRangeSafe(
     } catch (e) {
       if (!isBlockRangeTooLargeError(e) || fromBlock >= toBlock || depth >= maxDepth) throw e;
       const mid = Math.floor((fromBlock + toBlock) / 2);
-      const [a, b] = await Promise.all([
-        walk(fromBlock, mid, depth + 1),
-        walk(mid + 1, toBlock, depth + 1),
-      ]);
-      return [...a, ...b];
+      // Split sequentially to avoid fanning out too many concurrent RPC calls
+      // (which can cause rate limiting or edge timeouts in serverless contexts).
+      const a = await walk(fromBlock, mid, depth + 1);
+      const b = await walk(mid + 1, toBlock, depth + 1);
+      return a.concat(b);
     }
   };
 
