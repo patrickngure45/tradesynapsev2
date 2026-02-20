@@ -1,7 +1,8 @@
 import { SiteChrome } from "@/components/SiteChrome";
 import { CopyTradingClient } from "./CopyTradingClient";
 
-export const metadata = { title: "Copy Trading — TradeSynapse" };
+import { BRAND_NAME } from "@/lib/seo/brand";
+export const metadata = { title: `Copy Trading — ${BRAND_NAME}` };
 
 export default function CopyTradingPage() {
   return (

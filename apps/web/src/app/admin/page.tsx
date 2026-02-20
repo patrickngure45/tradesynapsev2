@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { SiteChrome } from "@/components/SiteChrome";
 import { AdminDashboardClient } from "./AdminDashboardClient";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
-export const metadata: Metadata = { title: "Admin · TradeSynapse" };
+export const metadata: Metadata = { title: `Admin · ${BRAND_NAME}` };
 export const dynamic = "force-dynamic";
 
 export default function AdminPage() {

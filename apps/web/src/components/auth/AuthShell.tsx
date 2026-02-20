@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogoMark } from "@/components/LogoMark";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
 function CoinLogo({
   symbol,
@@ -58,7 +59,7 @@ function MobileIntro({
           >
             <LogoMark size={18} className="opacity-95" />
           </span>
-          <span className="sr-only">TradeSynapse</span>
+          <span className="sr-only">{BRAND_NAME}</span>
         </Link>
 
         <div className="flex items-center -space-x-2" aria-label="Top markets">
@@ -198,7 +199,7 @@ export function AuthShell({
                   >
                     <LogoMark size={18} className="opacity-95" />
                   </span>
-                  <span className="sr-only">TradeSynapse</span>
+                  <span className="sr-only">{BRAND_NAME}</span>
                 </Link>
 
                 <div className="flex items-center gap-2">

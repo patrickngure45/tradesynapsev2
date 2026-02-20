@@ -1,6 +1,7 @@
 import { SiteChrome } from "@/components/SiteChrome";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
-export const metadata = { title: "Help Center — TradeSynapse" };
+export const metadata = { title: `Help Center — ${BRAND_NAME}` };
 
 export default function HelpCenterPage() {
   return (

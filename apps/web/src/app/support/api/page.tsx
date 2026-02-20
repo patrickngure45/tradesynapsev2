@@ -1,6 +1,7 @@
 import { SiteChrome } from "@/components/SiteChrome";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
-export const metadata = { title: "API Documentation — TradeSynapse" };
+export const metadata = { title: `API Documentation — ${BRAND_NAME}` };
 
 export default function ApiDocsPage() {
   return (

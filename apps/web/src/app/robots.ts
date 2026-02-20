@@ -1,0 +1,24 @@
+import type { MetadataRoute } from "next";
+
+import { getPublicBaseUrlOrigin } from "@/lib/seo/publicBaseUrl";
+
+export default function robots(): MetadataRoute.Robots {
+  const origin = getPublicBaseUrlOrigin();
+
+  return {
+    rules: {
+      userAgent: "*",
+      allow: "/",
+      disallow: [
+        "/api/",
+        "/admin",
+        "/account",
+        "/wallet",
+        "/notifications",
+        "/verify-email",
+      ],
+    },
+    sitemap: `${origin}/sitemap.xml`,
+    host: origin,
+  };
+}

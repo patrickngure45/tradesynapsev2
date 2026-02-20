@@ -1,7 +1,8 @@
 import { SiteChrome } from "@/components/SiteChrome";
 import { OrderHistoryClient } from "./OrderHistoryClient";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
-export const metadata = { title: "Order History — TradeSynapse" };
+export const metadata = { title: `Order History — ${BRAND_NAME}` };
 
 export default function OrderHistoryPage() {
   return (

@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 
 import { SiteChrome } from "@/components/SiteChrome";
 import { ExpressClient } from "./ExpressClient";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
 export const metadata: Metadata = {
-  title: "Express | TradeSynapse",
+  title: `Express | ${BRAND_NAME}`,
   description: "Net outcome router: P2P USDT + best spot price estimate.",
 };
 

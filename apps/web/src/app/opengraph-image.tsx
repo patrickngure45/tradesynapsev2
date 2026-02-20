@@ -1,7 +1,19 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "TradeSynapse — Spot Exchange on BSC";
+const BRAND_NAME = (process.env.NEXT_PUBLIC_BRAND_NAME ?? "Coinwaka").trim() || "Coinwaka";
+const BRAND_TAGLINE =
+  (process.env.NEXT_PUBLIC_BRAND_TAGLINE ?? "Spot Crypto Exchange").trim() || "Spot Crypto Exchange";
+
+const BRAND_INITIALS = BRAND_NAME
+  .split(/\s+/)
+  .filter(Boolean)
+  .slice(0, 2)
+  .map((part) => part[0]?.toUpperCase())
+  .join("")
+  .slice(0, 2) || "CW";
+
+export const alt = `${BRAND_NAME} — ${BRAND_TAGLINE}`;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -43,12 +55,12 @@ export default function OgImage() {
               color: "#fff",
             }}
           >
-            TS
+            {BRAND_INITIALS}
           </div>
-          <span style={{ fontSize: 48, fontWeight: 700 }}>TradeSynapse</span>
+          <span style={{ fontSize: 48, fontWeight: 700 }}>{BRAND_NAME}</span>
         </div>
         <div style={{ fontSize: 24, color: "#94a3b8", marginBottom: 16 }}>
-          Next-Gen Spot Exchange on BNB Smart Chain
+          {BRAND_TAGLINE}
         </div>
         <div
           style={{

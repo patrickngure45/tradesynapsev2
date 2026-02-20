@@ -1,7 +1,8 @@
 import { SiteChrome } from "@/components/SiteChrome";
 import { PortfolioClient } from "./PortfolioClient";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
-export const metadata = { title: "Portfolio — TradeSynapse" };
+export const metadata = { title: `Portfolio — ${BRAND_NAME}` };
 
 export default function PortfolioPage() {
   return (

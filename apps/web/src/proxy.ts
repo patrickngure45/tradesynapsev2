@@ -33,6 +33,30 @@ import {
 
 const isProd = process.env.NODE_ENV === "production";
 
+function getCanonicalHostname(): string {
+  const raw = (
+    process.env.CANONICAL_HOST ??
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    "https://coinwaka.com"
+  ).trim();
+
+  try {
+    // Accept either a hostname or a URL.
+    const url = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname.toLowerCase();
+  } catch {
+    return "coinwaka.com";
+  }
+}
+
+function getIncomingHostname(request: NextRequest): string {
+  const raw =
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    "";
+  return raw.split(",")[0]?.trim().toLowerCase() ?? "";
+}
+
 export const config = {
   /*
    * Match all API routes and page routes
@@ -205,6 +229,32 @@ export default async function proxy(request: NextRequest) {
     const httpsUrl = new URL(request.url);
     httpsUrl.protocol = "https:";
     return NextResponse.redirect(httpsUrl.toString(), 301);
+  }
+
+  // ── Canonical host redirect (SEO) ───────────────────────────────
+  // Consolidate `www.<host>` to `<host>` (or vice versa if configured)
+  // to avoid duplicate indexing and split link equity.
+  if (isProd && (method === "GET" || method === "HEAD")) {
+    const canonicalHost = getCanonicalHostname();
+    const incomingHost = getIncomingHostname(request);
+    if (canonicalHost && incomingHost) {
+      const canonicalWww = canonicalHost.startsWith("www.") ? canonicalHost : `www.${canonicalHost}`;
+      const canonicalApex = canonicalHost.startsWith("www.") ? canonicalHost.slice(4) : canonicalHost;
+
+      // If canonical is apex, redirect www -> apex.
+      if (canonicalHost === canonicalApex && incomingHost === canonicalWww) {
+        const url = request.nextUrl.clone();
+        url.hostname = canonicalApex;
+        return NextResponse.redirect(url, 301);
+      }
+
+      // If canonical is www, redirect apex -> www.
+      if (canonicalHost === canonicalWww && incomingHost === canonicalApex) {
+        const url = request.nextUrl.clone();
+        url.hostname = canonicalWww;
+        return NextResponse.redirect(url, 301);
+      }
+    }
   }
 
   // ── CSRF checks on mutating API requests ──────────────────────────

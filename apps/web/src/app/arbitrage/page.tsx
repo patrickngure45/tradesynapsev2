@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
 import { SiteChrome } from "@/components/SiteChrome";
+import { BRAND_NAME } from "@/lib/seo/brand";
 import { getSessionCookieName, verifySessionToken } from "@/lib/auth/session";
 import { ArbitrageClient } from "./ArbitrageClient";
 import { AIArbitrageAnalyst } from "./AIArbitrageAnalyst";
 import { FundingDashboard } from "./FundingDashboard";
 import { MarketRegimeWidget } from "./MarketRegimeWidget";
 
-export const metadata = { title: "Arbitrage Scanner — TradeSynapse" };
+export const metadata = { title: `Arbitrage Scanner — ${BRAND_NAME}` };
 
 export default async function ArbitragePage() {
   let userId: string | null = null;

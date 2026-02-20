@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LogoMark } from "@/components/LogoMark";
 import { Avatar } from "@/components/Avatar";
 import { fetchJsonOrThrow, ApiError } from "@/lib/api/client";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
 function withDevUserHeader(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
@@ -148,7 +149,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
             >
               <LogoMark size={18} className="opacity-95" />
             </div>
-            <span className="hidden text-lg font-bold tracking-tight lg:block">TradeSynapse</span>
+            <span className="hidden text-lg font-bold tracking-tight lg:block">{BRAND_NAME}</span>
           </Link>
 
           {/* Desktop Product Nav */}
@@ -325,7 +326,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           <div className="space-y-3">
              <div className="flex items-center gap-2 font-bold text-[var(--foreground)]">
                 <span className="h-4 w-4 bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] rounded-sm"></span>
-                TradeSynapse
+               {BRAND_NAME}
              </div>
              <p className="text-xs leading-relaxed max-w-[200px]">
                Next-generation spot trading platform with built-in P2P execution and AI-driven risk management.
@@ -360,9 +361,9 @@ export function SiteChrome({ children }: { children: ReactNode }) {
             </ul>
           </div>
         </div>
-        <div className="mt-12 text-xs border-t border-[var(--border)] pt-8">
-           © 2026 TradeSynapse. All rights reserved.
-        </div>
+          <div className="mt-12 text-xs border-t border-[var(--border)] pt-8">
+            © 2026 {BRAND_NAME}. All rights reserved.
+          </div>
       </footer>
     </div>
   );

@@ -4,9 +4,10 @@ import { SiteChrome } from "@/components/SiteChrome";
 import { P2PMarketplace } from "./P2PMarketplace";
 import { SUPPORTED_P2P_COUNTRIES } from "@/lib/p2p/supportedCountries";
 import { countryNameToIso2 } from "@/lib/p2p/countryIso2";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
 export const metadata: Metadata = {
-  title: "P2P Trading | TradeSynapse",
+  title: `P2P Trading | ${BRAND_NAME}`,
   description: "Buy and sell crypto directly with other users. Secure escrow and local payment rails.",
 };
 

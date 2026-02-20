@@ -1,10 +1,11 @@
 import { SiteChrome } from "@/components/SiteChrome";
 import { AiAdvisorClient } from "./AiAdvisorClient";
+import { BRAND_NAME } from "@/lib/seo/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Security Center — TradeSynapse",
+  title: `Security Center — ${BRAND_NAME}`,
   description: "Learn about common scam typologies and how our AI protects your funds.",
 };
 
