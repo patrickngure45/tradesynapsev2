@@ -21,6 +21,14 @@ const SMTP_HOST = process.env.SMTP_HOST ?? "";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "465", 10);
 const SMTP_USER = process.env.SMTP_USER ?? "";
 const SMTP_PASS = process.env.SMTP_PASS ?? "";
+const SMTP_SECURE_ENV = (process.env.SMTP_SECURE ?? "").trim().toLowerCase();
+const SMTP_SECURE = SMTP_SECURE_ENV
+  ? SMTP_SECURE_ENV === "1" || SMTP_SECURE_ENV === "true" || SMTP_SECURE_ENV === "yes"
+  : SMTP_PORT === 465;
+
+const SMTP_CONNECTION_TIMEOUT_MS = parseInt(process.env.SMTP_CONNECTION_TIMEOUT_MS ?? "20000", 10);
+const SMTP_GREETING_TIMEOUT_MS = parseInt(process.env.SMTP_GREETING_TIMEOUT_MS ?? "20000", 10);
+const SMTP_SOCKET_TIMEOUT_MS = parseInt(process.env.SMTP_SOCKET_TIMEOUT_MS ?? "45000", 10);
 const EMAIL_FROM = process.env.EMAIL_FROM ?? "no-reply@coinwaka.com";
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Coinwaka";
 
@@ -63,13 +71,19 @@ function getTransporter(): Transporter | null {
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
+      secure: SMTP_SECURE,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
+      // For STARTTLS ports (e.g. 587), require TLS upgrade.
+      ...(SMTP_SECURE ? {} : { requireTLS: true }),
+      tls: {
+        servername: SMTP_HOST,
+        minVersion: "TLSv1.2",
+      },
       pool: true,
       maxConnections: 3,
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 30_000,
+      connectionTimeout: Number.isFinite(SMTP_CONNECTION_TIMEOUT_MS) ? SMTP_CONNECTION_TIMEOUT_MS : 20_000,
+      greetingTimeout: Number.isFinite(SMTP_GREETING_TIMEOUT_MS) ? SMTP_GREETING_TIMEOUT_MS : 20_000,
+      socketTimeout: Number.isFinite(SMTP_SOCKET_TIMEOUT_MS) ? SMTP_SOCKET_TIMEOUT_MS : 45_000,
     });
   }
   return transporter;
