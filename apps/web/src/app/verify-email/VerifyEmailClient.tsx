@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 
 export function VerifyEmailClient() {
   const searchParams = useSearchParams();
@@ -19,20 +20,31 @@ export function VerifyEmailClient() {
 
     (async () => {
       try {
-        const res = await fetch("/api/account/verify-email", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        const data = await res.json();
-        if (res.ok && data.verified) {
+        const data = await fetchJsonOrThrow<{ ok?: boolean; verified?: boolean; error?: string }>(
+          "/api/account/verify-email",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ token }),
+          },
+        );
+
+        if (data.verified) {
           setStatus("success");
         } else {
           setStatus("error");
           setErrorMsg(data.error === "invalid_or_expired_token" ? "This link is invalid or has expired." : (data.error ?? "Verification failed."));
         }
-      } catch {
+      } catch (e) {
         setStatus("error");
+        if (e instanceof ApiError) {
+          if (e.code === "csrf_token_mismatch") {
+            setErrorMsg("Security check failed (CSRF). Please refresh this page and try again.");
+            return;
+          }
+          setErrorMsg(typeof e.details === "string" ? e.details : e.code);
+          return;
+        }
         setErrorMsg("Network error — please try again.");
       }
     })();
