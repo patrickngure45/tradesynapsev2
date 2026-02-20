@@ -10,9 +10,11 @@ type ServiceExpectation = { service: string; staleAfterMs: number };
 
 function getExpectedServices(): ServiceExpectation[] {
   const expected: ServiceExpectation[] = [
-    // Long-running background worker.
-    { service: "outbox-worker", staleAfterMs: 2 * 60_000 },
+    // Optional background worker (can be run as a dedicated service or via cron).
   ];
+
+  const expectOutboxWorker = (process.env.EXPECT_OUTBOX_WORKER ?? "").trim() === "1";
+  if (expectOutboxWorker) expected.push({ service: "outbox-worker", staleAfterMs: 10 * 60_000 });
 
   // Optional scheduled jobs: only treat as required when explicitly enabled.
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
