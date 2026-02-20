@@ -44,8 +44,10 @@ async function handle(request: Request) {
     );
   }
 
+  const cfg = emailConfigSummary();
+  const attemptedTransport = cfg.resend_api_configured ? "resend_api" : (cfg.smtp_host_configured && cfg.smtp_user_configured && cfg.smtp_pass_configured ? "smtp" : "demo");
+
   try {
-    const cfg = emailConfigSummary();
     const result = await sendMail({
       to,
       subject: "Coinwaka test email",
@@ -56,7 +58,7 @@ async function handle(request: Request) {
     return NextResponse.json({
       ok: true,
       to,
-      used_transport: result.demo ? "demo" : (cfg.resend_api_configured ? "resend_api" : "smtp"),
+      used_transport: result.demo ? "demo" : attemptedTransport,
       resend_api_configured: cfg.resend_api_configured,
       smtp_configured: cfg.smtp_host_configured && cfg.smtp_user_configured && cfg.smtp_pass_configured,
       sent: result.sent,
@@ -66,7 +68,14 @@ async function handle(request: Request) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
-      { ok: false, error: "email_send_failed", message },
+      {
+        ok: false,
+        error: "email_send_failed",
+        message,
+        attempted_transport: attemptedTransport,
+        resend_api_configured: cfg.resend_api_configured,
+        smtp_configured: cfg.smtp_host_configured && cfg.smtp_user_configured && cfg.smtp_pass_configured,
+      },
       { status: 502 },
     );
   }
