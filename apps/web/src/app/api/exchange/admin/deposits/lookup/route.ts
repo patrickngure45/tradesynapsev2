@@ -23,6 +23,12 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
+function envInt(name: string, fallback: number): number {
+  const raw = String(process.env[name] ?? "").trim();
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
 type DepositEventRow = {
   id: number;
   chain: string;
@@ -85,8 +91,19 @@ export async function GET(request: Request) {
   try {
     const provider = getBscProvider();
 
-    const [tip, onChain] = await Promise.all([
+    const confirmationsRequired = clampInt(envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
+
+    const [tip, cursorRow, onChain] = await Promise.all([
       provider.getBlockNumber(),
+      retryOnceOnTransientDbError(async () => {
+        const rows = await sql<{ last_scanned_block: number }[]>`
+          SELECT last_scanned_block
+          FROM ex_chain_deposit_cursor
+          WHERE chain = 'bsc'
+          LIMIT 1
+        `;
+        return rows[0] ?? null;
+      }),
       (async () => {
         if (!txHash) return null;
         const receipt = await provider.getTransactionReceipt(txHash);
@@ -111,6 +128,10 @@ export async function GET(request: Request) {
     const resolvedToAddress = normalizeAddress(
       address || (onChain && onChain.found && onChain.to ? onChain.to : ""),
     );
+
+    const safeTip = Math.max(0, tip - confirmationsRequired);
+    const cursorLast = cursorRow ? Number(cursorRow.last_scanned_block ?? 0) : 0;
+    const cursorLagBlocks = Math.max(0, safeTip - cursorLast);
 
     const depositAddress = resolvedToAddress
       ? await retryOnceOnTransientDbError(async () => {
@@ -198,10 +219,29 @@ export async function GET(request: Request) {
 
     const credited = events.some((e) => Boolean(e.journal_entry_id));
 
+    const uncreditedForAddress = resolvedToAddress
+      ? await retryOnceOnTransientDbError(async () => {
+          const rows = await sql<{ count: number }[]>`
+            SELECT count(*)::int AS count
+            FROM ex_chain_deposit_event
+            WHERE chain = 'bsc'
+              AND lower(to_address) = ${resolvedToAddress}
+              AND journal_entry_id IS NULL
+          `;
+          return Number(rows[0]?.count ?? 0) || 0;
+        })
+      : 0;
+
     return NextResponse.json({
       ok: true,
       chain: "bsc",
       tip,
+      confirmations_required: confirmationsRequired,
+      safe_tip: safeTip,
+      cursor: {
+        last_scanned_block: cursorLast,
+        lag_blocks: cursorLagBlocks,
+      },
       query: {
         address: resolvedToAddress || null,
         tx_hash: txHash || null,
@@ -218,6 +258,7 @@ export async function GET(request: Request) {
       onchain: onChain,
       events,
       credited,
+      uncredited_for_address: uncreditedForAddress,
       journal_lines: journalLines,
     });
   } catch (e) {
