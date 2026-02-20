@@ -2,6 +2,8 @@ import type { MetadataRoute } from "next";
 
 import { getPublicBaseUrlOrigin } from "@/lib/seo/publicBaseUrl";
 
+export const dynamic = "force-dynamic";
+
 const PUBLIC_PATHS: Array<{ path: string; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"]; priority: number }> = [
   { path: "/", changeFrequency: "daily", priority: 1 },
   { path: "/markets", changeFrequency: "hourly", priority: 0.9 },
