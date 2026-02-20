@@ -14,6 +14,9 @@
 # Logs
 **/*.log
 
+# Curl cookie jars
+cookies*.txt
+
 # OS/editor
 .DS_Store
 Thumbs.db

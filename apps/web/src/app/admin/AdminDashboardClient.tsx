@@ -81,13 +81,31 @@ type AdminSystemStatus = {
 };
 
 // --- Helpers ---
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)__csrf=([^;]+)/);
+  return match?.[1] ?? null;
+}
+
 async function adminFetch(path: string, init?: RequestInit) {
-  const res = await fetch(path, {
-    ...init,
+  const mergedInit: RequestInit = {
+    ...(init ?? {}),
     credentials: "include",
-    headers: {
-      ...(init?.headers ?? {}),
-    },
+  };
+
+  // Attach CSRF double-submit token on mutating requests.
+  const method = String(mergedInit.method ?? "GET").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) {
+      const headers = new Headers(mergedInit.headers);
+      if (!headers.has("x-csrf-token")) headers.set("x-csrf-token", csrf);
+      mergedInit.headers = headers;
+    }
+  }
+
+  const res = await fetch(path, {
+    ...mergedInit,
   });
   const text = await res.text();
   let json: unknown;
@@ -225,7 +243,7 @@ function normalizeWalletData(raw: any): WalletData {
 }
 
 export function AdminDashboardClient() {
-  const [tab, setTab] = useState<"wallet" | "withdrawals" | "reconciliation" | "dead-letters" | "audit-log" | "kyc-review">("wallet");
+  const [tab, setTab] = useState<"wallet" | "deposits" | "withdrawals" | "reconciliation" | "dead-letters" | "audit-log" | "kyc-review">("wallet");
 
   const [sysStatus, setSysStatus] = useState<AdminSystemStatus | null>(null);
   const [sysStatusError, setSysStatusError] = useState<string | null>(null);
@@ -285,6 +303,54 @@ export function AdminDashboardClient() {
   // Wallet state
   const [walletData, setWalletData] = useState<WalletData | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
+
+  // Deposit tools state (admin)
+  const [depTxHash, setDepTxHash] = useState<string>("");
+  const [depAddress, setDepAddress] = useState<string>("");
+  const [depConfirmations, setDepConfirmations] = useState<number>(2);
+  const [depLoading, setDepLoading] = useState<"lookup" | "credit" | null>(null);
+  const [depResult, setDepResult] = useState<any>(null);
+  const [depToolError, setDepToolError] = useState<string | null>(null);
+
+  const runDepositLookup = useCallback(async () => {
+    setDepLoading("lookup");
+    setDepToolError(null);
+    setDepResult(null);
+    try {
+      const params = new URLSearchParams({ chain: "bsc" });
+      if (depTxHash.trim()) params.set("tx_hash", depTxHash.trim());
+      if (depAddress.trim()) params.set("address", depAddress.trim());
+      const out = await adminFetch(`/api/exchange/admin/deposits/lookup?${params.toString()}`);
+      setDepResult(out);
+    } catch (e: any) {
+      setDepToolError(e?.message ?? "lookup_failed");
+    } finally {
+      setDepLoading(null);
+    }
+  }, [depTxHash, depAddress]);
+
+  const runDepositCredit = useCallback(async () => {
+    const tx = depTxHash.trim();
+    if (!tx) {
+      setDepToolError("missing_tx_hash");
+      return;
+    }
+    setDepLoading("credit");
+    setDepToolError(null);
+    setDepResult(null);
+    try {
+      const out = await adminFetch(`/api/exchange/admin/deposits/credit`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chain: "bsc", tx_hash: tx, confirmations: depConfirmations }),
+      });
+      setDepResult(out);
+    } catch (e: any) {
+      setDepToolError(e?.message ?? "credit_failed");
+    } finally {
+      setDepLoading(null);
+    }
+  }, [depTxHash, depConfirmations]);
 
   // Audit log state
   type AuditRow = {
@@ -534,12 +600,105 @@ export function AdminDashboardClient() {
 
   const refreshCurrentTab = useCallback(() => {
     if (tab === "wallet") return fetchWallet();
+    if (tab === "deposits") return;
     if (tab === "withdrawals") return fetchWithdrawals();
     if (tab === "reconciliation") return fetchRecon();
     if (tab === "dead-letters") return fetchDeadLetters(0);
     if (tab === "audit-log") return fetchAuditLog(0);
     if (tab === "kyc-review") return fetchKycSubmissions(0);
   }, [tab, fetchWallet, fetchWithdrawals, fetchRecon, fetchDeadLetters, fetchAuditLog, fetchKycSubmissions]);
+
+  const DepositToolsCard = () => (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold tracking-tight">Deposit Tools</h3>
+        <Badge text="Admin" variant="blue" />
+      </div>
+      <p className="mt-0.5 text-[10px] text-[var(--muted)]">Lookup or credit a deposit by tx hash (BNB, allowlisted tokens).</p>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <label className="block">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Tx Hash</div>
+          <input
+            value={depTxHash}
+            onChange={(e) => setDepTxHash(e.target.value)}
+            placeholder="0x…"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-mono text-[var(--foreground)] outline-none"
+          />
+        </label>
+        <label className="block">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Deposit Address (optional)</div>
+          <input
+            value={depAddress}
+            onChange={(e) => setDepAddress(e.target.value)}
+            placeholder="0x…"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-mono text-[var(--foreground)] outline-none"
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+          confirmations
+          <input
+            type="number"
+            min={0}
+            max={200}
+            value={depConfirmations}
+            onChange={(e) => setDepConfirmations(Number(e.target.value || 0))}
+            className="w-20 rounded border border-[var(--border)] bg-[var(--card-2)] px-2 py-1 text-[10px] text-[var(--foreground)]"
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={runDepositLookup}
+          disabled={depLoading !== null}
+          className="rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[color-mix(in_srgb,var(--card-2)_75%,transparent)] disabled:opacity-60"
+        >
+          {depLoading === "lookup" ? "Looking up…" : "Lookup"}
+        </button>
+
+        <button
+          type="button"
+          onClick={runDepositCredit}
+          disabled={depLoading !== null}
+          className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--accent-foreground)] hover:opacity-90 disabled:opacity-60"
+        >
+          {depLoading === "credit" ? "Crediting…" : "Credit"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setDepToolError(null);
+            setDepResult(null);
+          }}
+          className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+        >
+          clear
+        </button>
+      </div>
+
+      {depToolError ? (
+        <div className="mt-3 rounded border border-rose-300 bg-rose-50 px-3 py-2 text-[10px] text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+          {depToolError}
+        </div>
+      ) : null}
+
+      {depResult ? (
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card-2)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Result</div>
+            {depResult?.ok ? <Badge text="OK" variant="green" /> : <Badge text="Error" variant="red" />}
+          </div>
+          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--foreground)]">
+            {JSON.stringify(depResult, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
 
   // Auto-refresh on tab/filter change + polling
   useEffect(() => {
@@ -612,6 +771,7 @@ export function AdminDashboardClient() {
           {(
             [
               { key: "wallet", label: "Wallet" },
+              { key: "deposits", label: "Deposits" },
               { key: "withdrawals", label: "Withdrawals" },
               { key: "reconciliation", label: "Reconciliation" },
               { key: "dead-letters", label: "Dead Letters" },
@@ -739,6 +899,9 @@ export function AdminDashboardClient() {
                   </div>
                 </div>
               </div>
+
+              {/* Deposit Tools */}
+              <DepositToolsCard />
 
               {/* On-Chain Balances */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
@@ -910,6 +1073,13 @@ export function AdminDashboardClient() {
               </div>
             </>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* ========== Deposits ========== */}
+      {tab === "deposits" ? (
+        <div className="grid gap-6">
+          <DepositToolsCard />
         </div>
       ) : null}
 
