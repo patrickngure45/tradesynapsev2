@@ -7,6 +7,14 @@ import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockc
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type InFlight = { startedAtMs: number; id: string };
+let inFlight: InFlight | null = null;
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
 function requireCronAuth(req: NextRequest): string | null {
   if (process.env.NODE_ENV !== "production") return null;
 
@@ -24,6 +32,24 @@ export async function POST(req: NextRequest) {
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });
   }
+
+  // Prevent overlapping scans in the same Node process (cron retries/timeouts can
+  // otherwise pile up and OOM the web service).
+  const nowMs = Date.now();
+  const lockTtlMs = clampInt(Number(process.env.EXCHANGE_SCAN_LOCK_TTL_MS ?? 10 * 60_000), 30_000, 60 * 60_000);
+  if (inFlight && nowMs - inFlight.startedAtMs < lockTtlMs) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "scan_in_progress",
+        started_at: new Date(inFlight.startedAtMs).toISOString(),
+        hint: "Another scan is already running; wait for it to finish or increase EXCHANGE_SCAN_LOCK_TTL_MS.",
+      },
+      { status: 429 },
+    );
+  }
+  const myInFlight: InFlight = { startedAtMs: nowMs, id: crypto.randomUUID() };
+  inFlight = myInFlight;
 
   const sql = getSql();
 
@@ -45,22 +71,48 @@ export async function POST(req: NextRequest) {
   const maxBlocksRaw = url.searchParams.get("max_blocks");
   const confirmationsRaw = url.searchParams.get("confirmations");
   const blocksPerBatchRaw = url.searchParams.get("blocks_per_batch");
+  const maxMsRaw = url.searchParams.get("max_ms");
   const tokensRaw = url.searchParams.get("tokens");
   const nativeRaw = url.searchParams.get("native");
   const symbolsRaw = url.searchParams.get("symbols");
 
   const fromBlock = fromBlockRaw ? Number(fromBlockRaw) : undefined;
-  const maxBlocks = maxBlocksRaw ? Number(maxBlocksRaw) : undefined;
+  // Hard cap request override values; use env vars for bigger backfills.
+  const maxBlocks = maxBlocksRaw ? clampInt(Number(maxBlocksRaw), 10, 20_000) : undefined;
   const confirmations = confirmationsRaw ? Number(confirmationsRaw) : undefined;
-  const blocksPerBatch = blocksPerBatchRaw ? Number(blocksPerBatchRaw) : undefined;
+  const blocksPerBatch = blocksPerBatchRaw ? clampInt(Number(blocksPerBatchRaw), 10, 3_000) : undefined;
+  const maxMs = maxMsRaw ? clampInt(Number(maxMsRaw), 1_000, 120_000) : undefined;
 
-  const scanTokens = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
+  const scanTokensRaw = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
   const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
 
   const tokenSymbols = (symbolsRaw ?? "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean);
+
+  // Production-safe default: do NOT scan all enabled tokens unless explicitly allowlisted.
+  // Token scans can be very expensive (many assets × many addresses × getLogs ranges).
+  const allowTokenScanAll = String(process.env.ALLOW_TOKEN_SCAN_ALL ?? "").trim() === "1";
+
+  if (process.env.NODE_ENV === "production" && scanTokensRaw === true && tokenSymbols.length === 0 && !allowTokenScanAll) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "token_symbols_required",
+        hint: "Pass symbols=USDT,USDC (recommended) or set ALLOW_TOKEN_SCAN_ALL=1 to scan all enabled tokens (not recommended).",
+      },
+      { status: 400 },
+    );
+  }
+
+  const scanTokens =
+    scanTokensRaw ??
+    (tokenSymbols.length > 0
+      ? true
+      : allowTokenScanAll
+        ? true
+        : false);
 
   try {
     await beat({ event: "start" });
@@ -79,6 +131,7 @@ export async function POST(req: NextRequest) {
       maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,
       confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
       blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
+      maxMs: Number.isFinite(maxMs as any) ? (maxMs as number) : undefined,
       scanTokens,
       scanNative,
       tokenSymbols: tokenSymbols.length ? tokenSymbols : undefined,
@@ -100,6 +153,9 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 },
     );
+  } finally {
+    // Release lock only if we still own it.
+    if (inFlight?.id === myInFlight.id) inFlight = null;
   }
 }
 

@@ -610,6 +610,7 @@ export async function scanAndCreditBscDeposits(
     maxBlocks?: number;
     confirmations?: number;
     blocksPerBatch?: number;
+    maxMs?: number;
     scanNative?: boolean;
     scanTokens?: boolean;
     tokenSymbols?: string[];
@@ -629,6 +630,8 @@ export async function scanAndCreditBscDeposits(
   matchedDeposits: number;
   credited: number;
   duplicates: number;
+  stoppedEarly?: boolean;
+  stopReason?: "time_budget";
 }> {
   const provider = getBscProvider();
   const chain: "bsc" = "bsc";
@@ -638,6 +641,9 @@ export async function scanAndCreditBscDeposits(
   const confirmations = clamp(opts?.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
   const blocksPerBatch = clamp(opts?.blocksPerBatch ?? envInt("BSC_DEPOSIT_BLOCKS_PER_BATCH", 1200), 10, 10_000);
   const maxBlocks = clamp(opts?.maxBlocks ?? envInt("BSC_DEPOSIT_MAX_BLOCKS_PER_RUN", 15_000), 10, 200_000);
+
+  const maxMs = clamp(opts?.maxMs ?? envInt("BSC_DEPOSIT_MAX_MS", 0), 0, 5 * 60_000);
+  const startedAtMs = Date.now();
 
   const scanNative = opts?.scanNative ?? true;
   const scanTokens = opts?.scanTokens ?? true;
@@ -742,13 +748,27 @@ export async function scanAndCreditBscDeposits(
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
   const toTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
 
+  // Precompute watched-address topic chunks once per scan run.
+  const toTopicChunksAll = scanTokens
+    ? chunk(Array.from(addressToUser.keys()).map(encodeTopicAddress), toTopicChunkSize)
+    : [];
+
   let batches = 0;
   let checkedLogs = 0;
   let matchedDeposits = 0;
   let credited = 0;
   let duplicates = 0;
 
+  let stoppedEarly = false;
+  let stopReason: "time_budget" | undefined;
+
   for (let start = fromBlock; start <= toBlock; start += blocksPerBatch) {
+    if (maxMs > 0 && Date.now() - startedAtMs > maxMs) {
+      stoppedEarly = true;
+      stopReason = "time_budget";
+      break;
+    }
+
     const end = Math.min(toBlock, start + blocksPerBatch - 1);
     batches += 1;
 
@@ -808,9 +828,7 @@ export async function scanAndCreditBscDeposits(
     for (const contracts of contractChunks) {
       if (!contracts.length) continue;
 
-      const toTopicsAll = Array.from(addressToUser.keys()).map(encodeTopicAddress);
-      const toTopicChunks = chunk(toTopicsAll, toTopicChunkSize);
-      for (const toTopics of toTopicChunks) {
+      for (const toTopics of toTopicChunksAll) {
         if (!toTopics.length) continue;
 
         const logs = await getLogsBatchedOrSplit(provider, {
@@ -880,5 +898,6 @@ export async function scanAndCreditBscDeposits(
     matchedDeposits,
     credited,
     duplicates,
+    ...(stoppedEarly ? { stoppedEarly, stopReason } : {}),
   };
 }
