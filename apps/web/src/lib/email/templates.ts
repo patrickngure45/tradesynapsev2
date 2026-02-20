@@ -11,6 +11,20 @@
 
 const BRAND = (process.env.EMAIL_BRAND ?? process.env.EMAIL_FROM_NAME ?? "Coinwaka").trim() || "Coinwaka";
 const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL ?? "support@coinwaka.com").trim() || "support@coinwaka.com";
+const SITE_URL_RAW = (process.env.NEXT_PUBLIC_BASE_URL ?? "").trim();
+const SITE_ORIGIN = (() => {
+  try {
+    if (!SITE_URL_RAW) return "";
+    return new URL(SITE_URL_RAW).origin;
+  } catch {
+    return "";
+  }
+})();
+
+// Use a PNG/JPG logo URL for best compatibility (many clients block SVG).
+const EMAIL_LOGO_URL = (process.env.EMAIL_LOGO_URL ?? "").trim();
+const EMAIL_LOGO_ALT = (process.env.EMAIL_LOGO_ALT ?? BRAND).trim() || BRAND;
+const EMAIL_LOGO_WIDTH = Math.max(60, Math.min(240, parseInt(process.env.EMAIL_LOGO_WIDTH ?? "120", 10) || 120));
 
 function escapeHtml(text: string): string {
   return String(text)
@@ -24,6 +38,15 @@ function escapeHtml(text: string): string {
 function wrap(opts: { bodyHtml: string; preheader: string }): string {
   const year = new Date().getFullYear();
   const preheader = escapeHtml(opts.preheader);
+
+  const brandHeaderHtml = EMAIL_LOGO_URL
+    ? `
+      <div style="line-height:0;">
+        <img src="${escapeHtml(EMAIL_LOGO_URL)}" width="${EMAIL_LOGO_WIDTH}" alt="${escapeHtml(EMAIL_LOGO_ALT)}" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:100%;margin:0 auto;" />
+      </div>
+      <div style="margin-top:10px;font-size:16px;font-weight:700;letter-spacing:-0.01em;color:#ffffff;">${escapeHtml(BRAND)}</div>
+    `
+    : `${escapeHtml(BRAND)}`;
 
   // NOTE: Use table layout for broad email client compatibility.
   // Avoid relying on gradients/dark backgrounds (often render oddly in clients/dark mode).
@@ -48,7 +71,7 @@ function wrap(opts: { bodyHtml: string; preheader: string }): string {
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
           <tr>
             <td align="center" style="padding:18px 24px;background-color:#4f46e5;color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.01em;">
-              ${escapeHtml(BRAND)}
+              ${brandHeaderHtml}
             </td>
           </tr>
 
@@ -61,7 +84,9 @@ function wrap(opts: { bodyHtml: string; preheader: string }): string {
           <tr>
             <td style="padding:16px 24px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;" align="center">
               <div>&copy; ${year} ${escapeHtml(BRAND)}.</div>
-              <div style="margin-top:6px;">Need help? <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(SUPPORT_EMAIL)}</a></div>
+              ${SITE_ORIGIN ? `<div style="margin-top:6px;">Website: <a href="${escapeHtml(SITE_ORIGIN)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(SITE_ORIGIN)}</a></div>` : ""}
+              <div style="margin-top:6px;">Support: <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(SUPPORT_EMAIL)}</a></div>
+              <div style="margin-top:10px;color:#9ca3af;font-size:11px;">You’re receiving this email because an account action was requested for your email address.</div>
             </td>
           </tr>
         </table>
