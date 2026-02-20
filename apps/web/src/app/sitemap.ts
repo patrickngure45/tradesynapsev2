@@ -6,10 +6,10 @@ const PUBLIC_PATHS: Array<{ path: string; changeFrequency: MetadataRoute.Sitemap
   { path: "/", changeFrequency: "daily", priority: 1 },
   { path: "/markets", changeFrequency: "hourly", priority: 0.9 },
   { path: "/p2p", changeFrequency: "daily", priority: 0.8 },
-  { path: "/copy-trading", changeFrequency: "weekly", priority: 0.7 },
-  { path: "/arbitrage", changeFrequency: "weekly", priority: 0.7 },
   { path: "/express", changeFrequency: "weekly", priority: 0.6 },
-  { path: "/support", changeFrequency: "monthly", priority: 0.5 },
+  { path: "/support/help", changeFrequency: "monthly", priority: 0.5 },
+  { path: "/support/fees", changeFrequency: "monthly", priority: 0.5 },
+  { path: "/support/api", changeFrequency: "monthly", priority: 0.5 },
   { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
   { path: "/terms", changeFrequency: "yearly", priority: 0.3 },
 ];

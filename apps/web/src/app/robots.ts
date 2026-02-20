@@ -16,6 +16,8 @@ export default function robots(): MetadataRoute.Robots {
         "/wallet",
         "/notifications",
         "/verify-email",
+        "/login",
+        "/signup",
       ],
     },
     sitemap: `${origin}/sitemap.xml`,
