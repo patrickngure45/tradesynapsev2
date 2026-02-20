@@ -242,9 +242,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
   | {
      ok: true;
      tx_hash: string;
-     outcome: "credited" | "duplicate";
-     amount: string;
-     asset_symbol: string;
+     credits: Array<{ asset_symbol: string; amount: string; outcome: "credited" | "duplicate" }>;
      confirmations_required: number;
    }
   | { ok: false; error: string; message?: string }
@@ -912,12 +910,19 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    });
 
    if (res && typeof res === "object" && res.ok === true) {
+    const creditsRaw = Array.isArray((res as any).credits) ? ((res as any).credits as any[]) : [];
+    const credits = creditsRaw
+      .map((c) => ({
+        asset_symbol: String(c?.asset_symbol ?? "").toUpperCase(),
+        amount: String(c?.amount ?? ""),
+        outcome: (String(c?.outcome ?? "").toLowerCase() === "duplicate" ? "duplicate" : "credited") as any,
+      }))
+      .filter((c) => c.asset_symbol && c.amount);
+
     setReportResult({
      ok: true,
      tx_hash: String(res.tx_hash ?? tx),
-     outcome: (String(res.outcome ?? "").toLowerCase() === "duplicate" ? "duplicate" : "credited") as any,
-     amount: String(res.amount ?? ""),
-     asset_symbol: String(res.asset_symbol ?? "BNB"),
+     credits,
      confirmations_required: toNumberSafe(res.confirmations_required),
     });
     setToastKind("success");
@@ -1353,7 +1358,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
    <div className="flex flex-wrap items-center justify-between gap-2">
      <div className="text-[11px] font-semibold text-[var(--foreground)]">Report a deposit (tx hash)</div>
-     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">BNB</div>
+     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">BNB / USDT / USDC</div>
    </div>
    <p className="mt-1 text-[11px] text-[var(--muted)]">
      If a deposit doesn’t reflect automatically, paste the transaction hash here to verify and credit it safely.
@@ -1382,7 +1387,11 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    {reportResult ? (
      reportResult.ok ? (
        <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
-         {reportResult.outcome === "duplicate" ? "Already credited." : "Credited."} +{reportResult.amount} {reportResult.asset_symbol}
+         {reportResult.credits.length === 0
+           ? "Processed."
+           : reportResult.credits.length === 1
+             ? `${reportResult.credits[0]!.outcome === "duplicate" ? "Already credited" : "Credited"}. +${reportResult.credits[0]!.amount} ${reportResult.credits[0]!.asset_symbol}`
+             : `Processed ${reportResult.credits.length} transfers.`}
        </div>
      ) : (
        <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">

@@ -286,6 +286,14 @@ type NativeAsset = {
   decimals: number;
 };
 
+function parseSymbolAllowlist(raw: string, fallback: string[]): string[] {
+  const out = String(raw || "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  return out.length ? out : fallback;
+}
+
 export async function ingestNativeBnbDepositTx(
   sql: Sql,
   args: {
@@ -417,6 +425,178 @@ export async function ingestNativeBnbDepositTx(
     assetSymbol: "BNB",
     amount,
     outcome,
+  };
+}
+
+export async function ingestBscTokenDepositTx(
+  sql: Sql,
+  args: {
+    txHash: string;
+    userId: string;
+    depositAddress: string;
+    confirmations?: number;
+    tokenSymbols?: string[];
+  },
+): Promise<
+  | {
+      ok: true;
+      chain: "bsc";
+      txHash: string;
+      blockNumber: number;
+      confirmations: number;
+      safeTip: number;
+      depositAddress: string;
+      matches: number;
+      credits: Array<{
+        assetSymbol: string;
+        amount: string;
+        logIndex: number;
+        outcome: "credited" | "duplicate";
+      }>;
+    }
+  | {
+      ok: false;
+      error:
+        | "tx_not_found"
+        | "tx_not_confirmed"
+        | "tx_failed"
+        | "no_matching_token_transfers"
+        | "token_asset_not_enabled";
+      txHash: string;
+      details?: any;
+    }
+> {
+  const provider = getBscProvider();
+  const chain: "bsc" = "bsc";
+
+  const confirmations = clamp(args.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
+  const tip = await provider.getBlockNumber();
+  const safeTip = Math.max(0, tip - confirmations);
+
+  const txHash = String(args.txHash || "").trim();
+  if (!txHash.startsWith("0x") || txHash.length < 10) {
+    return { ok: false, error: "tx_not_found", txHash };
+  }
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) return { ok: false, error: "tx_not_found", txHash };
+
+  const blockNumber = Number(receipt.blockNumber);
+  if (!Number.isFinite(blockNumber) || blockNumber <= 0) {
+    return { ok: false, error: "tx_not_found", txHash, details: { blockNumber: receipt.blockNumber } };
+  }
+
+  if (blockNumber > safeTip) {
+    return {
+      ok: false,
+      error: "tx_not_confirmed",
+      txHash,
+      details: { blockNumber, tip, safeTip, confirmations },
+    };
+  }
+
+  if (typeof receipt.status === "number" && receipt.status !== 1) {
+    return { ok: false, error: "tx_failed", txHash, details: { status: receipt.status } };
+  }
+
+  const depositAddress = normalizeAddress(args.depositAddress);
+  if (!depositAddress || !depositAddress.startsWith("0x") || depositAddress.length !== 42) {
+    return { ok: false, error: "no_matching_token_transfers", txHash, details: { depositAddress } };
+  }
+
+  const allowSymbols = (args.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+  const symbols = allowSymbols.length
+    ? allowSymbols
+    : parseSymbolAllowlist(process.env.BSC_REPORT_TOKEN_SYMBOLS ?? "", ["USDT", "USDC"]);
+
+  const assets = await sql<DepositAsset[]>`
+    SELECT id::text AS id, symbol, decimals, contract_address
+    FROM ex_asset
+    WHERE chain = ${chain}
+      AND is_enabled = true
+      AND contract_address IS NOT NULL
+      AND upper(symbol) = ANY(${symbols})
+    ORDER BY symbol ASC
+  `;
+
+  if (assets.length === 0) {
+    return { ok: false, error: "token_asset_not_enabled", txHash, details: { symbols } };
+  }
+
+  const contractToAsset = new Map<string, DepositAsset>();
+  for (const a of assets) {
+    const c = normalizeAddress(a.contract_address);
+    if (c) contractToAsset.set(c, a);
+  }
+
+  const cols = await getDepositEventCols(sql);
+  const transferTopic = ethers.id("Transfer(address,address,uint256)");
+
+  const credits: Array<{ assetSymbol: string; amount: string; logIndex: number; outcome: "credited" | "duplicate" }> = [];
+  let matches = 0;
+
+  const logs = Array.isArray((receipt as any).logs) ? ((receipt as any).logs as Array<any>) : [];
+  for (const log of logs) {
+    const topics: string[] = Array.isArray(log?.topics) ? log.topics : [];
+    if (!topics?.length) continue;
+    if (String(topics[0]).toLowerCase() !== transferTopic.toLowerCase()) continue;
+
+    const to = decodeTopicAddress(topics?.[2] ?? "");
+    if (!to || to !== depositAddress) continue;
+
+    const contract = normalizeAddress(String(log?.address ?? ""));
+    const asset = contractToAsset.get(contract);
+    if (!asset) continue;
+
+    const from = decodeTopicAddress(topics?.[1] ?? "") || null;
+    let amountRaw: bigint;
+    try {
+      amountRaw = BigInt(String(log?.data ?? "0x0"));
+    } catch {
+      continue;
+    }
+    if (amountRaw <= 0n) continue;
+
+    const amount = ethers.formatUnits(amountRaw, asset.decimals);
+    const logIndex = Number((log as any)?.index ?? (log as any)?.logIndex ?? (log as any)?.log_index ?? 0);
+
+    matches += 1;
+    const outcome = await creditDepositEvent(sql as any, {
+      chain,
+      txHash,
+      logIndex,
+      blockNumber,
+      fromAddress: from,
+      toAddress: to,
+      userId: args.userId,
+      assetId: asset.id,
+      assetSymbol: asset.symbol,
+      amount,
+      cols,
+    });
+
+    credits.push({ assetSymbol: asset.symbol, amount, logIndex, outcome });
+  }
+
+  if (matches === 0) {
+    return {
+      ok: false,
+      error: "no_matching_token_transfers",
+      txHash,
+      details: { depositAddress, symbols },
+    };
+  }
+
+  return {
+    ok: true,
+    chain,
+    txHash,
+    blockNumber,
+    confirmations,
+    safeTip,
+    depositAddress,
+    matches,
+    credits,
   };
 }
 

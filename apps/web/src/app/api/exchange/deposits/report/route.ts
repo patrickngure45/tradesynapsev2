@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
-import { ingestNativeBnbDepositTx } from "@/lib/blockchain/depositIngest";
+import { ingestBscTokenDepositTx, ingestNativeBnbDepositTx } from "@/lib/blockchain/depositIngest";
 import { getBscProvider } from "@/lib/blockchain/wallet";
 
 export const runtime = "nodejs";
@@ -47,6 +47,21 @@ export async function POST(request: Request) {
       return apiError("invalid_tx_hash", { status: 400 });
     }
 
+    const ownedRows = await sql<{ address: string }[]>`
+      SELECT address
+      FROM ex_deposit_address
+      WHERE chain = 'bsc'
+        AND status = 'active'
+        AND user_id = ${userId}::uuid
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const depositAddress = ownedRows[0]?.address ? normalizeAddress(ownedRows[0].address) : "";
+    if (!depositAddress) {
+      return apiError("deposit_address_missing", { status: 400 });
+    }
+
     // Verify the tx is actually to THIS user's active deposit address.
     // This prevents a user from crediting someone else's deposit.
     const provider = getBscProvider();
@@ -54,57 +69,70 @@ export async function POST(request: Request) {
     if (!tx) return apiError("tx_not_found", { status: 404, details: { tx_hash: txHash } });
 
     const toAddress = tx.to ? normalizeAddress(tx.to) : "";
-    if (!toAddress) {
-      return apiError("not_a_native_transfer", { status: 400, details: { reason: "missing_to" } });
-    }
 
-    const owned = await sql<{ address: string }[]>`
-      SELECT address
-      FROM ex_deposit_address
-      WHERE chain = 'bsc'
-        AND status = 'active'
-        AND user_id = ${userId}::uuid
-        AND lower(address) = ${toAddress}
-      LIMIT 1
-    `;
+    // Case 1: native BNB transfer directly to the user's deposit address
+    if (toAddress && toAddress === depositAddress) {
+      const out = await ingestNativeBnbDepositTx(sql as any, {
+        txHash,
+        confirmations: input.confirmations,
+      });
 
-    if (owned.length === 0) {
-      return apiError("tx_to_not_your_deposit_address", {
-        status: 400,
-        details: { to_address: toAddress },
+      if (!out.ok) {
+        const status = out.error === "tx_not_confirmed" ? 202 : out.error === "tx_not_found" ? 404 : 400;
+        return apiError(out.error, { status, details: out.details ?? { tx_hash: txHash } });
+      }
+
+      if (String(out.userId) !== String(userId)) {
+        return apiError("tx_to_not_your_deposit_address", {
+          status: 400,
+          details: { to_address: out.toAddress },
+        });
+      }
+
+      return Response.json({
+        ok: true,
+        chain: out.chain,
+        tx_hash: out.txHash,
+        block_number: out.blockNumber,
+        confirmations_required: out.confirmations,
+        safe_tip: out.safeTip,
+        to_address: out.toAddress,
+        credits: [
+          {
+            asset_symbol: out.assetSymbol,
+            amount: out.amount,
+            outcome: out.outcome,
+          },
+        ],
       });
     }
 
-    const out = await ingestNativeBnbDepositTx(sql as any, {
+    // Case 2: token transfer(s) to the user's deposit address
+    const tokenOut = await ingestBscTokenDepositTx(sql as any, {
       txHash,
+      userId,
+      depositAddress,
       confirmations: input.confirmations,
     });
 
-    if (!out.ok) {
-      // Pass through known errors (safe; no secrets).
-      const status = out.error === "tx_not_confirmed" ? 202 : out.error === "tx_not_found" ? 404 : 400;
-      return apiError(out.error, { status, details: out.details ?? { tx_hash: txHash } });
-    }
-
-    // Double-check attribution.
-    if (String(out.userId) !== String(userId)) {
-      return apiError("tx_to_not_your_deposit_address", {
-        status: 400,
-        details: { to_address: out.toAddress },
-      });
+    if (!tokenOut.ok) {
+      const status = tokenOut.error === "tx_not_confirmed" ? 202 : tokenOut.error === "tx_not_found" ? 404 : 400;
+      return apiError(tokenOut.error, { status, details: tokenOut.details ?? { tx_hash: txHash } });
     }
 
     return Response.json({
       ok: true,
-      chain: out.chain,
-      tx_hash: out.txHash,
-      block_number: out.blockNumber,
-      confirmations_required: out.confirmations,
-      safe_tip: out.safeTip,
-      to_address: out.toAddress,
-      asset_symbol: out.assetSymbol,
-      amount: out.amount,
-      outcome: out.outcome,
+      chain: tokenOut.chain,
+      tx_hash: tokenOut.txHash,
+      block_number: tokenOut.blockNumber,
+      confirmations_required: tokenOut.confirmations,
+      safe_tip: tokenOut.safeTip,
+      to_address: tokenOut.depositAddress,
+      credits: tokenOut.credits.map((c) => ({
+        asset_symbol: c.assetSymbol,
+        amount: c.amount,
+        outcome: c.outcome,
+      })),
     });
   } catch (e) {
     const resp = responseForDbError("exchange.deposits.report", e);
