@@ -31,6 +31,22 @@ type BalanceRow = {
  available: string;
 };
 
+type PendingDepositRow = {
+  id: number;
+  chain: string;
+  tx_hash: string;
+  log_index: number;
+  block_number: number;
+  to_address: string;
+  asset_symbol: string;
+  asset_decimals: number;
+  amount: string;
+  confirmations: number;
+  confirmations_required: number;
+  status: "pending_confirmations" | "detected";
+  created_at: string;
+};
+
 type ProfileResponse = {
  user?: {
  country: string | null;
@@ -178,6 +194,9 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  const [balances, setBalances] = useState<BalanceRow[]>([]);
  const [holds, setHolds] = useState<Hold[]>([]);
+
+  const [pendingDeposits, setPendingDeposits] = useState<PendingDepositRow[]>([]);
+  const [pendingDepositsError, setPendingDepositsError] = useState<string | null>(null);
  const [localFiat, setLocalFiat] = useState<string>("USD");
  const [assetLocalRates, setAssetLocalRates] = useState<Record<string, number>>({});
  const [assetLocalRateSource, setAssetLocalRateSource] = useState<Record<string, string>>({});
@@ -789,6 +808,24 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  setBalances(nextBalances);
  setLastBalancesRefreshAt(Date.now());
 
+  // Best-effort: pending deposits (shows “pending confirmations” before credit).
+  try {
+    setPendingDepositsError(null);
+    const pd = await fetchJsonOrThrow<{ deposits?: PendingDepositRow[] }>("/api/exchange/deposits/pending", {
+      cache: "no-store",
+      headers: requestHeaders,
+    });
+    setPendingDeposits(Array.isArray(pd?.deposits) ? pd.deposits : []);
+  } catch (e) {
+    // If the user is not logged in (or header auth not set), don’t spam an error.
+    if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) {
+      setPendingDeposits([]);
+      return;
+    }
+    setPendingDeposits([]);
+    setPendingDepositsError(e instanceof Error ? e.message : String(e));
+  }
+
  try {
  const h = await fetchJsonOrThrow<{ holds?: Hold[] }>("/api/exchange/holds?status=all", {
   cache: "no-store",
@@ -1200,6 +1237,55 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      Your permanent deposit address will appear here once fetched.
    </div>
  )}
+
+ {pendingDepositsError ? (
+   <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+     Couldn’t load pending deposits.
+   </div>
+ ) : pendingDeposits.length > 0 ? (
+   <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
+     <div className="flex flex-wrap items-center justify-between gap-2">
+       <div className="text-[11px] font-semibold text-[var(--foreground)]">Pending confirmations</div>
+       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">Auto</div>
+     </div>
+
+     <div className="mt-2 grid gap-2">
+       {pendingDeposits.slice(0, 6).map((d) => {
+         const needed = Math.max(0, toNumberSafe(d.confirmations_required));
+         const got = Math.max(0, toNumberSafe(d.confirmations));
+         const done = needed === 0 ? true : got >= needed;
+         const confText = needed === 0 ? "final" : `${Math.min(got, needed)}/${needed} confs`;
+         const txHash = String(d.tx_hash);
+         const shortHash = txHash.length > 18 ? `${txHash.slice(0, 10)}…${txHash.slice(-6)}` : txHash;
+
+         return (
+           <div
+             key={`${d.tx_hash}:${d.log_index}`}
+             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2"
+           >
+             <div className="min-w-[200px]">
+               <div className="font-mono text-xs text-[var(--foreground)]" title={txHash}>
+                 {shortHash}
+               </div>
+               <div className="mt-0.5 truncate text-[10px] text-[var(--muted)]" title={d.to_address}>
+                 to {d.to_address}
+               </div>
+             </div>
+
+             <div className="flex items-center gap-3">
+               <div className="font-mono text-xs text-[var(--foreground)]">
+                 {fmtAmount(String(d.amount), toNumberSafe(d.asset_decimals))} {String(d.asset_symbol).toUpperCase()}
+               </div>
+               <div className={`text-[10px] font-bold uppercase tracking-widest ${done ? "text-emerald-400" : "text-[var(--warn)]"}`}>
+                 {done ? "Ready" : confText}
+               </div>
+             </div>
+           </div>
+         );
+       })}
+     </div>
+   </div>
+ ) : null}
 
  <details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
    <summary className="cursor-pointer text-[11px] font-semibold text-[var(--foreground)]">

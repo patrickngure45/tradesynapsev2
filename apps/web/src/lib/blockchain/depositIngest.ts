@@ -444,13 +444,16 @@ async function creditDepositEvent(
     cols?: { hasStatus: boolean; hasCreditedAt: boolean; hasConfirmedAt: boolean };
   },
 ): Promise<"credited" | "duplicate"> {
-  // Full idempotency is provided by ex_chain_deposit_event_uniq (chain, tx_hash, log_index).
+  // Idempotency is provided by ex_chain_deposit_event_uniq (chain, tx_hash, log_index).
+  // However, we also support a two-stage flow:
+  // - Stage A: record the deposit event as "seen" (journal_entry_id NULL)
+  // - Stage B: later credit it once confirmations are met
+  //
+  // So, if the row already exists but has no journal_entry_id, we still proceed to credit.
   return await sql.begin(async (tx) => {
     const txSql = tx as unknown as typeof sql;
 
-    const inserted = await txSql<
-      { id: number }[]
-    >`
+    const inserted = await txSql<{ id: number }[]>`
       INSERT INTO ex_chain_deposit_event (
         chain, tx_hash, log_index, block_number, from_address, to_address,
         user_id, asset_id, amount
@@ -470,7 +473,45 @@ async function creditDepositEvent(
       RETURNING id
     `;
 
-    if (inserted.length === 0) return "duplicate";
+    let eventId: number | null = inserted[0]?.id ?? null;
+    let alreadyCredited = false;
+
+    if (!eventId) {
+      const existing = await txSql<
+        { id: number; journal_entry_id: string | null }[]
+      >`
+        SELECT id, journal_entry_id
+        FROM ex_chain_deposit_event
+        WHERE chain = ${args.chain}
+          AND tx_hash = ${args.txHash}
+          AND log_index = ${args.logIndex}
+        FOR UPDATE
+        LIMIT 1
+      `;
+
+      if (existing.length === 0) {
+        // Extremely rare: concurrent delete or schema issue. Treat as duplicate.
+        return "duplicate";
+      }
+
+      eventId = Number(existing[0]!.id);
+      alreadyCredited = Boolean(existing[0]!.journal_entry_id);
+      if (alreadyCredited) return "duplicate";
+
+      // Ensure the existing row reflects the final resolved attribution.
+      // (If it was inserted earlier as "seen", we still want the authoritative values.)
+      await txSql`
+        UPDATE ex_chain_deposit_event
+        SET
+          block_number = ${args.blockNumber},
+          from_address = ${args.fromAddress},
+          to_address = ${args.toAddress},
+          user_id = ${args.userId}::uuid,
+          asset_id = ${args.assetId}::uuid,
+          amount = (${args.amount}::numeric)
+        WHERE id = ${eventId}
+      `;
+    }
 
     await ensureSystemUser(txSql as any);
 
@@ -575,6 +616,59 @@ async function creditDepositEvent(
   });
 }
 
+async function recordDepositEventSeen(
+  sql: Sql,
+  args: {
+    chain: "bsc";
+    txHash: string;
+    logIndex: number;
+    blockNumber: number;
+    fromAddress: string | null;
+    toAddress: string;
+    userId: string;
+    assetId: string;
+    amount: string;
+    cols?: { hasStatus: boolean };
+  },
+): Promise<"inserted" | "exists"> {
+  const inserted = await sql<{ id: number }[]>`
+    INSERT INTO ex_chain_deposit_event (
+      chain, tx_hash, log_index, block_number, from_address, to_address,
+      user_id, asset_id, amount
+    )
+    VALUES (
+      ${args.chain},
+      ${args.txHash},
+      ${args.logIndex},
+      ${args.blockNumber},
+      ${args.fromAddress},
+      ${args.toAddress},
+      ${args.userId}::uuid,
+      ${args.assetId}::uuid,
+      (${args.amount}::numeric)
+    )
+    ON CONFLICT (chain, tx_hash, log_index) DO NOTHING
+    RETURNING id
+  `;
+
+  const outcome = inserted.length > 0 ? "inserted" : "exists";
+
+  if (args.cols?.hasStatus) {
+    // Only mark as seen if it hasn't been credited/confirmed yet.
+    await sql`
+      UPDATE ex_chain_deposit_event
+      SET status = 'seen'
+      WHERE chain = ${args.chain}
+        AND tx_hash = ${args.txHash}
+        AND log_index = ${args.logIndex}
+        AND journal_entry_id IS NULL
+        AND (status IS NULL OR status <> 'confirmed')
+    `;
+  }
+
+  return outcome;
+}
+
 async function getOrInitCursor(sql: Sql, chain: "bsc"): Promise<number> {
   const rows = await sql<{ last_scanned_block: number }[]>`
     SELECT last_scanned_block
@@ -630,6 +724,7 @@ export async function scanAndCreditBscDeposits(
   matchedDeposits: number;
   credited: number;
   duplicates: number;
+  pendingSeen?: number;
   stoppedEarly?: boolean;
   stopReason?: "time_budget";
 }> {
@@ -744,6 +839,53 @@ export async function scanAndCreditBscDeposits(
         )[0] ?? null
       )
     : null;
+
+  // ── Pending-detection (native BNB only) ─────────────────────────
+  // Record recent deposits immediately ("seen") so the wallet can show
+  // pending confirmations even before crediting occurs.
+  //
+  // We intentionally keep this lightweight (small lookback, native only).
+  const pendingLookback = clamp(envInt("BSC_DEPOSIT_PENDING_LOOKBACK_BLOCKS", 60), 0, 500);
+  let pendingSeen = 0;
+  if (nativeBnb && pendingLookback > 0 && safeTip < tip) {
+    const pendingFrom = Math.max(safeTip + 1, tip - pendingLookback + 1);
+    const pendingTo = tip;
+    for (let blockNo = pendingFrom; blockNo <= pendingTo; blockNo += 1) {
+      if (maxMs > 0 && Date.now() - startedAtMs > maxMs) {
+        break;
+      }
+
+      const block = await provider.getBlock(blockNo, true);
+      if (!block) continue;
+
+      const txs = Array.isArray((block as any).transactions) ? ((block as any).transactions as ethers.TransactionResponse[]) : [];
+      for (const tx of txs) {
+        const to = tx.to ? normalizeAddress(tx.to) : "";
+        if (!to) continue;
+        const userId = addressToUser.get(to);
+        if (!userId) continue;
+
+        const value = tx.value ?? 0n;
+        if (typeof value !== "bigint" || value <= 0n) continue;
+
+        const amount = ethers.formatUnits(value, nativeBnb.decimals);
+        const out = await recordDepositEventSeen(sql as any, {
+          chain,
+          txHash: String(tx.hash),
+          logIndex: -1,
+          blockNumber: Number(block.number),
+          fromAddress: tx.from ? normalizeAddress(tx.from) : null,
+          toAddress: to,
+          userId,
+          assetId: nativeBnb.id,
+          amount,
+          cols,
+        });
+
+        if (out === "inserted") pendingSeen += 1;
+      }
+    }
+  }
 
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
   const toTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
@@ -898,6 +1040,7 @@ export async function scanAndCreditBscDeposits(
     matchedDeposits,
     credited,
     duplicates,
+    ...(pendingSeen ? { pendingSeen } : {}),
     ...(stoppedEarly ? { stoppedEarly, stopReason } : {}),
   };
 }
