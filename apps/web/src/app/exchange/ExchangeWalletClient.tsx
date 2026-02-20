@@ -1355,51 +1355,59 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
    </div>
  ) : null}
 
- <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
-   <div className="flex flex-wrap items-center justify-between gap-2">
-     <div className="text-[11px] font-semibold text-[var(--foreground)]">Report a deposit (tx hash)</div>
-     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">BNB / USDT / USDC</div>
-   </div>
-   <p className="mt-1 text-[11px] text-[var(--muted)]">
-     If a deposit doesn’t reflect automatically, paste the transaction hash here to verify and credit it safely.
-   </p>
+ <details
+   className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2"
+   open={Boolean(reportResult) || reportLoading}
+ >
+   <summary className="cursor-pointer text-[11px] font-semibold text-[var(--foreground)]">
+     Having trouble? Report a deposit (tx hash)
+   </summary>
+   <div className="mt-2">
+     <div className="flex flex-wrap items-center justify-between gap-2">
+       <div className="text-[11px] font-semibold text-[var(--foreground)]">Self-service reconciliation</div>
+       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">BNB / USDT / USDC</div>
+     </div>
+     <p className="mt-1 text-[11px] text-[var(--muted)]">
+       Funds are not lost if a deposit is delayed. Paste the transaction hash to verify and post it to your balance.
+     </p>
 
-   <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-     <input
-       value={reportTxHash}
-       onChange={(e) => setReportTxHash(e.target.value)}
-       placeholder="0x…"
-       className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/35 px-3 py-2 font-mono text-xs text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--ring)]"
-       spellCheck={false}
-       autoCapitalize="none"
-       autoCorrect="off"
-     />
-     <button
-       type="button"
-       className={buttonClassName({ variant: "secondary", size: "sm" })}
-       disabled={reportLoading || !reportTxHash.trim()}
-       onClick={() => void reportDepositTx()}
-     >
-       {reportLoading ? "Checking…" : "Check"}
-     </button>
-   </div>
+     <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+       <input
+         value={reportTxHash}
+         onChange={(e) => setReportTxHash(e.target.value)}
+         placeholder="0x…"
+         className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/35 px-3 py-2 font-mono text-xs text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--ring)]"
+         spellCheck={false}
+         autoCapitalize="none"
+         autoCorrect="off"
+       />
+       <button
+         type="button"
+         className={buttonClassName({ variant: "secondary", size: "sm" })}
+         disabled={reportLoading || !reportTxHash.trim()}
+         onClick={() => void reportDepositTx()}
+       >
+         {reportLoading ? "Checking…" : "Check"}
+       </button>
+     </div>
 
-   {reportResult ? (
-     reportResult.ok ? (
-       <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
-         {reportResult.credits.length === 0
-           ? "Processed."
-           : reportResult.credits.length === 1
-             ? `${reportResult.credits[0]!.outcome === "duplicate" ? "Already credited" : "Credited"}. +${reportResult.credits[0]!.amount} ${reportResult.credits[0]!.asset_symbol}`
-             : `Processed ${reportResult.credits.length} transfers.`}
-       </div>
-     ) : (
-       <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-         {String(reportResult.error)}
-       </div>
-     )
-   ) : null}
- </div>
+     {reportResult ? (
+       reportResult.ok ? (
+         <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+           {reportResult.credits.length === 0
+             ? "Processed."
+             : reportResult.credits.length === 1
+               ? `${reportResult.credits[0]!.outcome === "duplicate" ? "Already credited" : "Credited"}. +${reportResult.credits[0]!.amount} ${reportResult.credits[0]!.asset_symbol}`
+               : `Processed ${reportResult.credits.length} transfers.`}
+         </div>
+       ) : (
+         <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+           {String(reportResult.error)}
+         </div>
+       )
+     ) : null}
+   </div>
+ </details>
 
  <details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
    <summary className="cursor-pointer text-[11px] font-semibold text-[var(--foreground)]">
