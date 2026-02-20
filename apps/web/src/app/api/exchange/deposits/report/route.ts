@@ -69,6 +69,7 @@ export async function POST(request: Request) {
     if (!tx) return apiError("tx_not_found", { status: 404, details: { tx_hash: txHash } });
 
     const toAddress = tx.to ? normalizeAddress(tx.to) : "";
+    const value = typeof (tx as any)?.value === "bigint" ? ((tx as any).value as bigint) : 0n;
 
     // Case 1: native BNB transfer directly to the user's deposit address
     if (toAddress && toAddress === depositAddress) {
@@ -104,6 +105,19 @@ export async function POST(request: Request) {
             outcome: out.outcome,
           },
         ],
+      });
+    }
+
+    // If the transaction sent native value to some other address, this is not a token deposit
+    // for the current user. Return a clearer error rather than trying token-ingest.
+    if (toAddress && value > 0n) {
+      return apiError("tx_to_not_your_deposit_address", {
+        status: 400,
+        details: {
+          to_address: toAddress,
+          expected_deposit_address: depositAddress,
+          value_wei: value.toString(),
+        },
       });
     }
 
