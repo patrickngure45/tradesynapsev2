@@ -76,6 +76,7 @@ type AdminSystemStatus = {
   overall: "online" | "degraded" | "offline";
   db?: { ok: boolean; latency_ms: number | null };
   outbox?: { open: number; dead: number; with_errors: number };
+  email?: { configured: boolean; smtp_host_configured: boolean; from: string | null; from_name: string | null };
   stale_expected_services?: string[];
   internal_chain?: { last_tx_at: string | null };
 };
@@ -748,13 +749,17 @@ export function AdminDashboardClient() {
         </div>
 
         {sysStatus ? (
-          <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-4">
             <div>
               DB: {sysStatus.db?.ok ? "ok" : "down"}
               {typeof sysStatus.db?.latency_ms === "number" ? ` (${sysStatus.db.latency_ms}ms)` : ""}
             </div>
             <div>
               Outbox: open {sysStatus.outbox?.open ?? 0}, dead {sysStatus.outbox?.dead ?? 0}, errors {sysStatus.outbox?.with_errors ?? 0}
+            </div>
+            <div>
+              Email: {sysStatus.email?.configured ? "configured" : "demo"}
+              {sysStatus.email?.from ? ` (${sysStatus.email.from})` : ""}
             </div>
             <div>
               Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}

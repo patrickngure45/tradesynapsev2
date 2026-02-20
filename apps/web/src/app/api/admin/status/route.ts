@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { listServiceHeartbeats, type HeartbeatRow } from "@/lib/system/heartbeat";
+import { isEmailConfigured } from "@/lib/email/transport";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,11 +138,22 @@ export async function GET(request: Request) {
 
   const tookMs = Date.now() - startedAt;
 
+  const emailConfigured = isEmailConfigured();
+  const emailFrom = (process.env.EMAIL_FROM ?? "").trim() || null;
+  const emailFromName = (process.env.EMAIL_FROM_NAME ?? "").trim() || null;
+  const smtpHostConfigured = Boolean((process.env.SMTP_HOST ?? "").trim());
+
   return NextResponse.json({
     ok: true,
     overall,
     db: { ok: dbOk, latency_ms: dbLatencyMs },
     outbox: { open: outboxOpen, dead: outboxDead, with_errors: outboxWithErrors },
+    email: {
+      configured: emailConfigured,
+      smtp_host_configured: smtpHostConfigured,
+      from: emailFrom,
+      from_name: emailFromName,
+    },
     internal_chain: { last_tx_at: internalChainLastTxAt },
     expected_services: expectedServices,
     stale_expected_services: staleExpectedServices,
