@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireAdminKey } from "@/lib/auth/keys";
+import { apiError } from "@/lib/api/errors";
 import { listServiceHeartbeats, type HeartbeatRow } from "@/lib/system/heartbeat";
 import { emailConfigSummary } from "@/lib/email/transport";
 
@@ -46,8 +48,14 @@ function pickOverall(
 
 export async function GET(request: Request) {
   const sql = getSql();
-  const admin = await requireAdminForApi(sql, request);
-  if (!admin.ok) return admin.response;
+  const providedAdminKey = (request.headers.get("x-admin-key") ?? "").trim();
+  if (providedAdminKey) {
+    const key = requireAdminKey(request);
+    if (!key.ok) return apiError(key.error);
+  } else {
+    const admin = await requireAdminForApi(sql, request);
+    if (!admin.ok) return admin.response;
+  }
 
   const startedAt = Date.now();
 

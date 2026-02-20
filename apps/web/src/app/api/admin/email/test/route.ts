@@ -4,6 +4,7 @@ import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { requireAdminKey } from "@/lib/auth/keys";
 import { apiError } from "@/lib/api/errors";
+import { emailConfigSummary } from "@/lib/email/transport";
 import { sendMail } from "@/lib/email/transport";
 
 export const runtime = "nodejs";
@@ -44,6 +45,7 @@ async function handle(request: Request) {
   }
 
   try {
+    const cfg = emailConfigSummary();
     const result = await sendMail({
       to,
       subject: "Coinwaka test email",
@@ -54,6 +56,9 @@ async function handle(request: Request) {
     return NextResponse.json({
       ok: true,
       to,
+      used_transport: result.demo ? "demo" : (cfg.resend_api_configured ? "resend_api" : "smtp"),
+      resend_api_configured: cfg.resend_api_configured,
+      smtp_configured: cfg.smtp_host_configured && cfg.smtp_user_configured && cfg.smtp_pass_configured,
       sent: result.sent,
       demo: result.demo,
       messageId: result.messageId ?? null,
