@@ -21,8 +21,8 @@ const SMTP_HOST = process.env.SMTP_HOST ?? "";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "465", 10);
 const SMTP_USER = process.env.SMTP_USER ?? "";
 const SMTP_PASS = process.env.SMTP_PASS ?? "";
-const EMAIL_FROM = process.env.EMAIL_FROM ?? "noreply@citadel.exchange";
-const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Citadel Exchange";
+const EMAIL_FROM = process.env.EMAIL_FROM ?? "no-reply@coinwaka.com";
+const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Coinwaka";
 
 const fromAddress = `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`;
 

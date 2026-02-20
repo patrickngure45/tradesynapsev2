@@ -1,11 +1,16 @@
 /**
- * Pre-built email templates for Citadel Exchange.
+ * Pre-built email templates.
  *
  * Each returns { subject, text, html } suitable for sendMail().
+ *
+ * Branding is configurable via env vars:
+ *   EMAIL_BRAND        — e.g. "Coinwaka"
+ *   SUPPORT_EMAIL      — e.g. "support@coinwaka.com"
+ *   EMAIL_FROM_NAME    — fallback brand display name
  */
 
-const BRAND = "Citadel Exchange";
-const SUPPORT_EMAIL = "support@citadel.exchange";
+const BRAND = (process.env.EMAIL_BRAND ?? process.env.EMAIL_FROM_NAME ?? "Coinwaka").trim() || "Coinwaka";
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL ?? "support@coinwaka.com").trim() || "support@coinwaka.com";
 
 function wrap(body: string): string {
   return `<!DOCTYPE html>
