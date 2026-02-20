@@ -21,6 +21,7 @@ const SMTP_HOST = process.env.SMTP_HOST ?? "";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT ?? "465", 10);
 const SMTP_USER = process.env.SMTP_USER ?? "";
 const SMTP_PASS = process.env.SMTP_PASS ?? "";
+const RESEND_API_KEY = (process.env.RESEND_API_KEY ?? "").trim();
 const SMTP_SECURE_ENV = (process.env.SMTP_SECURE ?? "").trim().toLowerCase();
 const SMTP_SECURE = SMTP_SECURE_ENV
   ? SMTP_SECURE_ENV === "1" || SMTP_SECURE_ENV === "true" || SMTP_SECURE_ENV === "yes"
@@ -34,13 +35,17 @@ const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Coinwaka";
 
 const fromAddress = `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`;
 
-const isConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+const isSmtpConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+const isResendConfigured = Boolean(RESEND_API_KEY);
+// Prefer HTTPS API when configured; it's generally more reliable than SMTP on PaaS.
+const isConfigured = isResendConfigured || isSmtpConfigured;
 
 export function emailConfigSummary(): {
   configured: boolean;
   smtp_host_configured: boolean;
   smtp_user_configured: boolean;
   smtp_pass_configured: boolean;
+  resend_api_configured: boolean;
   from: string;
   from_name: string;
 } {
@@ -49,6 +54,7 @@ export function emailConfigSummary(): {
     smtp_host_configured: Boolean(SMTP_HOST),
     smtp_user_configured: Boolean(SMTP_USER),
     smtp_pass_configured: Boolean(SMTP_PASS),
+    resend_api_configured: isResendConfigured,
     from: EMAIL_FROM,
     from_name: EMAIL_FROM_NAME,
   };
@@ -66,7 +72,7 @@ function sleep(ms: number): Promise<void> {
 let transporter: Transporter | null = null;
 
 function getTransporter(): Transporter | null {
-  if (!isConfigured) return null;
+  if (!isSmtpConfigured) return null;
   if (!transporter) {
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,
@@ -89,6 +95,42 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
+async function sendViaResendApi(opts: SendMailOpts): Promise<{ messageId?: string }> {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: fromAddress,
+      to: [opts.to],
+      subject: opts.subject,
+      text: opts.text,
+      ...(opts.html ? { html: opts.html } : {}),
+    }),
+  });
+
+  const text = await res.text().catch(() => "");
+  let json: any = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = { _raw: text };
+  }
+
+  if (!res.ok) {
+    const msg =
+      (json && typeof json === "object" && (json.message || json.error))
+        ? String(json.message ?? json.error)
+        : `resend_http_${res.status}`;
+    throw new Error(msg);
+  }
+
+  const id = json && typeof json === "object" ? (json.id ?? json.data?.id) : undefined;
+  return { messageId: typeof id === "string" ? id : undefined };
+}
+
 // ── Public API ──────────────────────────────────────────────────
 export type SendMailOpts = {
   to: string;
@@ -107,6 +149,12 @@ export type SendMailOpts = {
 export async function sendMail(
   opts: SendMailOpts,
 ): Promise<{ sent: boolean; demo: boolean; messageId?: string }> {
+  // Prefer Resend HTTPS API if configured.
+  if (isResendConfigured) {
+    const info = await sendViaResendApi(opts);
+    return { sent: true, demo: false, messageId: info.messageId };
+  }
+
   const t = getTransporter();
   if (!t) {
     // Demo mode — log to console

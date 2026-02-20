@@ -150,6 +150,7 @@ export async function GET(request: Request) {
       smtp_host_configured: emailCfg.smtp_host_configured,
       smtp_user_configured: emailCfg.smtp_user_configured,
       smtp_pass_configured: emailCfg.smtp_pass_configured,
+      resend_api_configured: emailCfg.resend_api_configured,
       from: emailCfg.from,
       from_name: emailCfg.from_name,
     },

@@ -81,6 +81,7 @@ type AdminSystemStatus = {
     smtp_host_configured: boolean;
     smtp_user_configured?: boolean;
     smtp_pass_configured?: boolean;
+    resend_api_configured?: boolean;
     from: string | null;
     from_name: string | null;
   };
@@ -773,6 +774,7 @@ export function AdminDashboardClient() {
                   — smtp:{sysStatus.email.smtp_host_configured ? "host" : "_"}{sysStatus.email.smtp_user_configured ? "+user" : ""}{sysStatus.email.smtp_pass_configured ? "+pass" : ""}
                 </span>
               ) : null}
+              {sysStatus.email?.resend_api_configured ? <span> — resend:api</span> : null}
             </div>
             <div>
               Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
