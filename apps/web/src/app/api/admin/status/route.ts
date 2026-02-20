@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { listServiceHeartbeats, type HeartbeatRow } from "@/lib/system/heartbeat";
-import { isEmailConfigured } from "@/lib/email/transport";
+import { emailConfigSummary } from "@/lib/email/transport";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -138,10 +138,7 @@ export async function GET(request: Request) {
 
   const tookMs = Date.now() - startedAt;
 
-  const emailConfigured = isEmailConfigured();
-  const emailFrom = (process.env.EMAIL_FROM ?? "").trim() || null;
-  const emailFromName = (process.env.EMAIL_FROM_NAME ?? "").trim() || null;
-  const smtpHostConfigured = Boolean((process.env.SMTP_HOST ?? "").trim());
+  const emailCfg = emailConfigSummary();
 
   return NextResponse.json({
     ok: true,
@@ -149,10 +146,12 @@ export async function GET(request: Request) {
     db: { ok: dbOk, latency_ms: dbLatencyMs },
     outbox: { open: outboxOpen, dead: outboxDead, with_errors: outboxWithErrors },
     email: {
-      configured: emailConfigured,
-      smtp_host_configured: smtpHostConfigured,
-      from: emailFrom,
-      from_name: emailFromName,
+      configured: emailCfg.configured,
+      smtp_host_configured: emailCfg.smtp_host_configured,
+      smtp_user_configured: emailCfg.smtp_user_configured,
+      smtp_pass_configured: emailCfg.smtp_pass_configured,
+      from: emailCfg.from,
+      from_name: emailCfg.from_name,
     },
     internal_chain: { last_tx_at: internalChainLastTxAt },
     expected_services: expectedServices,

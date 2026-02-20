@@ -26,7 +26,25 @@ const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Coinwaka";
 
 const fromAddress = `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`;
 
-const isConfigured = !!SMTP_HOST;
+const isConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+
+export function emailConfigSummary(): {
+  configured: boolean;
+  smtp_host_configured: boolean;
+  smtp_user_configured: boolean;
+  smtp_pass_configured: boolean;
+  from: string;
+  from_name: string;
+} {
+  return {
+    configured: isConfigured,
+    smtp_host_configured: Boolean(SMTP_HOST),
+    smtp_user_configured: Boolean(SMTP_USER),
+    smtp_pass_configured: Boolean(SMTP_PASS),
+    from: EMAIL_FROM,
+    from_name: EMAIL_FROM_NAME,
+  };
+}
 
 // ── Retry config ────────────────────────────────────────────────
 const MAX_RETRIES = 2;

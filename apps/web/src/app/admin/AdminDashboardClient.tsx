@@ -76,7 +76,14 @@ type AdminSystemStatus = {
   overall: "online" | "degraded" | "offline";
   db?: { ok: boolean; latency_ms: number | null };
   outbox?: { open: number; dead: number; with_errors: number };
-  email?: { configured: boolean; smtp_host_configured: boolean; from: string | null; from_name: string | null };
+  email?: {
+    configured: boolean;
+    smtp_host_configured: boolean;
+    smtp_user_configured?: boolean;
+    smtp_pass_configured?: boolean;
+    from: string | null;
+    from_name: string | null;
+  };
   stale_expected_services?: string[];
   internal_chain?: { last_tx_at: string | null };
 };
@@ -760,6 +767,12 @@ export function AdminDashboardClient() {
             <div>
               Email: {sysStatus.email?.configured ? "configured" : "demo"}
               {sysStatus.email?.from ? ` (${sysStatus.email.from})` : ""}
+              {sysStatus.email && !sysStatus.email.configured ? (
+                <span>
+                  {" "}
+                  — smtp:{sysStatus.email.smtp_host_configured ? "host" : "_"}{sysStatus.email.smtp_user_configured ? "+user" : ""}{sysStatus.email.smtp_pass_configured ? "+pass" : ""}
+                </span>
+              ) : null}
             </div>
             <div>
               Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
