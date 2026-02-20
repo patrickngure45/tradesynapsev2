@@ -236,6 +236,21 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [depositAddressError, setDepositAddressError] = useState<string | null>(null);
  const [depositAddressCopied, setDepositAddressCopied] = useState(false);
 
+ const [reportTxHash, setReportTxHash] = useState<string>("");
+ const [reportResult, setReportResult] = useState<
+  | null
+  | {
+     ok: true;
+     tx_hash: string;
+     outcome: "credited" | "duplicate";
+     amount: string;
+     asset_symbol: string;
+     confirmations_required: number;
+   }
+  | { ok: false; error: string; message?: string }
+ >(null);
+ const [reportLoading, setReportLoading] = useState(false);
+
  const [convertFromSymbol, setConvertFromSymbol] = useState<string>("");
  const [convertToSymbol, setConvertToSymbol] = useState<string>("USDT");
  const [convertAmountIn, setConvertAmountIn] = useState<string>("");
@@ -879,6 +894,54 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }
  }
 
+ async function reportDepositTx() {
+  const tx = reportTxHash.trim();
+  if (!tx) return;
+  if (authMode === "header" && !canUseHeader) return;
+
+  setReportLoading(true);
+  setReportResult(null);
+  try {
+   const res = await fetchJsonOrThrow<any>("/api/exchange/deposits/report", {
+    method: "POST",
+    headers: {
+     "content-type": "application/json",
+     ...(requestHeaders ?? {}),
+    },
+    body: JSON.stringify({ chain: "bsc", tx_hash: tx }),
+   });
+
+   if (res && typeof res === "object" && res.ok === true) {
+    setReportResult({
+     ok: true,
+     tx_hash: String(res.tx_hash ?? tx),
+     outcome: (String(res.outcome ?? "").toLowerCase() === "duplicate" ? "duplicate" : "credited") as any,
+     amount: String(res.amount ?? ""),
+     asset_symbol: String(res.asset_symbol ?? "BNB"),
+     confirmations_required: toNumberSafe(res.confirmations_required),
+    });
+    setToastKind("success");
+    setToastMessage("Deposit processed. Refreshing balances…");
+    await refreshAll();
+    return;
+   }
+
+   setReportResult({ ok: false, error: "bad_response" });
+  } catch (e) {
+   if (e instanceof ApiError) {
+    setReportResult({ ok: false, error: e.code, message: (e.details as any)?.message });
+    setToastKind("error");
+    setToastMessage(e.code);
+   } else {
+    setReportResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    setToastKind("error");
+    setToastMessage("Deposit report failed");
+   }
+  } finally {
+   setReportLoading(false);
+  }
+ }
+
  useEffect(() => {
  void refreshAll();
  // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1286,6 +1349,48 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
      </div>
    </div>
  ) : null}
+
+ <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
+   <div className="flex flex-wrap items-center justify-between gap-2">
+     <div className="text-[11px] font-semibold text-[var(--foreground)]">Report a deposit (tx hash)</div>
+     <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">BNB</div>
+   </div>
+   <p className="mt-1 text-[11px] text-[var(--muted)]">
+     If a deposit doesn’t reflect automatically, paste the transaction hash here to verify and credit it safely.
+   </p>
+
+   <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+     <input
+       value={reportTxHash}
+       onChange={(e) => setReportTxHash(e.target.value)}
+       placeholder="0x…"
+       className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)]/35 px-3 py-2 font-mono text-xs text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--ring)]"
+       spellCheck={false}
+       autoCapitalize="none"
+       autoCorrect="off"
+     />
+     <button
+       type="button"
+       className={buttonClassName({ variant: "secondary", size: "sm" })}
+       disabled={reportLoading || !reportTxHash.trim()}
+       onClick={() => void reportDepositTx()}
+     >
+       {reportLoading ? "Checking…" : "Check"}
+     </button>
+   </div>
+
+   {reportResult ? (
+     reportResult.ok ? (
+       <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+         {reportResult.outcome === "duplicate" ? "Already credited." : "Credited."} +{reportResult.amount} {reportResult.asset_symbol}
+       </div>
+     ) : (
+       <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+         {String(reportResult.error)}
+       </div>
+     )
+   ) : null}
+ </div>
 
  <details className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)]/20 px-3 py-2">
    <summary className="cursor-pointer text-[11px] font-semibold text-[var(--foreground)]">
