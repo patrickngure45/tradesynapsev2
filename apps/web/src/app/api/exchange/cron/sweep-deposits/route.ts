@@ -25,9 +25,20 @@ export async function POST(req: NextRequest) {
   }
 
   const sql = getSql();
+  const url = new URL(req.url);
+  const execute = (url.searchParams.get("execute") ?? "").trim() === "1";
+  const gasTopups = (url.searchParams.get("gas_topups") ?? "").trim() === "1";
+  const tokenSymbolsRaw = (url.searchParams.get("symbols") ?? "").trim();
+  const tokenSymbols = tokenSymbolsRaw
+    ? tokenSymbolsRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+    : undefined;
 
   try {
-    const result = await sweepBscDeposits(sql as any);
+    const result = await sweepBscDeposits(sql as any, {
+      execute,
+      allowGasTopups: gasTopups,
+      tokenSymbols,
+    });
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

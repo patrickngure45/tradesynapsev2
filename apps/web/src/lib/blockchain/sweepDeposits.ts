@@ -35,6 +35,9 @@ export type SweepDepositsResult = {
   ok: true;
   chain: "bsc";
   execute: boolean;
+  requestedExecute?: boolean;
+  requestedGasTopups?: boolean;
+  tokenSymbols?: string[] | null;
   deposits: number;
   sweptTransfers: number;
   gasTopups: number;
@@ -153,7 +156,12 @@ async function recordGasSpend(
   });
 }
 
-async function buildTokenList(sql: Sql, defaultMinSweep: number): Promise<SweepToken[]> {
+async function buildTokenList(
+  sql: Sql,
+  defaultMinSweep: number,
+  opts?: { tokenSymbols?: string[] },
+): Promise<SweepToken[]> {
+  const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
   const dbAssets = await sql<
     {
       symbol: string;
@@ -166,6 +174,7 @@ async function buildTokenList(sql: Sql, defaultMinSweep: number): Promise<SweepT
     WHERE chain = 'bsc'
       AND is_enabled = true
       AND contract_address IS NOT NULL
+      AND (${tokenSymbols.length === 0}::boolean OR upper(symbol) = ANY(${tokenSymbols}))
   `;
 
   const seen = new Set<string>();
@@ -184,6 +193,9 @@ async function buildTokenList(sql: Sql, defaultMinSweep: number): Promise<SweepT
     });
   }
 
+  const includeExtra = envBool("SWEEP_INCLUDE_EXTRA_TOKENS");
+  if (!includeExtra) return tokens;
+
   for (const [symbol, contract] of Object.entries(EXTRA_TOKENS)) {
     const key = contract.toLowerCase();
     if (seen.has(key)) continue;
@@ -200,16 +212,34 @@ async function buildTokenList(sql: Sql, defaultMinSweep: number): Promise<SweepT
   return tokens;
 }
 
-export async function sweepBscDeposits(sql: Sql): Promise<SweepDepositsResult> {
+export async function sweepBscDeposits(
+  sql: Sql,
+  opts?: {
+    execute?: boolean;
+    allowGasTopups?: boolean;
+    tokenSymbols?: string[];
+  },
+): Promise<SweepDepositsResult> {
   const startedAt = new Date().toISOString();
 
-  const EXECUTE = envBool("SWEEP_EXECUTE");
+  // Safety: SWEEP_EXECUTE enables execution, but callers must also explicitly
+  // request it (e.g. cron URL `.../sweep-deposits?execute=1`) to prevent
+  // accidental fund movement from misconfigured schedulers.
+  const requestedExecute = Boolean(opts?.execute);
+  const EXECUTE = envBool("SWEEP_EXECUTE") && requestedExecute;
+
+  // Gas top-ups are extra-risky; require explicit opt-in.
+  const requestedGasTopups = Boolean(opts?.allowGasTopups);
+  const ALLOW_GAS_TOPUPS = envBool("SWEEP_ALLOW_GAS_TOPUPS") && requestedGasTopups;
   const ACCOUNT_GAS_IN_LEDGER = envBool("SWEEP_ACCOUNT_GAS_LEDGER");
   const MIN_BNB = (process.env.SWEEP_MIN_BNB || "0.0001").trim();
   const DEFAULT_MIN_SWEEP = envNum("SWEEP_MIN_TOKEN", 0.001);
 
   const provider = getBscProvider();
   const hotWallet = getHotWalletAddress();
+  if (!ethers.isAddress(hotWallet)) {
+    throw new Error("invalid_hot_wallet_address");
+  }
 
   const beat = async (details?: Record<string, unknown>) => {
     try {
@@ -236,12 +266,16 @@ export async function sweepBscDeposits(sql: Sql): Promise<SweepDepositsResult> {
   const nativeGasCost = gasPrice * NATIVE_TRANSFER_GAS;
   const minBnbWei = ethers.parseEther(MIN_BNB);
 
-  const tokens = await buildTokenList(sql, DEFAULT_MIN_SWEEP);
+  const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+  const tokens = await buildTokenList(sql, DEFAULT_MIN_SWEEP, { tokenSymbols });
 
   console.log("--- DEPOSIT SWEEPER ---");
   console.log(`Mode: ${EXECUTE ? "EXECUTE" : "PLAN ONLY"}`);
   console.log(`Hot wallet: ${hotWallet}`);
-  if (EXECUTE) console.log(`Ledger gas accounting: ${ACCOUNT_GAS_IN_LEDGER ? "ON" : "OFF"}`);
+  if (EXECUTE) {
+    console.log(`Ledger gas accounting: ${ACCOUNT_GAS_IN_LEDGER ? "ON" : "OFF"}`);
+    console.log(`Gas top-ups: ${ALLOW_GAS_TOPUPS ? "ENABLED" : "DISABLED"}`);
+  }
   console.log(`Gas price: ${ethers.formatUnits(gasPrice, "gwei")} gwei`);
   console.log(`Token gas cost: ${ethers.formatEther(tokenGasCost)} BNB per token transfer`);
   console.log(`Native gas cost: ${ethers.formatEther(nativeGasCost)} BNB`);
@@ -326,7 +360,7 @@ export async function sweepBscDeposits(sql: Sql): Promise<SweepDepositsResult> {
         const deficit = gasNeededWithMargin - bnbBal;
         const topupAmount = ethers.formatEther(deficit);
         console.log(`  PLAN: top-up ${topupAmount} BNB for gas (${sweepableTokens.length} token transfers)`);
-        if (EXECUTE) {
+        if (EXECUTE && ALLOW_GAS_TOPUPS) {
           try {
             const hotKey = getHotWalletKey();
             const tx = await sendBnb(hotKey, address, topupAmount);
@@ -348,6 +382,8 @@ export async function sweepBscDeposits(sql: Sql): Promise<SweepDepositsResult> {
           } catch (e: any) {
             console.log(`  ❌ Gas top-up failed: ${e?.message ?? String(e)}`);
           }
+        } else if (EXECUTE && !ALLOW_GAS_TOPUPS) {
+          console.log("  NOTE: gas top-ups disabled; token sweeps may be skipped for insufficient gas.");
         }
       }
     }
@@ -428,6 +464,9 @@ export async function sweepBscDeposits(sql: Sql): Promise<SweepDepositsResult> {
     ok: true,
     chain: "bsc",
     execute: EXECUTE,
+    requestedExecute,
+    requestedGasTopups,
+    tokenSymbols: tokenSymbols.length ? tokenSymbols : null,
     deposits: deposits.length,
     sweptTransfers,
     gasTopups,
