@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireAdminKey } from "@/lib/auth/keys";
+import { apiError } from "@/lib/api/errors";
 import { sendMail } from "@/lib/email/transport";
 
 export const runtime = "nodejs";
@@ -13,8 +15,17 @@ function normalizeEmail(v: string | null): string {
 
 async function handle(request: Request) {
   const sql = getSql();
-  const admin = await requireAdminForApi(sql, request);
-  if (!admin.ok) return admin.response;
+  // Auth options:
+  // - If the caller provides x-admin-key, enforce it (for deterministic curl/ops usage).
+  // - Otherwise, require a logged-in admin session (browser).
+  const providedAdminKey = (request.headers.get("x-admin-key") ?? "").trim();
+  if (providedAdminKey) {
+    const key = requireAdminKey(request);
+    if (!key.ok) return apiError(key.error);
+  } else {
+    const admin = await requireAdminForApi(sql, request);
+    if (!admin.ok) return admin.response;
+  }
 
   const url = new URL(request.url);
   const toFromQuery = normalizeEmail(url.searchParams.get("to"));
@@ -36,8 +47,8 @@ async function handle(request: Request) {
     const result = await sendMail({
       to,
       subject: "Coinwaka test email",
-      text: "This is a test email from Coinwaka. If you received this, SMTP is configured correctly.",
-      html: "<p>This is a <strong>test email</strong> from Coinwaka.</p><p>If you received this, SMTP is configured correctly.</p>",
+      text: "This is a test email from Coinwaka. If you received this, email sending is configured correctly.",
+      html: "<p>This is a <strong>test email</strong> from Coinwaka.</p><p>If you received this, email sending is configured correctly.</p>",
     });
 
     return NextResponse.json({
