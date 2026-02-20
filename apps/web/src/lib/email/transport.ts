@@ -32,6 +32,7 @@ const SMTP_GREETING_TIMEOUT_MS = parseInt(process.env.SMTP_GREETING_TIMEOUT_MS ?
 const SMTP_SOCKET_TIMEOUT_MS = parseInt(process.env.SMTP_SOCKET_TIMEOUT_MS ?? "45000", 10);
 const EMAIL_FROM = process.env.EMAIL_FROM ?? "no-reply@coinwaka.com";
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? "Coinwaka";
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL ?? "").trim();
 
 const fromAddress = `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`;
 
@@ -96,6 +97,7 @@ function getTransporter(): Transporter | null {
 }
 
 async function sendViaResendApi(opts: SendMailOpts): Promise<{ messageId?: string }> {
+  const replyTo = (opts.replyTo ?? SUPPORT_EMAIL).trim();
   const timeoutMs = Math.max(3_000, Math.min(20_000, parseInt(process.env.RESEND_TIMEOUT_MS ?? "12000", 10) || 12_000));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -111,6 +113,7 @@ async function sendViaResendApi(opts: SendMailOpts): Promise<{ messageId?: strin
       to: [opts.to],
       subject: opts.subject,
       text: opts.text,
+      ...(replyTo ? { reply_to: replyTo } : {}),
       ...(opts.html ? { html: opts.html } : {}),
     }),
   }).finally(() => clearTimeout(timer));
@@ -141,6 +144,7 @@ export type SendMailOpts = {
   subject: string;
   text: string;
   html?: string;
+  replyTo?: string;
 };
 
 /**
@@ -173,6 +177,7 @@ export async function sendMail(
     try {
       const info = await t.sendMail({
         from: fromAddress,
+        replyTo: (opts.replyTo ?? SUPPORT_EMAIL).trim() || undefined,
         to: opts.to,
         subject: opts.subject,
         text: opts.text,

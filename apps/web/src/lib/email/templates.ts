@@ -12,43 +12,97 @@
 const BRAND = (process.env.EMAIL_BRAND ?? process.env.EMAIL_FROM_NAME ?? "Coinwaka").trim() || "Coinwaka";
 const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL ?? "support@coinwaka.com").trim() || "support@coinwaka.com";
 
-function wrap(body: string): string {
-  return `<!DOCTYPE html>
+function escapeHtml(text: string): string {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function wrap(opts: { bodyHtml: string; preheader: string }): string {
+  const year = new Date().getFullYear();
+  const preheader = escapeHtml(opts.preheader);
+
+  // NOTE: Use table layout for broad email client compatibility.
+  // Avoid relying on gradients/dark backgrounds (often render oddly in clients/dark mode).
+  return `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
-  <div style="max-width:560px;margin:32px auto;background:#111;border:1px solid #222;border-radius:12px;overflow:hidden">
-    <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px 32px;text-align:center">
-      <h1 style="margin:0;color:#fff;font-size:20px;font-weight:600;letter-spacing:-0.02em">${BRAND}</h1>
-    </div>
-    <div style="padding:32px;color:#e5e5e5;font-size:14px;line-height:1.6">
-      ${body}
-    </div>
-    <div style="padding:16px 32px;border-top:1px solid #222;text-align:center;color:#666;font-size:11px">
-      <p style="margin:0">&copy; ${new Date().getFullYear()} ${BRAND}. All rights reserved.</p>
-      <p style="margin:4px 0 0">Need help? <a href="mailto:${SUPPORT_EMAIL}" style="color:#8b5cf6;text-decoration:none">${SUPPORT_EMAIL}</a></p>
-    </div>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no">
+  <title>${escapeHtml(BRAND)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <!-- Preheader (hidden) -->
+  <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">
+    ${preheader}
   </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+          <tr>
+            <td align="center" style="padding:18px 24px;background-color:#4f46e5;color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.01em;">
+              ${escapeHtml(BRAND)}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px;color:#111827;font-size:14px;line-height:1.6;">
+              ${opts.bodyHtml}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:16px 24px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;" align="center">
+              <div>&copy; ${year} ${escapeHtml(BRAND)}.</div>
+              <div style="margin-top:6px;">Need help? <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(SUPPORT_EMAIL)}</a></div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 }
 
-function btn(url: string, label: string): string {
-  return `<div style="text-align:center;margin:24px 0">
-    <a href="${url}" style="display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:12px 32px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;letter-spacing:-0.01em">${label}</a>
-  </div>`;
+function button(opts: { url: string; label: string }): string {
+  const url = opts.url;
+  const label = escapeHtml(opts.label);
+
+  // Outlook-safe button
+  return `
+  <table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:18px auto;">
+    <tr>
+      <td bgcolor="#4f46e5" style="border-radius:10px;">
+        <a href="${url}" style="display:inline-block;padding:12px 18px;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">${label}</a>
+      </td>
+    </tr>
+  </table>`;
 }
 
 // ── Verification Email ──────────────────────────────────────────
 export function verificationEmail(verifyUrl: string): { subject: string; text: string; html: string } {
   const subject = `Verify your email — ${BRAND}`;
-  const text = `Verify your email address by visiting this link:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you didn't create an account, you can safely ignore this email.`;
-  const html = wrap(`
-    <h2 style="margin:0 0 12px;color:#fff;font-size:18px;font-weight:600">Verify your email</h2>
-    <p style="margin:0 0 8px">Thanks for signing up! Click the button below to verify your email address and unlock Basic KYC access.</p>
-    ${btn(verifyUrl, "Verify Email Address")}
-    <p style="margin:0;color:#888;font-size:12px">This link expires in 24 hours. If you didn't create an account, ignore this email.</p>
-  `);
+  const text = `Verify your email address to finish setting up your ${BRAND} account:\n\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you didn't create an account, you can ignore this email.`;
+  const html = wrap({
+    preheader: `Verify your email to finish setting up your ${BRAND} account.`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Verify your email</h2>
+      <p style="margin:0 0 12px;">Thanks for signing up. Click the button below to verify your email address.</p>
+      ${button({ url: verifyUrl, label: "Verify email" })}
+      <p style="margin:0 0 8px;color:#6b7280;font-size:12px;">This link expires in 24 hours.</p>
+      <p style="margin:14px 0 6px;color:#111827;font-weight:600;">If the button doesn’t work, copy and paste this link:</p>
+      <p style="margin:0 0 10px;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;color:#374151;">${escapeHtml(verifyUrl)}</p>
+      <p style="margin:0;color:#6b7280;font-size:12px;">If you didn’t create an account, you can ignore this email.</p>
+    `,
+  });
   return { subject, text, html };
 }
 
@@ -56,11 +110,14 @@ export function verificationEmail(verifyUrl: string): { subject: string; text: s
 export function kycApprovedEmail(): { subject: string; text: string; html: string } {
   const subject = `KYC Verified — ${BRAND}`;
   const text = `Your identity has been verified. You now have Verified KYC status with increased withdrawal limits ($50,000/day).`;
-  const html = wrap(`
-    <h2 style="margin:0 0 12px;color:#fff;font-size:18px;font-weight:600">Identity Verified &#10003;</h2>
-    <p style="margin:0 0 8px">Congratulations! Your identity documents have been reviewed and approved.</p>
-    <p style="margin:0 0 8px">You now have <strong style="color:#22c55e">Verified</strong> KYC status with a daily withdrawal limit of <strong>$50,000</strong>.</p>
-  `);
+  const html = wrap({
+    preheader: `Your identity verification is approved.`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Identity verified</h2>
+      <p style="margin:0 0 8px;">Your identity documents have been reviewed and approved.</p>
+      <p style="margin:0;">You now have <strong>Verified</strong> KYC status with a daily withdrawal limit of <strong>$50,000</strong>.</p>
+    `,
+  });
   return { subject, text, html };
 }
 
@@ -68,14 +125,17 @@ export function kycApprovedEmail(): { subject: string; text: string; html: strin
 export function kycRejectedEmail(reason: string): { subject: string; text: string; html: string } {
   const subject = `KYC Review Update — ${BRAND}`;
   const text = `Your identity document submission was not approved.\n\nReason: ${reason}\n\nPlease re-submit clearer documents from your account page.`;
-  const html = wrap(`
-    <h2 style="margin:0 0 12px;color:#fff;font-size:18px;font-weight:600">Document Review Update</h2>
-    <p style="margin:0 0 8px">Unfortunately, your identity document submission was not approved.</p>
-    <div style="background:#1a1a1a;border-left:3px solid #ef4444;padding:12px 16px;margin:16px 0;border-radius:4px">
-      <p style="margin:0;color:#fca5a5;font-size:13px"><strong>Reason:</strong> ${reason}</p>
-    </div>
-    <p style="margin:0 0 8px;color:#888">You can re-submit your documents from the Account page.</p>
-  `);
+  const html = wrap({
+    preheader: `Your document submission needs an update.`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Document review update</h2>
+      <p style="margin:0 0 8px;">Your identity document submission was not approved.</p>
+      <div style="background-color:#fef2f2;border:1px solid #fecaca;border-left:4px solid #ef4444;padding:12px 12px;margin:16px 0;border-radius:8px;">
+        <div style="font-size:13px;color:#7f1d1d;"><strong>Reason:</strong> ${escapeHtml(reason)}</div>
+      </div>
+      <p style="margin:0;color:#374151;">Please re-submit clearer documents from your account page.</p>
+    `,
+  });
   return { subject, text, html };
 }
 
@@ -83,14 +143,17 @@ export function kycRejectedEmail(reason: string): { subject: string; text: strin
 export function withdrawalCompletedEmail(amount: string, symbol: string, txHash: string): { subject: string; text: string; html: string } {
   const subject = `Withdrawal Confirmed — ${BRAND}`;
   const text = `Your withdrawal of ${amount} ${symbol} has been confirmed on-chain.\n\nTransaction: ${txHash}`;
-  const html = wrap(`
-    <h2 style="margin:0 0 12px;color:#fff;font-size:18px;font-weight:600">Withdrawal Confirmed</h2>
-    <p style="margin:0 0 8px">Your withdrawal has been confirmed on-chain:</p>
-    <div style="background:#1a1a1a;padding:16px;border-radius:8px;margin:16px 0">
-      <p style="margin:0 0 4px;font-size:20px;font-weight:600;color:#22c55e">${amount} ${symbol}</p>
-      <p style="margin:0;font-size:11px;color:#888;word-break:break-all;font-family:monospace">TX: ${txHash}</p>
-    </div>
-  `);
+  const html = wrap({
+    preheader: `Your withdrawal is confirmed on-chain.`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Withdrawal confirmed</h2>
+      <p style="margin:0 0 12px;">Your withdrawal has been confirmed on-chain:</p>
+      <div style="background-color:#f9fafb;border:1px solid #e5e7eb;padding:14px;border-radius:10px;margin:12px 0;">
+        <div style="font-size:20px;font-weight:800;color:#111827;">${escapeHtml(amount)} ${escapeHtml(symbol)}</div>
+        <div style="margin-top:6px;font-size:12px;color:#6b7280;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">TX: ${escapeHtml(txHash)}</div>
+      </div>
+    `,
+  });
   return { subject, text, html };
 }
 
@@ -98,17 +161,27 @@ export function withdrawalCompletedEmail(amount: string, symbol: string, txHash:
 export function securityAlertEmail(action: string, ip: string, timestamp: string): { subject: string; text: string; html: string } {
   const subject = `Security Alert — ${BRAND}`;
   const text = `Security event on your account:\n\nAction: ${action}\nIP: ${ip}\nTime: ${timestamp}\n\nIf this wasn't you, change your password immediately.`;
-  const html = wrap(`
-    <h2 style="margin:0 0 12px;color:#fff;font-size:18px;font-weight:600">Security Alert</h2>
-    <p style="margin:0 0 8px">A security event was detected on your account:</p>
-    <div style="background:#1a1a1a;padding:16px;border-radius:8px;margin:16px 0">
-      <table style="font-size:13px;color:#ccc;border-collapse:collapse">
-        <tr><td style="padding:4px 16px 4px 0;color:#888">Action</td><td>${action}</td></tr>
-        <tr><td style="padding:4px 16px 4px 0;color:#888">IP</td><td style="font-family:monospace">${ip}</td></tr>
-        <tr><td style="padding:4px 16px 4px 0;color:#888">Time</td><td>${timestamp}</td></tr>
+  const html = wrap({
+    preheader: `Security activity detected on your account.`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Security alert</h2>
+      <p style="margin:0 0 12px;">A security event was detected on your account:</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
+        <tr>
+          <td style="padding:10px 12px;font-size:13px;color:#6b7280;width:110px;">Action</td>
+          <td style="padding:10px 12px;font-size:13px;color:#111827;">${escapeHtml(action)}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;font-size:13px;color:#6b7280;width:110px;">IP</td>
+          <td style="padding:10px 12px;font-size:13px;color:#111827;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">${escapeHtml(ip)}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px;font-size:13px;color:#6b7280;width:110px;">Time</td>
+          <td style="padding:10px 12px;font-size:13px;color:#111827;">${escapeHtml(timestamp)}</td>
+        </tr>
       </table>
-    </div>
-    <p style="margin:0;color:#fca5a5;font-size:13px">If this wasn't you, change your password and enable 2FA immediately.</p>
-  `);
+      <p style="margin:14px 0 0;color:#b91c1c;font-size:13px;"><strong>If this wasn’t you</strong>, change your password immediately and enable 2FA.</p>
+    `,
+  });
   return { subject, text, html };
 }
