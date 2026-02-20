@@ -96,12 +96,16 @@ function getTransporter(): Transporter | null {
 }
 
 async function sendViaResendApi(opts: SendMailOpts): Promise<{ messageId?: string }> {
+  const timeoutMs = Math.max(3_000, Math.min(20_000, parseInt(process.env.RESEND_TIMEOUT_MS ?? "12000", 10) || 12_000));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${RESEND_API_KEY}`,
     },
+    signal: controller.signal,
     body: JSON.stringify({
       from: fromAddress,
       to: [opts.to],
@@ -109,7 +113,7 @@ async function sendViaResendApi(opts: SendMailOpts): Promise<{ messageId?: strin
       text: opts.text,
       ...(opts.html ? { html: opts.html } : {}),
     }),
-  });
+  }).finally(() => clearTimeout(timer));
 
   const text = await res.text().catch(() => "");
   let json: any = null;
