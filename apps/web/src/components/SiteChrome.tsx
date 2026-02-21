@@ -31,6 +31,7 @@ function initials2(label: string): string {
 const products = [
   { href: "/home", label: "Home" },
   { href: "/wallet", label: "Wallet" },
+  { href: "/terminal", label: "Terminal" },
   { href: "/p2p", label: "P2P" },
   { href: "/arcade", label: "Arcade" },
 ] as const;
