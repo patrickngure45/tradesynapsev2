@@ -1,0 +1,50 @@
+# Coinwaka Build Plan (2026)
+
+This file is the single source of truth for what we’re building next, why, and in what order.
+
+## Product decisions (locked)
+
+- **Real user** = `email + password` (phone optional; not required).
+- **Core daily loop** = *check portfolio → watchlist/alerts → execute (buy/sell/convert) → review activity → notifications*.
+- **AI stance**: AI is for **explainability**, **support reduction**, and **ops/risk summarization**.
+  - We do **not** ship “AI trading signals” or prediction-based copy in V1.
+
+## Phase 1 (Now): Daily Use Loop
+
+### 1. Home / Portfolio Hub
+
+- [ ] New `/home` page (logged-in friendly) with:
+  - balances snapshot
+  - quick actions (Wallet / Withdraw / P2P / Order history)
+  - activity preview
+  - watchlist widget
+
+### 2. Watchlist
+
+- [ ] Persistent watchlist stored server-side (per user)
+- [ ] UI: add/remove assets
+
+### 3. Price alerts
+
+- [ ] Create threshold alerts (above/below) per asset + fiat
+- [ ] Cron endpoint to evaluate alerts and emit notifications
+- [ ] Notifications type: `price_alert`
+
+## Phase 2: Trust surfaces
+
+- [ ] In-app status page (deposits/withdrawals/outbox/db)
+- [ ] Proof-of-operations snapshot (non-marketing, factual)
+
+## Phase 3: Automation
+
+- [ ] Recurring buys (DCA) with strict caps and idempotency
+
+## Phase 4: Explainability
+
+- [ ] “Explain” endpoints for withdrawal/order/p2p states (reason codes → plain English)
+- [ ] Optional AI rephrase layer (rules-first, AI second)
+
+## Notes
+
+- Keep changes incremental and shippable.
+- Avoid adding new theme primitives; use existing `var(--*)` tokens.

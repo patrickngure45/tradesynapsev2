@@ -22,6 +22,7 @@ export type NotificationType =
   | "p2p_feedback_received"
   | "arcade_ready"
   | "arcade_hint_ready"
+  | "price_alert"
   | "system";
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -58,6 +59,8 @@ function getSeverityForType(type: NotificationType): NotificationSeverity {
     case "arcade_ready":
     case "arcade_hint_ready":
       return "info";
+    case "price_alert":
+      return "warning";
     case "p2p_dispute_resolved":
     case "p2p_order_created":
     case "trade_won":
@@ -81,6 +84,8 @@ function deriveHref(type: NotificationType, meta: Record<string, unknown>): stri
     case "arcade_ready":
     case "arcade_hint_ready":
       return "/arcade";
+    case "price_alert":
+      return "/home";
     case "deposit_credited":
       // Nudge users toward offloading via P2P (no fiat specified so it auto-selects from /api/whoami).
       return assetSymbol ? `/p2p?side=SELL&asset=${encodeURIComponent(assetSymbol)}&src=deposit` : "/wallet";
