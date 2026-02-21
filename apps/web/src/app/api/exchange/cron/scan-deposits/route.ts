@@ -24,11 +24,32 @@ function requireCronAuth(req: NextRequest): string | null {
   return null;
 }
 
+function requireEnabledInProd(): string | null {
+  if (process.env.NODE_ENV !== "production") return null;
+
+  // Safety default: never run heavy deposit scans unless explicitly enabled.
+  const enabled = String(process.env.EXCHANGE_ENABLE_DEPOSIT_SCAN ?? "").trim();
+  if (enabled !== "1" && enabled.toLowerCase() !== "true") return "deposit_scan_disabled";
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const authErr = requireCronAuth(req);
   if (authErr) {
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });
+  }
+
+  const enabledErr = requireEnabledInProd();
+  if (enabledErr) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: enabledErr,
+        hint: "Set EXCHANGE_ENABLE_DEPOSIT_SCAN=1 in production to enable this endpoint.",
+      },
+      { status: 403 },
+    );
   }
 
   const sql = getSql();
