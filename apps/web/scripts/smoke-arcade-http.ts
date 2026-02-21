@@ -113,11 +113,7 @@ async function main() {
   const auth = buildAuthHeaders();
   const cronSecret = optEnv("CRON_SECRET") ?? optEnv("EXCHANGE_CRON_SECRET") ?? null;
 
-  console.log(`[smoke:arcade] BASE=${baseUrl()}`);
-  console.log(`[smoke:arcade] auth=${optEnv("COOKIE") ? "cookie" : optEnv("INTERNAL_SERVICE_SECRET") ? "internal" : optEnv("X_USER_ID") ? "x-user-id" : "none"}`);
-
-  // 0) Basic auth check
-  {
+  const getInventory = async () => {
     const { status, json } = await fetchJson("/api/arcade/inventory", {
       method: "GET",
       headers: {
@@ -127,10 +123,21 @@ async function main() {
 
     if (status !== 200) {
       console.error(`[inventory] status=${status}`, json);
-      throw new Error("Arcade inventory request failed (check auth).")
+      throw new Error("Arcade inventory request failed (check auth).");
     }
 
-    console.log(`[inventory] shards=${json?.shards ?? "?"} items=${Array.isArray(json?.items) ? json.items.length : "?"}`);
+    const shards = Number(json?.shards ?? 0);
+    const items: any[] = Array.isArray(json?.items) ? json.items : [];
+    return { shards, items };
+  };
+
+  console.log(`[smoke:arcade] BASE=${baseUrl()}`);
+  console.log(`[smoke:arcade] auth=${optEnv("COOKIE") ? "cookie" : optEnv("INTERNAL_SERVICE_SECRET") ? "internal" : optEnv("X_USER_ID") ? "x-user-id" : "none"}`);
+
+  // 0) Basic auth check
+  {
+    const inv = await getInventory();
+    console.log(`[inventory] shards=${inv.shards} items=${inv.items.length}`);
   }
 
   // 1) Open an insight pack (commit -> reveal)
@@ -276,6 +283,129 @@ async function main() {
       }
 
       console.log(`[creation] revealed rarity=${reveal.json?.result?.outcome?.rarity ?? "?"}`);
+    }
+  }
+
+  // 4) Mutation + Fusion (if prerequisites are met)
+  {
+    const inv = await getInventory();
+    const cosmetics = inv.items
+      .filter((i) => String(i?.kind ?? "") === "cosmetic")
+      .map((i) => ({ kind: "cosmetic", code: String(i?.code ?? "").trim(), rarity: String(i?.rarity ?? "").trim(), quantity: Number(i?.quantity ?? 0) }))
+      .filter((i) => i.code && i.rarity && i.quantity > 0);
+
+    const shards = inv.shards;
+    const mutCost = 15;
+    const fusCost = 25;
+
+    if (cosmetics.length >= 1 && shards >= mutCost) {
+      const item = cosmetics[0]!;
+      const clientSeed = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+      const commitHash = await sha256Hex(clientSeed);
+
+      const commit = await fetchJson("/api/arcade/mutation/commit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...auth.headers,
+          ...(auth.csrfToken ? { "x-csrf-token": auth.csrfToken } : {}),
+        },
+        body: JSON.stringify({ profile: "low", client_commit_hash: commitHash, item }),
+      });
+
+      if (commit.status !== 200 || !commit.json?.action_id) {
+        console.error(`[mutation/commit] status=${commit.status}`, commit.json);
+        throw new Error("Mutation commit failed");
+      }
+
+      const actionId = String(commit.json.action_id);
+
+      const reveal = await fetchJson("/api/arcade/mutation/reveal", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...auth.headers,
+          ...(auth.csrfToken ? { "x-csrf-token": auth.csrfToken } : {}),
+        },
+        body: JSON.stringify({ action_id: actionId, client_seed: clientSeed }),
+      });
+
+      if (reveal.status !== 200) {
+        console.error(`[mutation/reveal] status=${reveal.status}`, reveal.json);
+        throw new Error("Mutation reveal failed");
+      }
+
+      console.log(`[mutation] ok action=${actionId.slice(0, 8)}… rarity=${reveal.json?.result?.outcome?.rarity ?? "?"}`);
+    } else {
+      console.log(`[mutation] skipped (need 1 cosmetic + ${mutCost} shards; have cosmetics=${cosmetics.length} shards=${shards})`);
+    }
+
+    const inv2 = await getInventory();
+    const cosmetics2 = inv2.items
+      .filter((i) => String(i?.kind ?? "") === "cosmetic")
+      .map((i) => ({ kind: "cosmetic", code: String(i?.code ?? "").trim(), rarity: String(i?.rarity ?? "").trim(), quantity: Number(i?.quantity ?? 0) }))
+      .filter((i) => i.code && i.rarity && i.quantity > 0);
+
+    const shards2 = inv2.shards;
+    const pickDistinct = (): { a: any; b: any } | null => {
+      if (cosmetics2.length < 2) return null;
+      const a = cosmetics2[0]!;
+      for (let i = 1; i < cosmetics2.length; i += 1) {
+        const b = cosmetics2[i]!;
+        if (a.code !== b.code || a.rarity !== b.rarity) return { a, b };
+      }
+      // If we only have one unique row but quantity>=2, pick same code/rarity is NOT allowed by API.
+      return null;
+    };
+
+    const distinct = pickDistinct();
+    if (distinct && shards2 >= fusCost) {
+      const clientSeed = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+      const commitHash = await sha256Hex(clientSeed);
+
+      const commit = await fetchJson("/api/arcade/fusion/commit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...auth.headers,
+          ...(auth.csrfToken ? { "x-csrf-token": auth.csrfToken } : {}),
+        },
+        body: JSON.stringify({
+          profile: "low",
+          client_commit_hash: commitHash,
+          item_a: distinct.a,
+          item_b: distinct.b,
+        }),
+      });
+
+      if (commit.status !== 200 || !commit.json?.action_id) {
+        console.error(`[fusion/commit] status=${commit.status}`, commit.json);
+        throw new Error("Fusion commit failed");
+      }
+
+      const actionId = String(commit.json.action_id);
+
+      const reveal = await fetchJson("/api/arcade/fusion/reveal", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...auth.headers,
+          ...(auth.csrfToken ? { "x-csrf-token": auth.csrfToken } : {}),
+        },
+        body: JSON.stringify({ action_id: actionId, client_seed: clientSeed }),
+      });
+
+      if (reveal.status !== 200) {
+        console.error(`[fusion/reveal] status=${reveal.status}`, reveal.json);
+        throw new Error("Fusion reveal failed");
+      }
+
+      console.log(`[fusion] ok action=${actionId.slice(0, 8)}… rarity=${reveal.json?.result?.outcome?.rarity ?? "?"}`);
+    } else {
+      const reason = !distinct
+        ? `need 2 distinct cosmetics (have rows=${cosmetics2.length})`
+        : `need ${fusCost} shards (have ${shards2})`;
+      console.log(`[fusion] skipped (${reason})`);
     }
   }
 
