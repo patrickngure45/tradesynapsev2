@@ -3,12 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
+import { releaseJobLock, tryAcquireJobLock } from "@/lib/system/jobLock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type InFlight = { startedAtMs: number; id: string };
-let inFlight: InFlight | null = null;
 
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -33,25 +31,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: authErr }, { status });
   }
 
-  // Prevent overlapping scans in the same Node process (cron retries/timeouts can
-  // otherwise pile up and OOM the web service).
-  const nowMs = Date.now();
+  const sql = getSql();
+
+  // Distributed lock across replicas (TTL-based).
   const lockTtlMs = clampInt(Number(process.env.EXCHANGE_SCAN_LOCK_TTL_MS ?? 10 * 60_000), 30_000, 60 * 60_000);
-  if (inFlight && nowMs - inFlight.startedAtMs < lockTtlMs) {
+  const lockKey = "exchange:scan-deposits:bsc";
+  const holderId = `${process.env.RAILWAY_SERVICE_NAME ?? process.env.SERVICE_NAME ?? "web"}:${crypto.randomUUID()}`;
+  const lock = await tryAcquireJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs });
+  if (!lock.acquired) {
     return NextResponse.json(
       {
         ok: false,
         error: "scan_in_progress",
-        started_at: new Date(inFlight.startedAtMs).toISOString(),
+        held_until: lock.held_until,
+        holder_id: lock.holder_id,
         hint: "Another scan is already running; wait for it to finish or increase EXCHANGE_SCAN_LOCK_TTL_MS.",
       },
       { status: 429 },
     );
   }
-  const myInFlight: InFlight = { startedAtMs: nowMs, id: crypto.randomUUID() };
-  inFlight = myInFlight;
-
-  const sql = getSql();
 
   const beat = async (details?: Record<string, unknown>) => {
     try {
@@ -154,8 +152,11 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   } finally {
-    // Release lock only if we still own it.
-    if (inFlight?.id === myInFlight.id) inFlight = null;
+    try {
+      await releaseJobLock(sql as any, { key: lockKey, holderId });
+    } catch {
+      // ignore
+    }
   }
 }
 
