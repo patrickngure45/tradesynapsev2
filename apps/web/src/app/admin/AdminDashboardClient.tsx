@@ -148,11 +148,15 @@ function statusBadgeVariant(status: string): "green" | "red" | "amber" | "blue" 
     case "needs_review":
       return "amber";
     case "approved":
-    case "completed":
+    case "broadcasted":
+      return "blue";
+    case "confirmed":
       return "green";
     case "rejected":
     case "failed":
       return "red";
+    case "canceled":
+      return "gray";
     default:
       return "gray";
   }
@@ -412,6 +416,19 @@ export function AdminDashboardClient() {
     setError(null);
     try {
       await adminFetch(`/api/exchange/admin/withdrawals/${id}/approve`, { method: "POST" });
+      await fetchWithdrawals();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleBroadcast = async (id: string) => {
+    setActionLoading(id);
+    setError(null);
+    try {
+      await adminFetch(`/api/exchange/admin/withdrawals/${id}/broadcast`, { method: "POST" });
       await fetchWithdrawals();
     } catch (e: any) {
       setError(e.message);
@@ -1108,7 +1125,7 @@ export function AdminDashboardClient() {
         <div className="grid gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-[var(--muted)]">Filter:</span>
-            {["review", "requested", "needs_review", "approved", "rejected", "completed", "failed"].map(
+            {["review", "requested", "needs_review", "approved", "broadcasted", "confirmed", "rejected", "failed", "canceled"].map(
               (s) => (
                 <button
                   key={s}
@@ -1182,6 +1199,19 @@ export function AdminDashboardClient() {
                         onClick={() => handleReject(w.id)}
                       >
                         {actionLoading === w.id ? "..." : "Reject"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {w.status === "approved" ? (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                        disabled={actionLoading === w.id}
+                        onClick={() => handleBroadcast(w.id)}
+                      >
+                        {actionLoading === w.id ? "..." : "Broadcast"}
                       </button>
                     </div>
                   ) : null}
