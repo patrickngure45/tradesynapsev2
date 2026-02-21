@@ -38,6 +38,22 @@ Apply (destructive balance changes):
 AGENT_EMAILS="agent1@x.com,agent2@y.com" npm run cleanup:agents -- --apply
 ```
 
+## 3) Delete seeded/bot users only (keep real accounts)
+
+If you don’t know all “real” user emails, use this safer cleanup: it deletes users that **do not** have a password set (`password_hash IS NULL`).
+
+Dry run:
+
+```bash
+npm run cleanup:dev-users
+```
+
+Execute:
+
+```bash
+CONFIRM_CLEANUP=DELETE_DEV_USERS npm run cleanup:dev-users
+```
+
 ## Notes
 
 - Never run these scripts unless `DATABASE_URL` points at the intended database.
