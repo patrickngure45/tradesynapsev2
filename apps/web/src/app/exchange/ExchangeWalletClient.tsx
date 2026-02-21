@@ -948,6 +948,46 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  }
  }
 
+ async function refreshBalancesAndPending(opts?: { silent?: boolean }) {
+  try {
+   const b = await fetchJsonOrThrow<unknown>("/api/exchange/balances", {
+    cache: "no-store",
+    headers: requestHeaders,
+   });
+   const nextBalances =
+    b && typeof b === "object" && "balances" in (b as any) && Array.isArray((b as any).balances)
+     ? ((b as any).balances as BalanceRow[])
+     : null;
+   if (nextBalances) {
+    setBalances(nextBalances);
+    setLastBalancesRefreshAt(Date.now());
+   }
+
+   // Best-effort: pending deposits
+   try {
+    setPendingDepositsError(null);
+    const pd = await fetchJsonOrThrow<{ deposits?: PendingDepositRow[] }>("/api/exchange/deposits/pending", {
+     cache: "no-store",
+     headers: requestHeaders,
+    });
+    setPendingDeposits(Array.isArray(pd?.deposits) ? pd.deposits : []);
+   } catch (e) {
+    if (e instanceof ApiError && (e.code === "unauthorized" || e.code === "missing_x_user_id")) {
+     setPendingDeposits([]);
+     return;
+    }
+    setPendingDeposits([]);
+    setPendingDepositsError(e instanceof Error ? e.message : String(e));
+   }
+  } catch (e) {
+   // Keep polling silent; don't stomp the main page error state.
+   if (!opts?.silent) {
+    setToastKind("error");
+    setToastMessage(e instanceof Error ? e.message : String(e));
+   }
+  }
+ }
+
  async function reportDepositTx() {
   const tx = reportTxHash.trim();
   if (!tx) return;
@@ -1007,6 +1047,28 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  void refreshAll();
  // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [authMode]);
+
+ // Auto-refresh balances and pending deposits while the wallet page is open.
+ // Keeps deposit UX responsive without requiring the user to manually refresh.
+ useEffect(() => {
+  let cancelled = false;
+  const intervalMs = 15_000;
+
+  const tick = async () => {
+   if (cancelled) return;
+   if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+   await refreshBalancesAndPending({ silent: true });
+  };
+
+  const id = window.setInterval(() => {
+   void tick();
+  }, intervalMs);
+
+  return () => {
+   cancelled = true;
+   window.clearInterval(id);
+  };
+ }, [requestHeaders]);
 
  useEffect(() => {
  if (!localFiat) return;
