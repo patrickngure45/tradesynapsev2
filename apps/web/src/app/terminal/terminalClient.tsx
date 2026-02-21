@@ -45,12 +45,14 @@ type OpenOrderRow = {
 
 type ConditionalOrderRow = {
   id: string;
-  kind: "stop_limit";
+  kind: "stop_limit" | "oco";
   side: "buy" | "sell";
   market_id: string;
   market_symbol: string;
   trigger_price: string;
   limit_price: string;
+  take_profit_price: string | null;
+  triggered_leg: string | null;
   quantity: string;
   status: "active" | "triggering" | "triggered" | "canceled" | "failed";
   attempt_count: number;
@@ -576,9 +578,10 @@ function FillsPanel({ marketId }: { marketId: string | null }) {
 
 function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [type, setType] = useState<"limit" | "market" | "stop_limit">("limit");
+  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco">("limit");
   const [price, setPrice] = useState<string>("");
   const [triggerPrice, setTriggerPrice] = useState<string>("");
+  const [takeProfitPrice, setTakeProfitPrice] = useState<string>("");
   const [qty, setQty] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -590,6 +593,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setErr(null);
     setPrice("");
     setTriggerPrice("");
+    setTakeProfitPrice("");
     setQty("");
   }, [market?.id]);
 
@@ -637,6 +641,25 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           side,
           trigger_price: triggerPrice,
           limit_price: price,
+          quantity: qty,
+        };
+        await fetchJsonOrThrow(
+          "/api/exchange/conditional-orders",
+          withDevUserHeader({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+        await loadStops();
+      } else if (type === "oco") {
+        const payload = {
+          kind: "oco",
+          market_id: market.id,
+          side,
+          take_profit_price: takeProfitPrice,
+          stop_trigger_price: triggerPrice,
+          stop_limit_price: price,
           quantity: qty,
         };
         await fetchJsonOrThrow(
@@ -706,7 +729,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         <button
           type="button"
           onClick={() => setType("limit")}
@@ -743,22 +766,43 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         >
           Stop‑Limit
         </button>
+        <button
+          type="button"
+          onClick={() => setType("oco")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "oco"
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          OCO
+        </button>
       </div>
 
-      {type === "stop_limit" ? (
+      {type === "oco" ? (
         <input
-          value={triggerPrice}
-          onChange={(e) => setTriggerPrice(e.target.value)}
-          placeholder="Trigger Price"
+          value={takeProfitPrice}
+          onChange={(e) => setTakeProfitPrice(e.target.value)}
+          placeholder="Take Profit Price"
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
       ) : null}
 
-      {type === "limit" || type === "stop_limit" ? (
+      {type === "stop_limit" || type === "oco" ? (
+        <input
+          value={triggerPrice}
+          onChange={(e) => setTriggerPrice(e.target.value)}
+          placeholder={type === "oco" ? "Stop Trigger Price" : "Trigger Price"}
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+        />
+      ) : null}
+
+      {type === "limit" || type === "stop_limit" || type === "oco" ? (
         <input
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          placeholder={type === "stop_limit" ? "Limit Price" : "Price"}
+          placeholder={type === "oco" ? "Stop Limit Price" : type === "stop_limit" ? "Limit Price" : "Price"}
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
       ) : null}
@@ -786,7 +830,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
         <div className="flex items-center justify-between gap-3 px-3 py-2">
-          <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Stops</div>
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Conditional</div>
           <div className="text-[10px] text-[var(--muted)]">{stopsLoading ? "sync" : `${stops.length}`}</div>
         </div>
         <div className="border-t border-[var(--border)]">
@@ -796,8 +840,10 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
+                  <th className="px-3 py-2 text-left text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">K</th>
                   <th className="px-3 py-2 text-left text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Side</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Trig</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">TP</th>
+                  <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Stop</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Limit</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Qty</th>
                   <th className="px-3 py-2 text-right text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">St</th>
@@ -835,7 +881,9 @@ function StopRow({ o, onChanged }: { o: ConditionalOrderRow; onChanged: () => vo
 
   return (
     <tr className="border-b border-[var(--border)] last:border-b-0">
+      <td className="px-3 py-1 text-left text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)]">{o.kind === "oco" ? "O" : "S"}</td>
       <td className={"px-3 py-1 font-extrabold " + (o.side === "buy" ? "text-[var(--up)]" : "text-[var(--down)]")}>{o.side.toUpperCase()}</td>
+      <td className="px-3 py-1 text-right text-[var(--foreground)]">{o.take_profit_price ? fmtCompact(o.take_profit_price, 8) : "—"}</td>
       <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(o.trigger_price, 8)}</td>
       <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(o.limit_price, 8)}</td>
       <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(o.quantity, 8)}</td>

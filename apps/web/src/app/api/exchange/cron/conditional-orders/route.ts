@@ -34,10 +34,11 @@ type ConditionalRow = {
   id: string;
   user_id: string;
   market_id: string;
-  kind: "stop_limit";
+  kind: "stop_limit" | "oco";
   side: "buy" | "sell";
   trigger_price: string;
   limit_price: string;
+  take_profit_price: string | null;
   quantity: string;
   status: "active" | "triggering";
   attempt_count: number;
@@ -47,6 +48,12 @@ type ConditionalRow = {
 function shouldTrigger(side: "buy" | "sell", currentPrice: number, triggerPrice: number): boolean {
   if (!Number.isFinite(currentPrice) || !Number.isFinite(triggerPrice) || triggerPrice <= 0) return false;
   return side === "buy" ? currentPrice >= triggerPrice : currentPrice <= triggerPrice;
+}
+
+function shouldTakeProfit(side: "buy" | "sell", currentPrice: number, takeProfitPrice: number): boolean {
+  if (!Number.isFinite(currentPrice) || !Number.isFinite(takeProfitPrice) || takeProfitPrice <= 0) return false;
+  // Favorable direction: sell TP when price rises; buy TP when price falls.
+  return side === "sell" ? currentPrice >= takeProfitPrice : currentPrice <= takeProfitPrice;
 }
 
 /**
@@ -78,12 +85,13 @@ export async function POST(request: Request) {
           side,
           trigger_price::text,
           limit_price::text,
+          take_profit_price::text,
           quantity::text,
           status,
           attempt_count,
           last_attempt_at
         FROM ex_conditional_order
-        WHERE kind = 'stop_limit'
+        WHERE kind IN ('stop_limit','oco')
           AND (
             status = 'active'
             OR (
@@ -159,8 +167,30 @@ export async function POST(request: Request) {
       const current = marketPrices.get(c.market_id);
       if (current == null) continue;
 
-      const triggerPrice = Number(c.trigger_price);
-      if (!shouldTrigger(c.side, current, triggerPrice)) continue;
+      let triggerLeg: "stop" | "take_profit" = "stop";
+      let placePrice = c.limit_price;
+
+      if (c.kind === "oco") {
+        const tp = c.take_profit_price != null ? Number(c.take_profit_price) : NaN;
+        const stopTrig = Number(c.trigger_price);
+        const stopHit = shouldTrigger(c.side, current, stopTrig);
+        const tpHit = shouldTakeProfit(c.side, current, tp);
+        if (!stopHit && !tpHit) continue;
+
+        // If both appear true due to a price gap / sparse sampling, prioritize STOP (risk protection).
+        if (tpHit && !stopHit) {
+          triggerLeg = "take_profit";
+          placePrice = String(tp);
+        } else {
+          triggerLeg = "stop";
+          placePrice = c.limit_price;
+        }
+      } else {
+        const triggerPrice = Number(c.trigger_price);
+        if (!shouldTrigger(c.side, current, triggerPrice)) continue;
+        triggerLeg = "stop";
+        placePrice = c.limit_price;
+      }
 
       triggered++;
       attempted++;
@@ -190,7 +220,7 @@ export async function POST(request: Request) {
           market_id: c.market_id,
           side: c.side,
           type: "limit",
-          price: c.limit_price,
+          price: placePrice,
           quantity: c.quantity,
         }),
       });
@@ -213,6 +243,7 @@ export async function POST(request: Request) {
             UPDATE ex_conditional_order
             SET status = 'triggered',
                 triggered_at = now(),
+                triggered_leg = ${triggerLeg},
                 placed_order_id = ${placedOrderId}::uuid,
                 updated_at = now()
             WHERE id = ${c.id}::uuid

@@ -9,7 +9,7 @@ import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransie
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const createSchema = z.object({
+const stopLimitSchema = z.object({
   kind: z.literal("stop_limit"),
   market_id: z.string().uuid(),
   side: z.enum(["buy", "sell"]),
@@ -17,6 +17,18 @@ const createSchema = z.object({
   limit_price: z.string().min(1),
   quantity: z.string().min(1),
 });
+
+const ocoSchema = z.object({
+  kind: z.literal("oco"),
+  market_id: z.string().uuid(),
+  side: z.enum(["buy", "sell"]),
+  take_profit_price: z.string().min(1),
+  stop_trigger_price: z.string().min(1),
+  stop_limit_price: z.string().min(1),
+  quantity: z.string().min(1),
+});
+
+const createSchema = z.union([stopLimitSchema, ocoSchema]);
 
 const querySchema = z.object({
   market_id: z.string().uuid().optional(),
@@ -57,6 +69,8 @@ export async function GET(request: Request) {
           market_symbol: string;
           trigger_price: string;
           limit_price: string;
+            take_profit_price: string | null;
+            triggered_leg: string | null;
           quantity: string;
           status: string;
           attempt_count: number;
@@ -75,6 +89,8 @@ export async function GET(request: Request) {
           m.symbol AS market_symbol,
           c.trigger_price::text,
           c.limit_price::text,
+          c.take_profit_price::text,
+          c.triggered_leg,
           c.quantity::text,
           c.status,
           c.attempt_count,
@@ -121,17 +137,30 @@ export async function POST(request: Request) {
     }
 
     const row = await retryOnceOnTransientDbError(async () => {
+      const stopTrigger = input.kind === "oco" ? input.stop_trigger_price : input.trigger_price;
+      const stopLimit = input.kind === "oco" ? input.stop_limit_price : input.limit_price;
+      const takeProfit = input.kind === "oco" ? input.take_profit_price : null;
+
       const rows = await sql<{ id: string }[]>`
         INSERT INTO ex_conditional_order (
-          user_id, market_id, kind, side, trigger_price, limit_price, quantity, status
+          user_id,
+          market_id,
+          kind,
+          side,
+          trigger_price,
+          limit_price,
+          take_profit_price,
+          quantity,
+          status
         )
         VALUES (
           ${actingUserId}::uuid,
           ${input.market_id}::uuid,
           ${input.kind},
           ${input.side},
-          ${input.trigger_price}::numeric,
-          ${input.limit_price}::numeric,
+          ${stopTrigger}::numeric,
+          ${stopLimit}::numeric,
+          ${takeProfit}::numeric,
           ${input.quantity}::numeric,
           'active'
         )
