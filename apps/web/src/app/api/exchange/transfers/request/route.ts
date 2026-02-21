@@ -20,6 +20,7 @@ const requestSchema = z.object({
   recipient_email: z.string().email(),
   reference: z.string().min(1).max(200).optional(),
   totp_code: z.string().length(6).regex(/^\d{6}$/).optional(),
+  use_fee_boost: z.boolean().optional().default(false),
 });
 
 export async function POST(request: Request) {
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
       amount: input.amount,
       recipientEmail: input.recipient_email,
       reference: input.reference,
+      useFeeBoost: input.use_fee_boost,
     });
 
     const err = result.body as { error?: string; details?: unknown };

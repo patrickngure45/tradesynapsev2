@@ -61,8 +61,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (rows.length === 0) return { status: 404 as const, body: { error: "not_found" } };
     const w = rows[0]!;
 
+    // Idempotency: if already rejected, return success.
+    if (w.status === "rejected") {
+      return { status: 200 as const, body: { ok: true, withdrawal_id: id, status: "rejected" } };
+    }
+
+    // Prevent rejecting once approved/broadcasted/confirmed (would conflict with on-chain send).
+    if (w.status === "approved" || w.status === "broadcasted" || w.status === "confirmed") {
+      return {
+        status: 409 as const,
+        body: { error: "trade_state_conflict", details: { current_status: w.status } },
+      };
+    }
+
     if (w.status !== "requested" && w.status !== "needs_review") {
-      return { status: 409 as const, body: { error: "trade_state_conflict" } };
+      return { status: 409 as const, body: { error: "trade_state_conflict", details: { current_status: w.status } } };
     }
 
     const reason = input?.reason ?? "rejected";

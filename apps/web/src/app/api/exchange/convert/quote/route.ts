@@ -3,9 +3,10 @@ import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { amount3818PositiveSchema } from "@/lib/exchange/amount";
-import { quoteConvert } from "@/lib/exchange/convert";
+import { convertFeeBps, quoteConvert } from "@/lib/exchange/convert";
 import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 import { responseForDbError } from "@/lib/dbTransient";
+import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,14 @@ const querySchema = z.object({
   from: z.string().min(1).max(12),
   to: z.string().min(1).max(12),
   amount_in: amount3818PositiveSchema,
+  use_fee_boost: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const s = String(v ?? "").trim().toLowerCase();
+      return s === "1" || s === "true" || s === "yes";
+    })
+    .optional(),
 });
 
 export async function GET(request: Request) {
@@ -26,6 +35,7 @@ export async function GET(request: Request) {
       from: url.searchParams.get("from") ?? "",
       to: url.searchParams.get("to") ?? "",
       amount_in: url.searchParams.get("amount_in") ?? "",
+      use_fee_boost: url.searchParams.get("use_fee_boost") ?? undefined,
     });
   } catch (e) {
     return apiZodError(e) ?? apiError("invalid_input");
@@ -49,10 +59,50 @@ export async function GET(request: Request) {
     const toAsset = assets.find((a) => a.symbol.toUpperCase() === toSym) ?? null;
     if (!fromAsset || !toAsset) return apiError("asset_not_found", { status: 404 });
 
+    let feeBps = convertFeeBps();
+    let feeBoost: null | { code: string; bps: number } = null;
+
+    if (q.use_fee_boost) {
+      const actingUserId = getActingUserId(request);
+      const authErr = requireActingUserIdInProd(actingUserId);
+      if (authErr) return apiError(authErr);
+      if (!actingUserId) return apiError("missing_x_user_id");
+
+      const invRows = await sql<{ code: string; quantity: number }[]>`
+        SELECT code, quantity
+        FROM arcade_inventory
+        WHERE user_id = ${actingUserId}::uuid
+          AND kind = 'boost'
+          AND code = ANY(ARRAY['fee_25bps_7d','fee_15bps_72h','fee_10bps_48h','fee_5bps_24h']::text[])
+          AND quantity > 0
+        ORDER BY
+          CASE code
+            WHEN 'fee_25bps_7d' THEN 1
+            WHEN 'fee_15bps_72h' THEN 2
+            WHEN 'fee_10bps_48h' THEN 3
+            WHEN 'fee_5bps_24h' THEN 4
+            ELSE 99
+          END,
+          updated_at DESC
+        LIMIT 1
+      `;
+
+      const inv = invRows[0];
+      if (inv) {
+        const m = String(inv.code ?? "").match(/fee_(\d+)bps/i);
+        const bps = m ? Number(m[1]) : 0;
+        if (Number.isFinite(bps) && bps > 0) {
+          feeBoost = { code: inv.code, bps };
+          feeBps = Math.max(0, feeBps - bps);
+        }
+      }
+    }
+
     const quote = await quoteConvert(sql as any, {
       fromSymbol: fromSym,
       toSymbol: toSym,
       amountIn: q.amount_in,
+      feeBps,
     });
     if (!quote) return apiError("quote_unavailable", { status: 409 });
 
@@ -95,7 +145,7 @@ export async function GET(request: Request) {
       });
     }
 
-    return Response.json({ ok: true, quote }, { status: 200 });
+    return Response.json({ ok: true, quote, fee_boost: feeBoost }, { status: 200 });
   } catch (e) {
     const resp = responseForDbError("exchange.convert.quote", e);
     if (resp) return resp;

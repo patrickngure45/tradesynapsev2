@@ -8,6 +8,7 @@ import { requireAdminForApi } from "@/lib/auth/admin";
 import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createNotification } from "@/lib/notifications";
+import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,17 +50,67 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
 
-    const rows = await txSql<{ id: string; status: string; user_id: string; amount: string; asset_id: string; asset_symbol: string }[]>`
-      SELECT w.id, w.status, w.user_id::text AS user_id, w.amount::text AS amount, w.asset_id::text AS asset_id, a.symbol AS asset_symbol
+    const rows = await txSql<
+      {
+        id: string;
+        status: string;
+        user_id: string;
+        amount: string;
+        asset_id: string;
+        asset_symbol: string;
+        hold_id: string | null;
+        hold_status: string | null;
+        hold_remaining_amount: string | null;
+      }[]
+    >`
+      SELECT
+        w.id,
+        w.status,
+        w.user_id::text AS user_id,
+        w.amount::text AS amount,
+        w.asset_id::text AS asset_id,
+        a.symbol AS asset_symbol,
+        w.hold_id::text AS hold_id,
+        h.status AS hold_status,
+        h.remaining_amount::text AS hold_remaining_amount
       FROM ex_withdrawal_request w
       JOIN ex_asset a ON a.id = w.asset_id
+      LEFT JOIN ex_hold h ON h.id = w.hold_id
       WHERE w.id = ${id}
       LIMIT 1
+      FOR UPDATE
     `;
 
     if (rows.length === 0) return { status: 404 as const, body: { error: "not_found" } };
-    if (rows[0]!.status !== "requested" && rows[0]!.status !== "needs_review") {
-      return { status: 409 as const, body: { error: "trade_state_conflict" } };
+    const w = rows[0]!;
+
+    // Idempotency: if already approved/broadcasted/confirmed, return success.
+    if (w.status === "approved" || w.status === "broadcasted" || w.status === "confirmed") {
+      return { status: 200 as const, body: { ok: true, withdrawal_id: id, status: w.status } };
+    }
+
+    if (w.status !== "requested" && w.status !== "needs_review") {
+      return { status: 409 as const, body: { error: "trade_state_conflict", details: { current_status: w.status } } };
+    }
+
+    // Ensure we have an active hold reserved for this withdrawal.
+    if (!w.hold_id) {
+      return { status: 409 as const, body: { error: "withdrawal_missing_hold" } };
+    }
+    if (w.hold_status !== "active") {
+      return {
+        status: 409 as const,
+        body: { error: "withdrawal_hold_not_active", details: { hold_status: w.hold_status } },
+      };
+    }
+    if (w.hold_remaining_amount && toBigInt3818(w.hold_remaining_amount) < toBigInt3818(w.amount)) {
+      return {
+        status: 409 as const,
+        body: {
+          error: "withdrawal_hold_insufficient",
+          details: { remaining: w.hold_remaining_amount, required: w.amount },
+        },
+      };
     }
 
     // If we have a risk signal that says "block", require rejection.
@@ -113,10 +164,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     // Notify user
     await createNotification(txSql, {
-      userId: rows[0]!.user_id,
+      userId: w.user_id,
       type: "withdrawal_approved",
       title: "Withdrawal Approved",
-      body: `Your withdrawal of ${rows[0]!.amount} has been approved and is being processed.`,
+      body: `Your withdrawal of ${w.amount} has been approved and is being processed.`,
       metadata: { withdrawalId: id },
     });
 

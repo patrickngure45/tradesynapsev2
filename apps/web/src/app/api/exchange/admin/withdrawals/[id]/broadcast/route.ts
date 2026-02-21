@@ -46,6 +46,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const w = rows[0]!;
+
+  // Idempotency: if already progressed, just return current state.
+  if (w.status === "broadcasted" || w.status === "confirmed" || w.status === "failed") {
+    const final = await sql<{ status: string; tx_hash: string | null }[]>`
+      SELECT status, tx_hash
+      FROM ex_withdrawal_request
+      WHERE id = ${id}
+    `;
+    const response = Response.json({
+      ok: true,
+      withdrawal_id: id,
+      status: final[0]?.status ?? w.status,
+      tx_hash: final[0]?.tx_hash ?? null,
+    });
+    logRouteResponse(request, response, { startMs, meta: { withdrawalId: id, idempotent: true } });
+    return response;
+  }
+
   if (w.status !== "approved") {
     return apiError("trade_state_conflict", {
       status: 409,

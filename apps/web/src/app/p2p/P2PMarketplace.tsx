@@ -36,6 +36,7 @@ type Ad = {
   completed_count?: number;
   is_verified_agent?: boolean;
   terms: string | null;
+  highlighted_until?: string | null;
 };
 
 export function P2PMarketplace() {
@@ -514,6 +515,8 @@ function AdRow({
   onTake: () => void;
   isLast: boolean;
 }) {
+  const isHighlighted = Boolean(ad.highlighted_until) && new Date(String(ad.highlighted_until)).getTime() > Date.now();
+
   let displayName = "user";
   if (ad.display_name) displayName = ad.display_name;
   else if (ad.email) {
@@ -568,6 +571,12 @@ function AdRow({
             <div className="truncate text-sm font-semibold text-[var(--foreground)]">{displayName}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--muted)]">
               <span className="text-[var(--up)]">Active</span>
+              {isHighlighted ? (
+                <>
+                  <span>•</span>
+                  <span className="font-semibold text-[var(--accent)]">Highlighted</span>
+                </>
+              ) : null}
               <span>•</span>
               <span className="text-[var(--muted)]">{repLabel === "No feedback yet" ? "No feedback" : repLabel}</span>
               {completedLabel ? (

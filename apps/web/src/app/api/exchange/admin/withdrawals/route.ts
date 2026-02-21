@@ -4,7 +4,17 @@ import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransie
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { logRouteResponse } from "@/lib/routeLog";
 
-const VALID_STATUSES = new Set(["requested", "needs_review", "approved", "rejected", "completed", "failed", "review"]);
+const VALID_STATUSES = new Set([
+  "requested",
+  "needs_review",
+  "approved",
+  "rejected",
+  "broadcasted",
+  "confirmed",
+  "failed",
+  "canceled",
+  "review",
+]);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,7 +85,10 @@ export async function GET(request: Request) {
           (${statusList}::text[] IS NOT NULL AND w.status = ANY(${statusList}::text[]))
           OR (${statusList}::text[] IS NULL AND w.status = ${status})
         )
-        ORDER BY w.created_at ASC
+        ORDER BY
+          (w.priority_until IS NOT NULL AND w.priority_until > now()) DESC,
+          w.priority_until DESC NULLS LAST,
+          w.created_at ASC
         LIMIT 200
       `;
     });

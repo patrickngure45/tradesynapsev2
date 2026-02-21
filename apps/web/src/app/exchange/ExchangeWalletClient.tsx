@@ -265,6 +265,14 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  const [convertJustConverted, setConvertJustConverted] = useState(false);
  const [freezeWalletSortUntil, setFreezeWalletSortUntil] = useState<number | null>(null);
 
+ const [convertFeeBoostEligible, setConvertFeeBoostEligible] = useState(false);
+ const [convertUseFeeBoost, setConvertUseFeeBoost] = useState(false);
+ const [convertBestFeeBoostLabel, setConvertBestFeeBoostLabel] = useState<string | null>(null);
+
+ const [transferFeeBoostEligible, setTransferFeeBoostEligible] = useState(false);
+ const [transferUseFeeBoost, setTransferUseFeeBoost] = useState(false);
+ const [transferBestFeeBoostLabel, setTransferBestFeeBoostLabel] = useState<string | null>(null);
+
  const [adminKey, setAdminKey] = useState<string>("");
  const [adminId, setAdminId] = useState<string>("admin@local");
  const [adminRequested, setAdminRequested] = useState<AdminWithdrawalRow[]>([]);
@@ -294,6 +302,54 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  if (!id) return undefined;
  return {"x-user-id": id };
  }, [authMode, actingUserId]);
+
+ useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      const inv = await fetchJsonOrThrow<{ ok: true; items: Array<{ kind: string; code: string; quantity: number; metadata_json?: any }> }>(
+        "/api/arcade/inventory",
+        { cache: "no-store", headers: { ...(requestHeaders ?? {}) } },
+      );
+      if (cancelled) return;
+      const items = Array.isArray(inv.items) ? inv.items : [];
+      const feeBoosts = items.filter((i) => i.kind === "boost" && /^fee_\d+bps_/i.test(String(i.code ?? "")) && Number(i.quantity ?? 0) > 0);
+      const eligible = feeBoosts.length > 0;
+      setConvertFeeBoostEligible(eligible);
+      setTransferFeeBoostEligible(eligible);
+      if (!eligible) {
+        setConvertUseFeeBoost(false);
+        setConvertBestFeeBoostLabel(null);
+        setTransferUseFeeBoost(false);
+        setTransferBestFeeBoostLabel(null);
+      } else {
+        const best = feeBoosts
+          .slice()
+          .sort((x, y) => {
+            const bx = Number(String(x.code).match(/fee_(\d+)bps/i)?.[1] ?? 0);
+            const by = Number(String(y.code).match(/fee_(\d+)bps/i)?.[1] ?? 0);
+            return by - bx;
+          })[0];
+        const label = String((best as any)?.metadata_json?.label ?? best?.code ?? "Fee boost");
+        setConvertBestFeeBoostLabel(label);
+        setTransferBestFeeBoostLabel(label);
+      }
+    } catch {
+      if (!cancelled) {
+        setConvertFeeBoostEligible(false);
+        setConvertUseFeeBoost(false);
+        setConvertBestFeeBoostLabel(null);
+
+        setTransferFeeBoostEligible(false);
+        setTransferUseFeeBoost(false);
+        setTransferBestFeeBoostLabel(null);
+      }
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
+ }, [requestHeaders]);
 
  const canUseHeader = actingUserId.trim() && isUuid(actingUserId.trim());
 
@@ -1011,9 +1067,10 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     setConvertQuoteLoading(true);
     try {
       const qs = new URLSearchParams({ from, to, amount_in: convertAmountIn });
+      if (convertFeeBoostEligible && convertUseFeeBoost) qs.set("use_fee_boost", "1");
       const json = await fetchJsonOrThrow<{ ok: boolean; quote: ConvertQuote }>(
         `/api/exchange/convert/quote?${qs.toString()}`,
-        { cache: "no-store", signal: controller.signal },
+        { cache: "no-store", signal: controller.signal, headers: { ...(requestHeaders ?? {}) } },
       );
       if (cancelled) return;
       setConvertQuote(json.quote);
@@ -1033,7 +1090,19 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
     controller.abort();
     window.clearTimeout(timer);
   };
- }, [convertFromSymbol, convertToSymbol, convertAmountIn, isConvertAmountValid, isConvertAmountTooHigh, convertQuoteNonce, isConverting]);
+ }, [
+  convertFromSymbol,
+  convertToSymbol,
+  convertAmountIn,
+  isConvertAmountValid,
+  isConvertAmountTooHigh,
+  convertQuoteNonce,
+  isConverting,
+  convertFeeBoostEligible,
+  convertUseFeeBoost,
+  requestHeaders,
+ ]);
+ 
 
  // Auto-refresh quote periodically (Binance-style) while inputs stay valid.
  useEffect(() => {
@@ -1817,6 +1886,22 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  />
  </label>
 
+ {transferFeeBoostEligible ? (
+ <label className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+ <input
+ type="checkbox"
+ checked={transferUseFeeBoost}
+ onChange={(e) => setTransferUseFeeBoost(e.target.checked)}
+ className="mt-0.5"
+ disabled={loadingAction === "transfer:request"}
+ />
+ <span className="min-w-0">
+ <span className="block font-semibold text-[var(--foreground)]">Use fee discount boost</span>
+ <span className="block text-[10px] text-[var(--muted)]">Consumes 1 boost on successful transfer{transferBestFeeBoostLabel ? ` (${transferBestFeeBoostLabel})` : ""}.</span>
+ </span>
+ </label>
+ ) : null}
+
  <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
  {transferGasQuoteLoading ? (
  <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Updating network fee…</div>
@@ -1904,6 +1989,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  amount: transferAmount,
  recipient_email: transferRecipientEmail,
  ...(transferTotpCode.length === 6 ? { totp_code: transferTotpCode } : {}),
+ ...(transferFeeBoostEligible ? { use_fee_boost: Boolean(transferUseFeeBoost) } : {}),
  }),
  });
  setToastKind("success");
@@ -2135,6 +2221,25 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
        />
      </label>
 
+     {convertFeeBoostEligible ? (
+       <label className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
+         <input
+           type="checkbox"
+           checked={convertUseFeeBoost}
+           onChange={(e) => {
+             setConvertUseFeeBoost(e.target.checked);
+             setConvertQuoteNonce((n) => n + 1);
+           }}
+           className="mt-0.5"
+           disabled={isConverting}
+         />
+         <span className="min-w-0">
+           <span className="block font-semibold text-[var(--foreground)]">Use fee discount boost</span>
+           <span className="block text-[10px] text-[var(--muted)]">Consumes 1 boost on successful conversion{convertBestFeeBoostLabel ? ` (${convertBestFeeBoostLabel})` : ""}.</span>
+         </span>
+       </label>
+     ) : null}
+
      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/25 px-3 py-2 text-[11px] text-[var(--muted)]">
        {convertLockedQuote ? (
          <div className="mb-1 break-words text-[10px] text-[var(--muted)]">Locked quote • executing…</div>
@@ -2210,6 +2315,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
                  from: fromAsset.symbol.toUpperCase(),
                  to: toAsset.symbol.toUpperCase(),
                  amount_in: convertAmountIn,
+                 ...(convertFeeBoostEligible ? { use_fee_boost: Boolean(convertUseFeeBoost) } : {}),
                  ...(locked
                    ? {
                        client_quote: {

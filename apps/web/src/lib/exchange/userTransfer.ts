@@ -1,6 +1,7 @@
 import { getSql } from "../db";
 import { quoteGasFee } from "./gas";
 import { recordInternalChainTx } from "./internalChain";
+import { logArcadeConsumption } from "../arcade/consumption";
 import {
   add3818,
   bpsFeeCeil3818,
@@ -18,6 +19,7 @@ type TransferRequestInput = {
   amount: string;
   recipientEmail: string;
   reference?: string;
+  useFeeBoost?: boolean;
 };
 
 export type TransferRequestResult =
@@ -206,9 +208,52 @@ export async function requestUserTransfer(
     ]);
 
     const baseTransferFeeBps = Math.max(0, Math.min(10_000, envInt("TRANSFER_USER_FEE_BPS", 10)));
-    const transferFeeBps = feeDiscountPct > 0
+
+    let transferFeeBps = feeDiscountPct > 0
       ? Math.max(0, Math.min(10_000, Math.floor(baseTransferFeeBps * (1 - feeDiscountPct))))
       : baseTransferFeeBps;
+
+    let feeBoost: null | { inventory_id: string; code: string; quantity: number; bps: number } = null;
+    if (baseTransferFeeBps > 0 && input.useFeeBoost) {
+      const invRows = await txSql<{ id: string; quantity: number; code: string }[]>`
+        SELECT id::text AS id, quantity, code
+        FROM arcade_inventory
+        WHERE user_id = ${input.actingUserId}::uuid
+          AND kind = 'boost'
+          AND code = ANY(ARRAY['fee_25bps_7d','fee_15bps_72h','fee_10bps_48h','fee_5bps_24h']::text[])
+        ORDER BY
+          CASE code
+            WHEN 'fee_25bps_7d' THEN 1
+            WHEN 'fee_15bps_72h' THEN 2
+            WHEN 'fee_10bps_48h' THEN 3
+            WHEN 'fee_5bps_24h' THEN 4
+            ELSE 99
+          END,
+          updated_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+
+      if (!invRows.length || Number(invRows[0]!.quantity ?? 0) <= 0) {
+        return {
+          status: 409 as const,
+          body: {
+            error: "insufficient_balance",
+            details: { message: "No fee discount boost available." },
+          },
+        };
+      }
+
+      const inv = invRows[0]!;
+      const m = String(inv.code ?? "").match(/fee_(\d+)bps/i);
+      const bps = m ? Number(m[1]) : 0;
+      if (!Number.isFinite(bps) || bps <= 0 || bps > 2500) {
+        return { status: 409 as const, body: { error: "internal_error", details: { message: "invalid_fee_boost" } } };
+      }
+
+      feeBoost = { inventory_id: inv.id, code: inv.code, quantity: Number(inv.quantity ?? 0), bps };
+      transferFeeBps = Math.max(0, baseTransferFeeBps - bps);
+    }
     const transferFeeMin = envAmount("TRANSFER_USER_FEE_MIN", "0");
     const transferFeeMax = envAmount("TRANSFER_USER_FEE_MAX", "0");
     let transferFeeAmount =
@@ -313,6 +358,9 @@ export async function requestUserTransfer(
           asset_symbol: asset.symbol,
           amount: input.amount,
           transfer_fee_amount: transferFeeAmount,
+          transfer_fee_bps: transferFeeBps,
+          transfer_fee_bps_base: baseTransferFeeBps,
+          fee_boost: feeBoost ? { code: feeBoost.code, bps: feeBoost.bps } : null,
           gas_fallback_in_asset: gasFallbackInAsset,
           gas_display_symbol: gasDisplaySymbol,
           gas_display_amount: gasDisplayAmount,
@@ -335,6 +383,8 @@ export async function requestUserTransfer(
         recipient_user_id: recipient.id,
         recipient_email: recipient.email,
         transfer_fee_bps: transferFeeBps,
+        transfer_fee_bps_base: baseTransferFeeBps,
+        fee_boost: feeBoost ? { code: feeBoost.code, bps: feeBoost.bps } : null,
         discount_pct: feeDiscountPct,
         gas_display_symbol: gasDisplaySymbol,
         gas_display_amount: gasDisplayAmount,
@@ -380,6 +430,8 @@ export async function requestUserTransfer(
             gas_fallback_in_asset: gasFallbackInAsset,
             total_fee_in_asset: totalFeeInAsset,
             transfer_fee_bps: transferFeeBps,
+            transfer_fee_bps_base: baseTransferFeeBps,
+            fee_boost: feeBoost ? { code: feeBoost.code, bps: feeBoost.bps } : null,
             burn_bps: transferFeeBurnBps,
             gas_fallback_source: gasFallbackSource,
             gas_display_symbol: gasDisplaySymbol,
@@ -414,6 +466,46 @@ export async function requestUserTransfer(
             (${feeEntryId}::uuid, ${burnAcct}::uuid, ${asset.id}::uuid, (${burnAmount}::numeric))
         `;
       }
+    }
+
+    if (feeBoost) {
+      const invQty = Number(feeBoost.quantity ?? 0);
+      if (invQty <= 0) {
+        return {
+          status: 409 as const,
+          body: { error: "insufficient_balance", details: { message: "No fee discount boost available." } },
+        };
+      }
+
+      if (invQty === 1) {
+        await txSql`
+          DELETE FROM arcade_inventory
+          WHERE id = ${feeBoost.inventory_id}::uuid
+        `;
+      } else {
+        await txSql`
+          UPDATE arcade_inventory
+          SET quantity = ${invQty - 1}, updated_at = now()
+          WHERE id = ${feeBoost.inventory_id}::uuid
+        `;
+      }
+
+      await logArcadeConsumption(txSql, {
+        user_id: input.actingUserId,
+        kind: "boost",
+        code: feeBoost.code,
+        rarity: null,
+        quantity: 1,
+        context_type: "user_transfer",
+        context_id: entryId,
+        module: "transfer_fee",
+        metadata: {
+          fee_bps_base: baseTransferFeeBps,
+          fee_bps: transferFeeBps,
+          discount_bps: feeBoost.bps,
+          transfer_fee_amount: transferFeeAmount,
+        },
+      });
     }
 
     return {

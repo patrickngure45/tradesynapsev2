@@ -10,6 +10,7 @@ import { responseForDbError } from "@/lib/dbTransient";
 import { buildConvertJournalLines, convertFeeBps, quoteConvert } from "@/lib/exchange/convert";
 import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 import { recordInternalChainTx } from "@/lib/exchange/internalChain";
+import { logArcadeConsumption } from "@/lib/arcade/consumption";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ const requestSchema = z.object({
   amount_in: amount3818PositiveSchema,
   reference: z.string().min(1).max(200).optional(),
   totp_code: z.string().length(6).regex(/^\d{6}$/).optional(),
+  use_fee_boost: z.boolean().optional().default(false),
   client_quote: z
     .object({
       amount_out: amount3818PositiveSchema,
@@ -116,10 +118,52 @@ export async function POST(request: Request) {
         return { status: 404 as const, body: { error: "asset_not_found" } };
       }
 
+      const baseFeeBps = convertFeeBps();
+      let effectiveFeeBps = baseFeeBps;
+      let feeBoost: null | { inventory_id: string; code: string; quantity: number; bps: number } = null;
+
+      if (input.use_fee_boost) {
+        const invRows = await txSql<
+          { id: string; quantity: number; code: string }[]
+        >`
+          SELECT id::text AS id, quantity, code
+          FROM arcade_inventory
+          WHERE user_id = ${actingUserId}::uuid
+            AND kind = 'boost'
+            AND code = ANY(ARRAY['fee_25bps_7d','fee_15bps_72h','fee_10bps_48h','fee_5bps_24h']::text[])
+          ORDER BY
+            CASE code
+              WHEN 'fee_25bps_7d' THEN 1
+              WHEN 'fee_15bps_72h' THEN 2
+              WHEN 'fee_10bps_48h' THEN 3
+              WHEN 'fee_5bps_24h' THEN 4
+              ELSE 99
+            END,
+            updated_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `;
+
+        if (!invRows.length || Number(invRows[0]!.quantity ?? 0) <= 0) {
+          return { status: 409 as const, body: { error: "insufficient_balance", details: { message: "No fee discount boost available." } } };
+        }
+
+        const inv = invRows[0]!;
+        const m = String(inv.code ?? "").match(/fee_(\d+)bps/i);
+        const bps = m ? Number(m[1]) : 0;
+        if (!Number.isFinite(bps) || bps <= 0 || bps > 2500) {
+          return { status: 409 as const, body: { error: "internal_error", details: { message: "invalid_fee_boost" } } };
+        }
+
+        feeBoost = { inventory_id: inv.id, code: inv.code, quantity: Number(inv.quantity ?? 0), bps };
+        effectiveFeeBps = Math.max(0, baseFeeBps - bps);
+      }
+
       const quote = await quoteConvert(txSql as any, {
         fromSymbol: fromSym,
         toSymbol: toSym,
         amountIn: input.amount_in,
+        feeBps: effectiveFeeBps,
       });
       if (!quote) {
         return { status: 409 as const, body: { error: "quote_unavailable" } };
@@ -203,7 +247,9 @@ export async function POST(request: Request) {
             net_in: quote.netIn,
             amount_out: quote.amountOut,
             rate_to_per_from: quote.rateToPerFrom,
-            fee_bps: convertFeeBps(),
+            fee_bps: effectiveFeeBps,
+            fee_bps_base: baseFeeBps,
+            fee_boost: feeBoost ? { code: feeBoost.code, bps: feeBoost.bps } : null,
             price_source: quote.priceSource,
           })}::jsonb
         )
@@ -239,10 +285,48 @@ export async function POST(request: Request) {
           to: toSym,
           amount_in: quote.amountIn,
           amount_out: quote.amountOut,
-          fee_bps: convertFeeBps(),
+          fee_bps: effectiveFeeBps,
+          fee_bps_base: baseFeeBps,
+          fee_boost: feeBoost ? { code: feeBoost.code, bps: feeBoost.bps } : null,
           price_source: quote.priceSource,
         },
       });
+
+      if (feeBoost) {
+        const invQty = Number(feeBoost.quantity ?? 0);
+        if (invQty <= 0) {
+          return { status: 409 as const, body: { error: "insufficient_balance", details: { message: "No fee discount boost available." } } };
+        }
+
+        if (invQty === 1) {
+          await txSql`
+            DELETE FROM arcade_inventory
+            WHERE id = ${feeBoost.inventory_id}::uuid
+          `;
+        } else {
+          await txSql`
+            UPDATE arcade_inventory
+            SET quantity = ${invQty - 1}, updated_at = now()
+            WHERE id = ${feeBoost.inventory_id}::uuid
+          `;
+        }
+
+        await logArcadeConsumption(txSql, {
+          user_id: actingUserId,
+          kind: "boost",
+          code: feeBoost.code,
+          rarity: null,
+          quantity: 1,
+          context_type: "convert",
+          context_id: entryId,
+          module: "convert_fee",
+          metadata: {
+            fee_bps_base: baseFeeBps,
+            fee_bps: effectiveFeeBps,
+            discount_bps: feeBoost.bps,
+          },
+        });
+      }
 
       return {
         status: 201 as const,

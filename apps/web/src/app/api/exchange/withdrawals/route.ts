@@ -39,6 +39,8 @@ export async function GET(request: Request) {
           updated_at: string;
           approved_by: string | null;
           approved_at: string | null;
+          priority_until: string | null;
+          priority_boost_code: string | null;
         }[]
       >`
         SELECT
@@ -56,7 +58,9 @@ export async function GET(request: Request) {
           w.created_at,
           w.updated_at,
           w.approved_by,
-          w.approved_at
+          w.approved_at,
+          w.priority_until,
+          w.priority_boost_code
         FROM ex_withdrawal_request w
         JOIN ex_asset a ON a.id = w.asset_id
         WHERE w.user_id = ${actingUserId}

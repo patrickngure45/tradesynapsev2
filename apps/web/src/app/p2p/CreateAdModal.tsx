@@ -115,6 +115,9 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
   const [fetchingMethods, setFetchingMethods] = useState(false);
   const [showAddMethod, setShowAddMethod] = useState(false);
 
+  const [highlightEligible, setHighlightEligible] = useState(false);
+  const [useHighlight, setUseHighlight] = useState(false);
+
   // Form State
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [asset, setAsset] = useState("USDT");
@@ -164,6 +167,33 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/arcade/inventory", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const items = Array.isArray(data?.items) ? (data.items as any[]) : [];
+        const has = items.some(
+          (i) =>
+            i &&
+            i.kind === "boost" &&
+            (i.code === "p2p_highlight_1" || i.code === "p2p_highlight_3") &&
+            Number(i.quantity ?? 0) > 0,
+        );
+        setHighlightEligible(Boolean(has));
+        if (!has) setUseHighlight(false);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const [priceType, setPriceType] = useState<"fixed" | "floating">("fixed");
@@ -245,6 +275,7 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
           terms,
           payment_window_minutes: 15,
           payment_methods: side === "SELL" ? selectedMethods : [],
+          use_highlight_boost: highlightEligible ? Boolean(useHighlight) : false,
         }),
       });
 
@@ -486,6 +517,21 @@ export function CreateAdModal({ onClose }: { onClose: () => void }) {
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
                 />
              </div>
+
+             {highlightEligible ? (
+               <label className="flex items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm">
+                 <input
+                   type="checkbox"
+                   checked={useHighlight}
+                   onChange={(e) => setUseHighlight(e.target.checked)}
+                   className="mt-1"
+                 />
+                 <span className="min-w-0">
+                   <span className="block font-semibold text-[var(--foreground)]">Use highlight boost</span>
+                   <span className="block text-xs text-[var(--muted)]">Highlights this ad for a limited time.</span>
+                 </span>
+               </label>
+             ) : null}
              
           </div>
 

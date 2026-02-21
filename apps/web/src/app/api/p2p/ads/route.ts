@@ -7,6 +7,7 @@ import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { getOrComputeFxReferenceRate } from "@/lib/fx/reference";
 import { isSupportedP2PCountry } from "@/lib/p2p/supportedCountries";
+import { logArcadeConsumption } from "@/lib/arcade/consumption";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,9 @@ const createAdSchema = z
     // For SELL ads, these must be UUIDs of the seller's saved payout methods.
     // For BUY ads, this should be omitted or an empty array.
     payment_methods: z.array(z.string().uuid()).optional(),
+
+    // Optional: spend an Arcade boost to visually highlight this ad for a limited time.
+    use_highlight_boost: z.boolean().optional().default(false),
   })
   .superRefine((data, ctx) => {
     if (data.side === "SELL") {
@@ -195,7 +199,8 @@ export async function GET(req: NextRequest) {
           WHERE o.status = 'completed'
             AND (o.buyer_id = ad.user_id OR o.seller_id = ad.user_id)
         ) AS completed_count,
-        ad.terms
+        ad.terms,
+        ad.highlighted_until
       FROM p2p_ad ad
       JOIN app_user u ON ad.user_id = u.id
       LEFT JOIN (
@@ -257,6 +262,7 @@ export async function GET(req: NextRequest) {
     const ref = await getOrComputeFxReferenceRate(sql, assetUpper, fiatUpper);
     const refMid = ref?.mid ?? null;
 
+    const nowMs = Date.now();
     const hydrated = (ads ?? [])
       .map((ad: any) => {
         const priceType = String(ad.price_type ?? "fixed");
@@ -272,17 +278,26 @@ export async function GET(req: NextRequest) {
           }
         }
 
+        const hUntilRaw = ad.highlighted_until;
+        const hUntilMs = hUntilRaw ? new Date(String(hUntilRaw)).getTime() : NaN;
+        const highlightActive = Number.isFinite(hUntilMs) ? hUntilMs > nowMs : false;
+
         return {
           ...ad,
           is_verified_agent: agentEmails.size > 0 ? agentEmails.has(String(ad.email ?? "").toLowerCase()) : false,
           // Keep UI compatibility: provide a string price field.
           fixed_price: displayPrice !== null ? String(displayPrice) : null,
           _display_price: displayPrice,
+          _highlight_active: highlightActive,
         };
       })
       .filter((ad: any) => ad._display_price !== null);
 
     const sorted = hydrated.sort((a: any, b: any) => {
+      const ha = Boolean(a._highlight_active);
+      const hb = Boolean(b._highlight_active);
+      if (ha !== hb) return ha ? -1 : 1;
+
       // When user wants to BUY, targetSide is SELL, show lowest first.
       // When user wants to SELL, targetSide is BUY, show highest first.
       const pa = a._display_price as number;
@@ -291,7 +306,7 @@ export async function GET(req: NextRequest) {
     });
 
     const out = sorted.slice(0, 50).map((ad: any) => {
-      const { _display_price, ...rest } = ad;
+      const { _display_price, _highlight_active, ...rest } = ad;
       return rest;
     });
     return NextResponse.json({ ads: out });
@@ -546,6 +561,72 @@ export async function POST(req: NextRequest) {
         RETURNING id
       `;
 
+      if (data.use_highlight_boost) {
+        // Consume a highlight boost (if present) and set highlighted_until.
+        const invRows = await tx<
+          {
+            id: string;
+            quantity: number;
+            metadata_json: any;
+            code: string;
+          }[]
+        >`
+          SELECT id::text AS id, quantity, metadata_json, code
+          FROM arcade_inventory
+          WHERE user_id = ${actingUserId}::uuid
+            AND kind = 'boost'
+            AND code = ANY(ARRAY['p2p_highlight_3','p2p_highlight_1']::text[])
+          ORDER BY coalesce((metadata_json->>'duration_hours')::int, 0) DESC, updated_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `;
+
+        if (!invRows.length || Number(invRows[0]!.quantity ?? 0) <= 0) {
+          throw new Error("no_highlight_boost");
+        }
+
+        const inv = invRows[0]!;
+        const invQty = Number(inv.quantity ?? 0);
+        const durationHoursRaw = inv.metadata_json?.duration_hours;
+        const durationHours = Math.max(1, Math.min(24 * 30, Number(durationHoursRaw ?? 72)));
+
+        if (invQty === 1) {
+          await tx`
+            DELETE FROM arcade_inventory
+            WHERE id = ${inv.id}::uuid
+          `;
+        } else {
+          await tx`
+            UPDATE arcade_inventory
+            SET quantity = ${invQty - 1}, updated_at = now()
+            WHERE id = ${inv.id}::uuid
+          `;
+        }
+
+        await tx`
+          UPDATE p2p_ad
+          SET highlighted_until = (
+            CASE
+              WHEN highlighted_until IS NULL OR highlighted_until < now() THEN now()
+              ELSE highlighted_until
+            END
+          ) + make_interval(hours => ${durationHours}::int)
+          WHERE id = ${newAd.id}
+        `;
+
+        await logArcadeConsumption(tx as any, {
+          user_id: actingUserId,
+          kind: "boost",
+          code: String(inv.code),
+          rarity: null,
+          quantity: 1,
+          context_type: "p2p_ad",
+          context_id: String(newAd.id),
+          module: "p2p",
+          metadata: { duration_hours: durationHours },
+        });
+      }
+
       // Option A (backed ads): for SELL ads, reserve inventory in an ex_hold.
       if (data.side === "SELL") {
         const acctRows = await tx<{ id: string }[]>`
@@ -583,6 +664,9 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error("POST /api/p2p/ads error:", err);
+    if (String(err?.message ?? "") === "no_highlight_boost") {
+      return apiError("insufficient_balance", { details: { message: "No P2P highlight boost available." } });
+    }
     return apiError("internal_error");
   }
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { SiteChrome } from "@/components/SiteChrome";
+import { buttonClassName } from "@/components/ui/Button";
 import { getSql } from "@/lib/db";
 import { verifySessionToken, getSessionCookieName } from "@/lib/auth/session";
 
@@ -32,6 +34,11 @@ export default async function WalletPage() {
     <SiteChrome>
       <main className="mx-auto flex w-full max-w-6xl flex-col px-6 py-10 sm:py-14">
         <div className="fade-in-up">
+          <div className="mb-4 flex items-center justify-end">
+            <Link href="/wallet/withdraw" className={buttonClassName({ variant: "primary", size: "sm" })}>
+              Withdraw
+            </Link>
+          </div>
           <ExchangeWalletClient isAdmin={isAdmin} />
         </div>
       </main>
