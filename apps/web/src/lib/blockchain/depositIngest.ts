@@ -976,10 +976,13 @@ export async function scanAndCreditBscDeposits(
     };
   }
 
+  const maxAddresses = clamp(envInt("BSC_DEPOSIT_MAX_ADDRESSES", 500), 1, 50_000);
   const depositAddresses = await sql<{ user_id: string; address: string }[]>`
     SELECT user_id::text AS user_id, address
     FROM ex_deposit_address
     WHERE chain = ${chain} AND status = 'active'
+    ORDER BY derivation_index ASC
+    LIMIT ${maxAddresses}
   `;
   const addressToUser = new Map<string, string>();
   for (const row of depositAddresses) {
@@ -1045,14 +1048,10 @@ export async function scanAndCreditBscDeposits(
   // Record recent deposits immediately ("seen") so the wallet can show
   // pending confirmations even before crediting occurs.
   //
-    const maxAddresses = clamp(envInt("BSC_DEPOSIT_MAX_ADDRESSES", 500), 1, 50_000);
-    const depositAddresses = await sql<{ user_id: string; address: string }[]>`
-      SELECT user_id::text AS user_id, address
-      FROM ex_deposit_address
-      WHERE chain = ${chain} AND status = 'active'
-      ORDER BY derivation_index ASC
-      LIMIT ${maxAddresses}
-    `;
+  const pendingLookback = clamp(envInt("BSC_DEPOSIT_PENDING_LOOKBACK_BLOCKS", 60), 0, 500);
+  let pendingSeen = 0;
+  if (nativeBnb && pendingLookback > 0 && safeTip < tip) {
+    const pendingFrom = Math.max(safeTip + 1, tip - pendingLookback + 1);
     const pendingTo = tip;
     for (let blockNo = pendingFrom; blockNo <= pendingTo; blockNo += 1) {
       if (maxMs > 0 && Date.now() - startedAtMs > maxMs) {
@@ -1062,7 +1061,9 @@ export async function scanAndCreditBscDeposits(
       const block = await provider.getBlock(blockNo, true);
       if (!block) continue;
 
-      const txs = Array.isArray((block as any).transactions) ? ((block as any).transactions as ethers.TransactionResponse[]) : [];
+      const txs = Array.isArray((block as any).transactions)
+        ? ((block as any).transactions as ethers.TransactionResponse[])
+        : [];
       for (const tx of txs) {
         const to = tx.to ? normalizeAddress(tx.to) : "";
         if (!to) continue;
