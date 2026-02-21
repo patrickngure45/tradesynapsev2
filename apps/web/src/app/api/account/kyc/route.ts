@@ -60,6 +60,12 @@ export async function POST(request: Request) {
       if (current !== "none") {
         return apiError("already_max_kyc", { status: 409 });
       }
+      if (!rows[0]!.email_verified) {
+        return apiError("email_not_verified", {
+          status: 403,
+          details: { message: "Verify your email before upgrading your KYC tier." },
+        });
+      }
       const nextTier = "basic";
       await sql`
         UPDATE app_user SET kyc_level = ${nextTier}
