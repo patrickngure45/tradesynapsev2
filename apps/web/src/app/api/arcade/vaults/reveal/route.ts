@@ -6,6 +6,7 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
 import { resolveTimeVault } from "@/lib/arcade/timeVault";
+import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -175,6 +176,13 @@ export async function POST(request: Request) {
           ON CONFLICT (user_id, kind, code, rarity)
           DO UPDATE SET quantity = arcade_inventory.quantity + 1, updated_at = now()
         `;
+
+        await addArcadeXp(txSql as any, {
+          userId: actingUserId,
+          deltaXp: 2,
+          contextRandomHash: resolved.audit.random_hash,
+          source: "time_vault",
+        });
 
         await txSql`
           UPDATE arcade_action

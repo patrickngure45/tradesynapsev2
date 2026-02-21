@@ -5,16 +5,18 @@ import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
-import { resolveDailyDrop } from "@/lib/arcade/dailyDrop";
+import { resolveStreakProtector } from "@/lib/arcade/streakProtector";
 import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const postSchema = z.object({
-  action_id: z.string().min(1),
+  action_id: z.string().uuid(),
   client_seed: z.string().min(8).max(256),
 });
+
+const MODULE_KEY = "streak_protector";
 
 export async function POST(request: Request) {
   const actingUserId = getActingUserId(request);
@@ -30,8 +32,8 @@ export async function POST(request: Request) {
     return apiZodError(e) ?? apiError("invalid_input");
   }
 
-  const actionId = String(input.action_id).trim();
-  const clientSeed = String(input.client_seed).trim();
+  const actionId = input.action_id;
+  const clientSeed = String(input.client_seed ?? "").trim();
 
   const sql = getSql();
 
@@ -50,36 +52,36 @@ export async function POST(request: Request) {
             client_commit_hash: string;
             server_commit_hash: string;
             server_seed_b64: string;
-            requested_at: string;
-            resolved_at: string | null;
+            input_json: any;
             outcome_json: any;
           }[]
         >`
-          SELECT id, user_id, module, profile, status, client_commit_hash, server_commit_hash, server_seed_b64,
-                 requested_at, resolved_at, outcome_json
+          SELECT
+            id::text AS id,
+            user_id::text AS user_id,
+            module,
+            profile,
+            status,
+            client_commit_hash,
+            server_commit_hash,
+            server_seed_b64,
+            input_json,
+            outcome_json
           FROM arcade_action
           WHERE id = ${actionId}::uuid
           LIMIT 1
+          FOR UPDATE
         `;
 
-        if (rows.length === 0) {
-          return { kind: "err" as const, err: apiError("not_found") };
-        }
-
+        if (!rows.length) return { kind: "err" as const, err: apiError("not_found") };
         const action = rows[0]!;
-        if (action.user_id !== actingUserId) {
-          return { kind: "err" as const, err: apiError("x_user_id_mismatch") };
-        }
+
+        if (action.user_id !== actingUserId) return { kind: "err" as const, err: apiError("x_user_id_mismatch") };
+        if (action.module !== MODULE_KEY) return { kind: "err" as const, err: apiError("invalid_input") };
 
         if (action.status === "resolved") {
-          return {
-            kind: "ok" as const,
-            alreadyResolved: true,
-            action,
-            outcome: action.outcome_json,
-          };
+          return { kind: "ok" as const, already: true, outcome: action.outcome_json };
         }
-
         if (action.status !== "committed") {
           return { kind: "err" as const, err: apiError("trade_state_conflict", { details: { status: action.status } }) };
         }
@@ -89,14 +91,14 @@ export async function POST(request: Request) {
           return { kind: "err" as const, err: apiError("invalid_input", { details: "client_seed does not match commit" }) };
         }
 
-        const expectedServerCommit = sha256Hex(
-          `${action.server_seed_b64}:${action.client_commit_hash}:${action.module}:${action.profile}:${actingUserId}`,
-        );
+        const expectedServerCommit = sha256Hex(`${action.server_seed_b64}:${action.client_commit_hash}:${action.module}:${action.profile}:${actingUserId}`);
         if (expectedServerCommit !== String(action.server_commit_hash ?? "").toLowerCase()) {
           return { kind: "err" as const, err: apiError("internal_error", { details: "server_commit_mismatch" }) };
         }
 
-        const resolved = resolveDailyDrop({
+        const weekStartIso = String(action.input_json?.week_start ?? "").trim() || new Date().toISOString().slice(0, 10);
+
+        const resolved = resolveStreakProtector({
           actionId: action.id,
           userId: actingUserId,
           module: action.module,
@@ -104,11 +106,30 @@ export async function POST(request: Request) {
           serverSeedB64: action.server_seed_b64,
           clientSeed,
           clientCommitHash: action.client_commit_hash,
+          weekStartIso,
         });
+
+        // Grant inventory (stack).
+        await txSql`
+          INSERT INTO arcade_inventory (user_id, kind, code, rarity, quantity, metadata_json, created_at, updated_at)
+          VALUES (
+            ${actingUserId}::uuid,
+            ${resolved.outcome.kind},
+            ${resolved.outcome.code},
+            ${resolved.outcome.rarity},
+            ${resolved.outcome.quantity},
+            ${txSql.json({ label: resolved.outcome.label, source: MODULE_KEY, week_start: weekStartIso, action_id: action.id })},
+            now(),
+            now()
+          )
+          ON CONFLICT (user_id, kind, code, rarity)
+          DO UPDATE SET quantity = arcade_inventory.quantity + EXCLUDED.quantity, updated_at = now()
+        `;
 
         const outcomeJson = {
           module: action.module,
           profile: action.profile,
+          week_start: weekStartIso,
           outcome: resolved.outcome,
           audit: {
             client_commit_hash: action.client_commit_hash,
@@ -120,61 +141,31 @@ export async function POST(request: Request) {
           },
         };
 
-        // Inventory: upsert stack.
-        await txSql`
-          INSERT INTO arcade_inventory (user_id, kind, code, rarity, quantity, metadata_json, created_at, updated_at)
-          VALUES (
-            ${actingUserId}::uuid,
-            ${resolved.outcome.kind},
-            ${resolved.outcome.code},
-            ${resolved.outcome.rarity},
-            1,
-            ${txSql.json({ label: resolved.outcome.label, source: action.module })},
-            now(),
-            now()
-          )
-          ON CONFLICT (user_id, kind, code, rarity)
-          DO UPDATE SET quantity = arcade_inventory.quantity + 1, updated_at = now()
-        `;
-
-        await addArcadeXp(txSql as any, {
-          userId: actingUserId,
-          deltaXp: 1,
-          contextRandomHash: resolved.audit.random_hash,
-          source: "daily_drop",
-        });
-
         await txSql`
           UPDATE arcade_action
           SET status = 'resolved',
               resolved_at = now(),
               reveal_json = ${txSql.json({ client_seed_present: true })},
               outcome_json = ${txSql.json(outcomeJson)}
-          WHERE id = ${actionId}::uuid
+          WHERE id = ${action.id}::uuid
         `;
 
-        return {
-          kind: "ok" as const,
-          alreadyResolved: false,
-          action,
-          outcome: outcomeJson,
-        };
+        await addArcadeXp(txSql as any, {
+          userId: actingUserId,
+          deltaXp: 1,
+          contextRandomHash: resolved.audit.random_hash,
+          source: "streak_protector",
+        });
+
+        return { kind: "ok" as const, already: false, outcome: outcomeJson };
       });
     });
 
     if (out.kind === "err") return out.err;
 
-    return Response.json(
-      {
-        ok: true,
-        action_id: actionId,
-        already_resolved: out.alreadyResolved,
-        result: out.outcome,
-      },
-      { status: 200 },
-    );
+    return Response.json({ ok: true, action_id: actionId, already_resolved: out.already, result: out.outcome }, { status: 200 });
   } catch (e) {
-    const dep = responseForDbError("arcade_daily_reveal", e);
+    const dep = responseForDbError("arcade_streak_reveal", e);
     if (dep) return dep;
     return apiError("internal_error");
   }

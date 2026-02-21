@@ -78,6 +78,55 @@ type DraftRevealResponse = {
   picked: any | null;
 };
 
+type WheelCommitResponse = {
+  ok: true;
+  action_id: string;
+  module: string;
+  profile: "low" | "medium" | "high";
+  server_commit_hash: string;
+};
+
+type WheelRevealResponse = {
+  ok: true;
+  action_id: string;
+  already_resolved: boolean;
+  result: any;
+};
+
+type StreakCommitResponse = {
+  ok: true;
+  action_id: string;
+  module: string;
+  profile: "low" | "medium" | "high";
+  week_start: string;
+  server_commit_hash: string;
+};
+
+type StreakRevealResponse = {
+  ok: true;
+  action_id: string;
+  already_resolved: boolean;
+  result: any;
+};
+
+type MissionsStatusResponse = {
+  ok: true;
+  today: string;
+  missions: Array<{
+    code: string;
+    title: string;
+    description: string;
+    completed: boolean;
+    claimable: boolean;
+    claimed: boolean;
+  }>;
+};
+
+type ProgressionResponse = {
+  ok: true;
+  progression: { xp: number; tier: number; prestige: number; next_tier_xp: number | null };
+};
+
 type RevealResponse = {
   ok: true;
   action_id: string;
@@ -152,6 +201,28 @@ export function ArcadeClient() {
   const [draftPicked, setDraftPicked] = useState<any | null>(null);
   const [draftPicking, setDraftPicking] = useState<string | null>(null);
 
+  const [wheelProfile, setWheelProfile] = useState<"low" | "medium" | "high">("low");
+  const [wheelLoading, setWheelLoading] = useState(false);
+  const [wheelError, setWheelError] = useState<string | null>(null);
+  const [wheelLast, setWheelLast] = useState<any | null>(null);
+
+  const [streakProfile, setStreakProfile] = useState<"low" | "medium" | "high">("low");
+  const [streakLoading, setStreakLoading] = useState(false);
+  const [streakError, setStreakError] = useState<string | null>(null);
+  const [streakLast, setStreakLast] = useState<any | null>(null);
+
+  const [missionsProfile, setMissionsProfile] = useState<"low" | "medium" | "high">("low");
+  const [missionsLoading, setMissionsLoading] = useState(false);
+  const [missionsError, setMissionsError] = useState<string | null>(null);
+  const [missionsStatus, setMissionsStatus] = useState<MissionsStatusResponse | null>(null);
+  const [missionClaiming, setMissionClaiming] = useState<string | null>(null);
+  const [missionLast, setMissionLast] = useState<any | null>(null);
+
+  const [progLoading, setProgLoading] = useState(false);
+  const [progError, setProgError] = useState<string | null>(null);
+  const [progression, setProgression] = useState<ProgressionResponse["progression"] | null>(null);
+  const [prestigeLoading, setPrestigeLoading] = useState(false);
+
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [invItems, setInvItems] = useState<InventoryItem[]>([]);
@@ -169,6 +240,11 @@ export function ArcadeClient() {
         ? "Medium variance: balanced distribution."
         : "Low variance: mostly common outcomes with a long tail.";
   }, [profile]);
+
+  const streakProtectorQty = useMemo(() => {
+    const row = invItems.find((i) => i.kind === "perk" && String(i.code ?? "") === "streak_protector");
+    return Number(row?.quantity ?? 0) || 0;
+  }, [invItems]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,8 +292,62 @@ export function ArcadeClient() {
     }
   }
 
+  async function refreshMissions() {
+    setMissionsError(null);
+    setMissionsLoading(true);
+    try {
+      const s = await fetchJsonOrThrow<MissionsStatusResponse>("/api/arcade/missions/status", { cache: "no-store" });
+      setMissionsStatus(s);
+    } catch (e) {
+      if (e instanceof ApiError) setMissionsError(e.code);
+      else setMissionsError("Network error");
+    } finally {
+      setMissionsLoading(false);
+    }
+  }
+
+  async function refreshProgression() {
+    setProgError(null);
+    setProgLoading(true);
+    try {
+      const res = await fetchJsonOrThrow<ProgressionResponse>("/api/arcade/progression", { cache: "no-store" });
+      setProgression(res.progression);
+    } catch (e) {
+      if (e instanceof ApiError) setProgError(e.code);
+      else setProgError("Network error");
+    } finally {
+      setProgLoading(false);
+    }
+  }
+
+  async function doPrestigeReset() {
+    setProgError(null);
+    setPrestigeLoading(true);
+    try {
+      await fetchJsonOrThrow<{ ok: true }>("/api/arcade/progression/prestige-reset", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await Promise.all([refreshProgression(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setProgError(e.code);
+      else setProgError("Network error");
+    } finally {
+      setPrestigeLoading(false);
+    }
+  }
+
   useEffect(() => {
     void refreshCalendarStatus();
+  }, []);
+
+  useEffect(() => {
+    void refreshMissions();
+  }, []);
+
+  useEffect(() => {
+    void refreshProgression();
   }, []);
 
   async function refreshInventory() {
@@ -518,8 +648,183 @@ export function ArcadeClient() {
     }
   }
 
+  async function spinWheel() {
+    setWheelError(null);
+    setWheelLast(null);
+    setWheelLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<WheelCommitResponse>("/api/arcade/wheel/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: wheelProfile, client_commit_hash: clientCommit }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<WheelRevealResponse>("/api/arcade/wheel/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setWheelLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setWheelError(e.code);
+      else setWheelError("Network error");
+    } finally {
+      setWheelLoading(false);
+    }
+  }
+
+  async function claimStreakProtector() {
+    setStreakError(null);
+    setStreakLast(null);
+    setStreakLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<StreakCommitResponse>("/api/arcade/streak/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: streakProfile, client_commit_hash: clientCommit }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<StreakRevealResponse>("/api/arcade/streak/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setStreakLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setStreakError(e.code);
+      else setStreakError("Network error");
+    } finally {
+      setStreakLoading(false);
+    }
+  }
+
+  async function claimMission(missionCode: string) {
+    setMissionLast(null);
+    setMissionsError(null);
+    setMissionClaiming(missionCode);
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<{ ok: true; action_id: string }>("/api/arcade/missions/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mission_code: missionCode, profile: missionsProfile, client_commit_hash: clientCommit }),
+      });
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/missions/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setMissionLast(reveal.result);
+      await Promise.all([refreshMissions(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setMissionsError(e.code);
+      else setMissionsError("Network error");
+    } finally {
+      setMissionClaiming(null);
+    }
+  }
+
   return (
     <div className="grid gap-6">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 18% 28%, var(--ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Progression</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+            <button
+              className={buttonClassName({ variant: "ghost", size: "xs" })}
+              onClick={refreshProgression}
+              disabled={progLoading}
+            >
+              {progLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">XP</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+                {progression ? progression.xp : "—"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">
+                Next tier at <span className="font-mono text-[var(--foreground)]">{progression?.next_tier_xp ?? "—"}</span>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Tier</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+                {progression ? progression.tier : "—"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Tier-ups can grant a small bounded bonus XP.</div>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Prestige</div>
+                <button
+                  className={buttonClassName({ variant: "secondary", size: "xs" })}
+                  onClick={doPrestigeReset}
+                  disabled={prestigeLoading || (progression ? progression.tier < 3 : true)}
+                  title={progression && progression.tier < 3 ? "Reach Tier 3 to prestige" : ""}
+                >
+                  {prestigeLoading ? "Resetting…" : "Prestige"}
+                </button>
+              </div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+                {progression ? progression.prestige : "—"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Optional reset for long-term cosmetics.</div>
+            </div>
+          </div>
+
+          {progError ? (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{progError}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
@@ -657,6 +962,302 @@ export function ArcadeClient() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 15% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Flash missions</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+            <button
+              className={buttonClassName({ variant: "ghost", size: "xs" })}
+              onClick={refreshMissions}
+              disabled={missionsLoading}
+            >
+              {missionsLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Do healthy actions · claim rewards</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Daily mission rotation · commit→reveal rewards · small, bounded utility.</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={missionsProfile}
+                  onChange={(e) => setMissionsProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Missions profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Today</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{missionsStatus?.today ?? "—"}</span>
+              </div>
+            </div>
+          </div>
+
+          {missionsError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{missionsError}</span>
+            </div>
+          )}
+
+          {Array.isArray(missionsStatus?.missions) && missionsStatus!.missions.length > 0 ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {missionsStatus!.missions.map((m) => {
+                const canClaim = Boolean(m.claimable) && missionClaiming === null;
+                const busy = missionClaiming === m.code;
+                return (
+                  <div key={m.code} className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{m.title}</div>
+                        <div className="mt-1 text-xs text-[var(--muted)]">{m.description}</div>
+                      </div>
+                      <div className="shrink-0 text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                        {m.claimed ? "Claimed" : m.completed ? "Complete" : "Pending"}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <div className="text-xs text-[var(--muted)]">
+                        {m.completed ? "Eligible" : "Complete the action to unlock claim."}
+                      </div>
+                      <button
+                        className={buttonClassName({ variant: canClaim ? "primary" : "secondary", size: "xs" })}
+                        disabled={!m.claimable || busy}
+                        onClick={() => claimMission(m.code)}
+                      >
+                        {busy ? "Claiming…" : m.claimed ? "Claimed" : "Claim"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+              {missionsLoading ? "Loading missions…" : "No missions available."}
+            </div>
+          )}
+
+          {missionLast?.reward ? (
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Last reward</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+                {missionLast.reward.label ?? "—"}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 25%, var(--ring) 0, transparent 55%), radial-gradient(circle at 80% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Streak protector</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly protector roll</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">If you miss exactly one day on Calendar Daily, a protector is auto-consumed to preserve your streak.</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={streakProfile}
+                  onChange={(e) => setStreakProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Streak protector profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">In inventory</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : streakProtectorQty}</span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={claimStreakProtector}
+                disabled={streakLoading}
+              >
+                {streakLoading ? "Claiming…" : "Claim weekly"}
+              </button>
+            </div>
+          </div>
+
+          {streakError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{streakError}</span>
+            </div>
+          )}
+
+          {streakLast?.outcome ? (
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+                {streakLast?.outcome?.label ?? "—"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Quantity: {streakLast?.outcome?.quantity ?? 1}</div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 18% 18%, var(--ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Rarity wheel</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Spin for cosmetics</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Costs 10 shards · commit→reveal fairness proof</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={wheelProfile}
+                  onChange={(e) => setWheelProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Wheel volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={spinWheel}
+                disabled={wheelLoading || invLoading || invShards < 10}
+              >
+                {wheelLoading ? "Spinning…" : "Spin"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-2 text-xs text-[var(--muted)]">Pity: after 10 non-rare spins, the wheel guarantees at least a Rare cosmetic.</div>
+
+          {wheelError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{wheelError}</span>
+            </div>
+          )}
+
+          {wheelLast?.outcome ? (
+            <div className="mt-5 grid gap-3">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{wheelLast.outcome.label}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{wheelLast.outcome.rarity}</div>
+                </div>
+                <div className="mt-2 text-xs text-[var(--muted)]">Code: <span className="font-mono">{wheelLast.outcome.code}</span></div>
+              </div>
+
+              {wheelLast?.audit ? (
+                <details className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--muted)]">Fairness proof</summary>
+                  <div className="mt-3 grid gap-2 text-xs text-[var(--muted)]">
+                    {wheelLast.audit.client_commit_hash ? (
+                      <div>
+                        client_commit_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.client_commit_hash}</span>
+                      </div>
+                    ) : null}
+                    {wheelLast.audit.server_commit_hash ? (
+                      <div>
+                        server_commit_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.server_commit_hash}</span>
+                      </div>
+                    ) : null}
+                    {wheelLast.audit.server_seed_b64 ? (
+                      <div>
+                        server_seed_b64: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.server_seed_b64}</span>
+                      </div>
+                    ) : null}
+                    {wheelLast.audit.random_hash ? (
+                      <div>
+                        random_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.random_hash}</span>
+                      </div>
+                    ) : null}
+                    {typeof wheelLast.audit.rarity_roll === "number" && typeof wheelLast.audit.rarity_total === "number" ? (
+                      <div>
+                        rarity_roll: <span className="font-semibold text-[var(--foreground)]">{wheelLast.audit.rarity_roll}</span> / {wheelLast.audit.rarity_total}
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 

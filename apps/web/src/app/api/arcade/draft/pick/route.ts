@@ -4,6 +4,7 @@ import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,6 +97,14 @@ export async function POST(request: Request) {
           options,
           audit: action.reveal_json?.audit ?? {},
         };
+
+          const ctx = String((outcomeJson as any)?.audit?.random_hashes?.[0] ?? (outcomeJson as any)?.audit?.random_hash ?? "");
+          await addArcadeXp(txSql as any, {
+            userId: actingUserId,
+            deltaXp: 1,
+            contextRandomHash: ctx || String(action.id ?? ""),
+            source: "boost_draft",
+          });
 
         await txSql`
           UPDATE arcade_action

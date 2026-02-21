@@ -6,6 +6,8 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
 import { resolveCalendarDaily } from "@/lib/arcade/calendarDaily";
+import { logArcadeConsumption } from "@/lib/arcade/consumption";
+import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +19,15 @@ const postSchema = z.object({
 
 function utcDateIso(d: Date): string {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())).toISOString().slice(0, 10);
+}
+
+function dayIndexUtc(isoDate: string): number {
+  // isoDate: YYYY-MM-DD
+  const y = Number(isoDate.slice(0, 4));
+  const m = Number(isoDate.slice(5, 7));
+  const d = Number(isoDate.slice(8, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return 0;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
 }
 
 export async function POST(request: Request) {
@@ -154,7 +165,62 @@ export async function POST(request: Request) {
         const today = claimDateIso;
         const yesterdayIso = utcDateIso(new Date(Date.now() - 24 * 3600_000));
         const prev = state?.last_claim_date;
-        const nextStreak = prev === yesterdayIso ? Number(state?.streak_count ?? 0) + 1 : 1;
+
+        let usedProtector = false;
+        let nextStreak = 1;
+        if (prev === yesterdayIso) {
+          nextStreak = Number(state?.streak_count ?? 0) + 1;
+        } else if (prev) {
+          const gapDays = dayIndexUtc(today) - dayIndexUtc(prev);
+          // If user missed exactly one day, allow a single protector to preserve the streak.
+          if (gapDays === 2) {
+            const perkRows = await txSql<{ id: string; quantity: number }[]>`
+              SELECT id::text AS id, quantity
+              FROM arcade_inventory
+              WHERE user_id = ${actingUserId}::uuid
+                AND kind = 'perk'
+                AND code = 'streak_protector'
+                AND rarity = 'rare'
+              LIMIT 1
+              FOR UPDATE
+            `;
+            const qty = Number(perkRows[0]?.quantity ?? 0);
+            if (qty > 0) {
+              usedProtector = true;
+              nextStreak = Number(state?.streak_count ?? 0) + 1;
+
+              if (qty === 1) {
+                await txSql`
+                  DELETE FROM arcade_inventory
+                  WHERE id = ${perkRows[0]!.id}::uuid
+                `;
+              } else {
+                await txSql`
+                  UPDATE arcade_inventory
+                  SET quantity = ${qty - 1}, updated_at = now()
+                  WHERE id = ${perkRows[0]!.id}::uuid
+                `;
+              }
+
+              await logArcadeConsumption(txSql, {
+                user_id: actingUserId,
+                kind: 'perk',
+                code: 'streak_protector',
+                rarity: 'rare',
+                quantity: 1,
+                context_type: 'calendar_daily',
+                context_id: action.id,
+                module: 'streak_protector',
+                metadata: { claim_date: today, last_claim_date: prev },
+              });
+            }
+          }
+        }
+
+        if (!usedProtector && prev !== yesterdayIso) {
+          // Default: reset.
+          nextStreak = 1;
+        }
         const bestStreak = Math.max(Number(state?.best_streak ?? 0), nextStreak);
 
         const nextPity = (resolved.outcome.rarity === "rare" || resolved.outcome.rarity === "epic" || resolved.outcome.rarity === "legendary")
@@ -172,6 +238,13 @@ export async function POST(request: Request) {
             pity_rare = EXCLUDED.pity_rare,
             updated_at = now()
         `;
+
+        await addArcadeXp(txSql as any, {
+          userId: actingUserId,
+          deltaXp: 1,
+          contextRandomHash: resolved.audit.random_hash,
+          source: "calendar_daily",
+        });
 
         await txSql`
           UPDATE arcade_action
