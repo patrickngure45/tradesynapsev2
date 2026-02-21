@@ -8,6 +8,10 @@ const SYSTEM_USER_IDS = [
   "00000000-0000-0000-0000-000000000003", // burn
 ];
 
+function shouldExecute(): boolean {
+  return String(process.env.CONFIRM_CLEANUP ?? "").trim() === "DELETE_NON_CORE_USERS";
+}
+
 function parseKeepEmails(): string[] {
   const raw = process.env.KEEP_USER_EMAILS?.trim();
   if (!raw) {
@@ -26,19 +30,45 @@ function parseKeepEmails(): string[] {
 async function main() {
   const sql = getSql();
   const keepEmails = parseKeepEmails();
+  const execute = shouldExecute();
 
   console.log("[cleanup] keeping emails:", keepEmails.join(", "));
+  console.log(`[cleanup] mode: ${execute ? "EXECUTE" : "DRY_RUN"}`);
+  if (!execute) {
+    console.log("[cleanup] To actually delete, set CONFIRM_CLEANUP=DELETE_NON_CORE_USERS");
+  }
 
   await sql.begin(async (tx) => {
     const txSql = tx as unknown as typeof sql;
 
     await txSql`
       CREATE TEMP TABLE _cleanup_target_users AS
-      SELECT u.id
+      SELECT u.id, lower(u.email) AS email
       FROM app_user u
       WHERE u.id::text <> ALL(${SYSTEM_USER_IDS}::text[])
         AND lower(coalesce(u.email, '')) <> ALL(${keepEmails}::text[])
     `;
+
+    const targetCount = await txSql<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM _cleanup_target_users
+    `;
+
+    const sample = await txSql<{ id: string; email: string | null }[]>`
+      SELECT id::text AS id, email
+      FROM _cleanup_target_users
+      ORDER BY email NULLS LAST, id
+      LIMIT 25
+    `;
+
+    console.log(`[cleanup] target users: ${targetCount[0]?.n ?? "0"}`);
+    if (sample.length > 0) {
+      console.log("[cleanup] sample targets (max 25):");
+      console.table(sample.map((r) => ({ id: r.id, email: r.email ?? "" })));
+    }
+
+    if (!execute) {
+      return;
+    }
 
     await txSql`
       DO $$
