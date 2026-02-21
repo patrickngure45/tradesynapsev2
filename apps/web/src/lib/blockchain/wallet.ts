@@ -17,10 +17,9 @@ let _ethProvider: ethers.JsonRpcProvider | null = null;
 export function getBscProvider(): ethers.JsonRpcProvider {
   if (!_provider) {
     const rpcUrl = process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org";
-    _provider = new ethers.JsonRpcProvider(rpcUrl, {
-      name: "bnb",
-      chainId: Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56,
-    });
+    const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
+    const network = ethers.Network.from({ name: "bnb", chainId });
+    _provider = new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network });
   }
   return _provider;
 }
@@ -28,10 +27,9 @@ export function getBscProvider(): ethers.JsonRpcProvider {
 export function getEthProvider(): ethers.JsonRpcProvider {
   if (!_ethProvider) {
     const rpcUrl = process.env.ETH_RPC_URL || process.env.ETHEREUM_RPC_URL || "https://cloudflare-eth.com";
-    _ethProvider = new ethers.JsonRpcProvider(rpcUrl, {
-      name: "ethereum",
-      chainId: Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 11155111 : 1,
-    });
+    const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 11155111 : 1;
+    const network = ethers.Network.from({ name: "ethereum", chainId });
+    _ethProvider = new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network });
   }
   return _ethProvider;
 }
