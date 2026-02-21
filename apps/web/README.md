@@ -92,6 +92,10 @@ Sweeps should run as a scheduled job (or a separate service invoked on a timer):
 
 This app exposes several production cron endpoints that are safe to run from a scheduler.
 
+For the systematic, production-grade checklist (scope, architecture, paid services, and acceptance criteria), follow:
+
+- `DEPOSITS_TODO.md`
+
 ### Required (Arcade delayed actions)
 
 Some Arcade modules create `scheduled` actions that must be moved to `ready` on a timer.
@@ -106,17 +110,23 @@ These are the common operational jobs:
 - Outbox worker (every **1 minute**)
 	- `GET /api/exchange/cron/outbox-worker?secret=...&max_ms=20000&batch=50&max_batches=10`
 
-- Deposit scan (native) (every **2 minutes**)
-	- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&tokens=0&max_ms=20000&max_blocks=200&blocks_per_batch=50`
+- Deposit scan (native + allowlisted token logs) (every **2–3 minutes**)
+	- Recommended (BSC):
+		- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=1&tokens=1&symbols=USDT%2CUSDC&max_ms=20000&max_blocks=120&blocks_per_batch=60`
 
-- Deposit scan (token logs) (every **10–15 minutes**, offset from native scan)
-	- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=0&tokens=1&symbols=USDT%2CUSDC&max_ms=20000&max_blocks=60&blocks_per_batch=60`
+	Notes:
+	- In production, token scanning requires an allowlist via `symbols=...` unless `ALLOW_TOKEN_SCAN_ALL=1` is set.
+	- To avoid long-lived `429 scan_in_progress` after restarts, set `EXCHANGE_SCAN_LOCK_TTL_MS=120000` in production.
 
-- Sweep deposits (every **5–15 minutes**)
-	- `GET /api/exchange/cron/sweep-deposits?secret=...`
+- Sweep deposits (optional housekeeping; NOT required for deposits to reflect)
+	- Keep this disabled until scan/credit is stable.
+	- When enabling, start with native-only:
+		- `GET /api/exchange/cron/sweep-deposits?secret=...&execute=1&tokens=0`
+	- Or allowlisted tokens:
+		- `GET /api/exchange/cron/sweep-deposits?secret=...&execute=1&tokens=1&symbols=USDT%2CUSDC%2CWBNB`
 
-**Avoid overlap**: `scan-deposits` uses an in-process lock. If two scans overlap, one may return `429 scan_in_progress`.
-The simplest fix is scheduling offsets (e.g. token scan at minute `:05, :15, :25, ...` if native scan runs at `:00, :02, :04, ...`).
+**Avoid overlap**: `scan-deposits` uses a distributed DB lock. If two scans overlap, one returns `429 scan_in_progress`.
+Run the scan job every 2–3 minutes (not every minute) and keep `EXCHANGE_SCAN_LOCK_TTL_MS` short.
 
 ### Security note
 
