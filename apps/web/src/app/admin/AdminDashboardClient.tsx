@@ -49,7 +49,16 @@ type LedgerRow = {
 };
 type FeeRow = { symbol: string; chain: string; total_fees: string };
 type PendingWdRow = { symbol: string; chain: string; total_pending: string; count: string };
-type UserCounts = { total: string; admins: string; with_email: string; with_ledger: string };
+type UserCounts = {
+  total: string;
+  admins: string;
+  with_email: string;
+  with_ledger: string;
+  total_rows: string;
+  active_non_system: string;
+  banned_non_system: string;
+  system_rows: string;
+};
 type WalletHealth = {
   pendingWithdrawals: number;
   pendingWithdrawalAmount: string;
@@ -251,6 +260,10 @@ function normalizeWalletData(raw: any): WalletData {
       admins: asStr(raw?.userCounts?.admins, "0"),
       with_email: asStr(raw?.userCounts?.with_email, "0"),
       with_ledger: asStr(raw?.userCounts?.with_ledger, "0"),
+      total_rows: asStr(raw?.userCounts?.total_rows, "0"),
+      active_non_system: asStr(raw?.userCounts?.active_non_system, "0"),
+      banned_non_system: asStr(raw?.userCounts?.banned_non_system, "0"),
+      system_rows: asStr(raw?.userCounts?.system_rows, "0"),
     },
   };
 }
@@ -862,7 +875,7 @@ export function AdminDashboardClient() {
                   <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Registered Users</div>
                   <div className="mt-1 text-lg font-semibold text-[var(--foreground)]">{walletData.userCounts.with_email}</div>
                   <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                    {walletData.userCounts.admins} admin · {walletData.userCounts.with_ledger} with ledger accounts · {walletData.userCounts.total} active users
+                    {walletData.userCounts.admins} admin · {walletData.userCounts.with_ledger} with ledger accounts · {walletData.userCounts.total} active registered · {walletData.userCounts.active_non_system} active total · {walletData.userCounts.banned_non_system} banned · {walletData.userCounts.system_rows} system
                   </div>
                 </div>
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">

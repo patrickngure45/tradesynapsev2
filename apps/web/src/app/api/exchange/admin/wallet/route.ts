@@ -235,18 +235,36 @@ export async function GET(request: Request) {
 
     // User counts breakdown
     const userCounts = await retryOnceOnTransientDbError(async () => {
-      const rows = await sql<{ total: string; admins: string; with_email: string; with_ledger: string }[]>`
-        WITH real_users AS (
-          SELECT id, role
-          FROM app_user
-          WHERE status = 'active'
-            AND id <> '00000000-0000-0000-0000-000000000001'::uuid
-            AND email IS NOT NULL
-            AND password_hash IS NOT NULL
-            AND lower(email) NOT LIKE '%@test.local'
-            AND lower(email) NOT LIKE '%@demo.com'
-            AND lower(email) NOT LIKE 'smoke-%'
-            AND lower(email) NOT IN (
+      const rows = await sql<
+        {
+          total: string;
+          admins: string;
+          with_email: string;
+          with_ledger: string;
+          total_rows: string;
+          active_non_system: string;
+          banned_non_system: string;
+          system_rows: string;
+        }[]
+      >`
+        WITH system_users AS (
+          SELECT unnest(array[
+            ${SYSTEM_USER_ID}::uuid,
+            ${CAP_USER_ID}::uuid,
+            ${BURN_USER_ID}::uuid
+          ]) AS id
+        ),
+        real_users AS (
+          SELECT u.id, u.role
+          FROM app_user u
+          WHERE u.status = 'active'
+            AND u.id NOT IN (SELECT id FROM system_users)
+            AND u.email IS NOT NULL
+            AND u.password_hash IS NOT NULL
+            AND lower(u.email) NOT LIKE '%@test.local'
+            AND lower(u.email) NOT LIKE '%@demo.com'
+            AND lower(u.email) NOT LIKE 'smoke-%'
+            AND lower(u.email) NOT IN (
               'trial@gmail.com',
               'test-debug@test.local',
               'taker@demo.com',
@@ -263,9 +281,35 @@ export async function GET(request: Request) {
             SELECT count(DISTINCT la.user_id)
             FROM ex_ledger_account la
             JOIN real_users ru ON ru.id = la.user_id
-          )::text AS with_ledger
+          )::text AS with_ledger,
+          (SELECT count(*) FROM app_user)::text AS total_rows,
+          (
+            SELECT count(*)
+            FROM app_user u
+            WHERE u.status = 'active'
+              AND u.id NOT IN (SELECT id FROM system_users)
+          )::text AS active_non_system,
+          (
+            SELECT count(*)
+            FROM app_user u
+            WHERE u.status = 'banned'
+              AND u.id NOT IN (SELECT id FROM system_users)
+          )::text AS banned_non_system,
+          (SELECT count(*) FROM system_users)::text AS system_rows
       `;
-      return rows[0] ?? { total: "0", admins: "0", with_email: "0", with_ledger: "0" };
+
+      return (
+        rows[0] ?? {
+          total: "0",
+          admins: "0",
+          with_email: "0",
+          with_ledger: "0",
+          total_rows: "0",
+          active_non_system: "0",
+          banned_non_system: "0",
+          system_rows: "0",
+        }
+      );
     });
 
     return NextResponse.json({
