@@ -1048,6 +1048,57 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
  // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [authMode]);
 
+ // Realtime deposit updates (cookie/session auth only).
+ // EventSource cannot send custom headers, so this intentionally does not run in header auth mode.
+ useEffect(() => {
+  if (authMode === "header") return;
+  let cancelled = false;
+
+  const es = new EventSource("/api/notifications/stream");
+
+  const onNotification = (ev: MessageEvent) => {
+   if (cancelled) return;
+   try {
+    const data = JSON.parse(String(ev.data || "{}"));
+    const type = String(data?.type ?? "");
+    if (!type) return;
+
+    // For deposit/withdrawal/order fills, refresh balances immediately.
+    if (
+     type === "deposit_credited" ||
+     type === "withdrawal_completed" ||
+     type === "order_filled" ||
+     type === "order_partially_filled" ||
+     type === "order_canceled"
+    ) {
+     void refreshBalancesAndPending({ silent: true });
+    }
+
+    if (type === "deposit_credited") {
+     setToastKind("success");
+     setToastMessage("Deposit credited");
+    }
+   } catch {
+    // ignore
+   }
+  };
+
+  es.addEventListener("notification", onNotification as any);
+
+  es.onerror = () => {
+   // Keep it quiet; browser will auto-retry.
+  };
+
+  return () => {
+   cancelled = true;
+   try {
+    es.close();
+   } catch {
+    // ignore
+   }
+  };
+ }, [authMode]);
+
  // Auto-refresh balances and pending deposits while the wallet page is open.
  // Keeps deposit UX responsive without requiring the user to manually refresh.
  useEffect(() => {

@@ -128,7 +128,7 @@ export async function createNotification(
   const body = String(params.body ?? "");
   const metadata = applyNotificationPolicy(params.type, params.metadata);
 
-  const rows = await sql<{ id: string }[]>`
+  const rows = await sql<{ id: string; created_at: string }[]>`
     INSERT INTO ex_notification (user_id, type, title, body, metadata_json)
     VALUES (
       ${params.userId}::uuid,
@@ -137,9 +137,29 @@ export async function createNotification(
       ${body},
       ${metadata as any}::jsonb
     )
-    RETURNING id
+    RETURNING id::text AS id, created_at::text AS created_at
   `;
-  return rows[0]!.id;
+
+  const row = rows[0]!;
+
+  // Realtime push (SSE/WebSocket listeners): fires on COMMIT if inside a transaction.
+  // Keep payload small (Postgres NOTIFY is ~8KB).
+  try {
+    const payload = JSON.stringify({
+      id: row.id,
+      user_id: params.userId,
+      type: params.type,
+      title,
+      body,
+      metadata_json: metadata,
+      created_at: row.created_at,
+    });
+    await sql`SELECT pg_notify('ex_notification', ${payload})`;
+  } catch {
+    // ignore realtime failures
+  }
+
+  return row.id;
 }
 
 export async function listNotifications(
