@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 
 const BRAND_NAME = (process.env.NEXT_PUBLIC_BRAND_NAME ?? "Coinwaka").trim() || "Coinwaka";
 const BRAND_TAGLINE =
-  (process.env.NEXT_PUBLIC_BRAND_TAGLINE ?? "Spot Crypto Exchange").trim() || "Spot Crypto Exchange";
+  (process.env.NEXT_PUBLIC_BRAND_TAGLINE ?? "Wallet + P2P Settlement").trim() || "Wallet + P2P Settlement";
 const BASE_URL = getPublicBaseUrl();
 const BASE_ORIGIN = getPublicBaseUrlOrigin();
 const DEFAULT_TITLE = `${BRAND_NAME} — ${BRAND_TAGLINE}`;
@@ -34,16 +34,14 @@ export const metadata: Metadata = {
     template: `%s | ${BRAND_NAME}`,
   },
   description:
-    "Spot crypto exchange with real-time order books, cross-exchange arbitrage scanning, and copy trading.",
+    "Wallet rails and P2P escrow settlement with transparent, predictable flows.",
   keywords: [
-    "crypto exchange",
-    "spot trading",
-    "order book",
     "USDT",
     "BNB",
-    "arbitrage",
-    "copy trading",
     "p2p trading",
+    "crypto wallet",
+    "withdrawals",
+    "deposits",
   ],
   openGraph: {
     type: "website",
@@ -51,12 +49,12 @@ export const metadata: Metadata = {
     url: BASE_ORIGIN,
     title: DEFAULT_TITLE,
     description:
-      "Trade with real-time order books, arbitrage scanning, and copy trading.",
+      "Wallet rails and P2P escrow settlement with transparent, predictable flows.",
   },
   twitter: {
     card: "summary_large_image",
     title: DEFAULT_TITLE,
-    description: "Spot crypto exchange with real-time order books.",
+    description: "Wallet rails and P2P escrow settlement.",
   },
   robots: {
     index: true,

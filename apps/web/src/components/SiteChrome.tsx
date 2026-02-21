@@ -29,21 +29,12 @@ function initials2(label: string): string {
 }
 
 const products = [
-  { href: "/markets", label: "Markets" },
-  { href: "/exchange", label: "Spot" },
+  { href: "/wallet", label: "Wallet" },
   { href: "/p2p", label: "P2P" },
-  { href: "/express", label: "Express" },
-  { href: "/arbitrage", label: "Arbitrage" },
-  { href: "/copy-trading", label: "Copy Trade" },
+  { href: "/arcade", label: "Arcade" },
 ] as const;
 
-const tools = [
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/wallet", label: "Wallet" },
-  { href: "/connections", label: "Connections" },
-  { href: "/order-history", label: "Orders" },
-  { href: "/ai", label: "AI Advisor" },
-] as const;
+const tools: Array<{ href: string; label: string }> = [];
 
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -155,36 +146,16 @@ export function SiteChrome({ children }: { children: ReactNode }) {
           {/* Desktop Product Nav */}
           <nav className="hidden min-w-0 flex-1 items-center gap-1 md:flex lg:gap-1.5 overflow-hidden">
             {products.map((p) => (
-              <NLink
-                key={p.href}
-                {...p}
-                className={
-                  p.href === "/copy-trading"
-                    ? "hidden xl:inline"
-                    : p.href === "/arbitrage" || p.href === "/express"
-                      ? "hidden lg:inline"
-                      : ""
-                }
-              />
+              <NLink key={p.href} {...p} />
             ))}
           </nav>
 
           {/* Desktop User Nav */}
           <nav className="hidden shrink-0 ml-auto items-center gap-2 md:flex lg:gap-3">
             {tools.map((t) => (
-              <NLink
-                key={t.href}
-                {...t}
-                className={
-                  t.href === "/ai"
-                    ? "hidden xl:inline"
-                    : t.href === "/connections"
-                      ? "hidden lg:inline"
-                      : ""
-                }
-              />
+              <NLink key={t.href} {...t} />
             ))}
-            <div className="h-4 w-px bg-[var(--border)]" />
+            {tools.length > 0 && <div className="h-4 w-px bg-[var(--border)]" />}
             <NotificationBell />
             <ThemeToggle />
             <div className="relative group">
@@ -288,19 +259,23 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         {mobileOpen && (
           <div className="border-t border-[var(--border)] bg-[var(--background)] px-6 py-4 md:hidden animate-in slide-in-from-top-2">
             <nav className="grid gap-4 text-base">
-              <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Products</div>
+              <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Core</div>
               {products.map((p) => (
                 <Link key={p.href} href={p.href} onClick={() => setMobileOpen(false)} className="block py-1">
                   {p.label}
                 </Link>
               ))}
-              <div className="my-2 h-px bg-[var(--border)]" />
-              <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Account</div>
-              {tools.map((t) => (
-                <Link key={t.href} href={t.href} onClick={() => setMobileOpen(false)} className="block py-1">
-                  {t.label}
-                </Link>
-              ))}
+              {tools.length > 0 && (
+                <>
+                  <div className="my-2 h-px bg-[var(--border)]" />
+                  <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Account</div>
+                  {tools.map((t) => (
+                    <Link key={t.href} href={t.href} onClick={() => setMobileOpen(false)} className="block py-1">
+                      {t.label}
+                    </Link>
+                  ))}
+                </>
+              )}
               <Link href="/account" onClick={() => setMobileOpen(false)} className="block py-1">
                 Settings
               </Link>
@@ -329,7 +304,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
                {BRAND_NAME}
              </div>
              <p className="text-xs leading-relaxed max-w-[200px]">
-               Next-generation spot trading platform with built-in P2P execution and AI-driven risk management.
+               Wallet rails and P2P escrow settlement with a clean, transparent UX.
              </p>
              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-[10px] font-semibold text-[var(--muted)]">
                <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
@@ -337,19 +312,17 @@ export function SiteChrome({ children }: { children: ReactNode }) {
              </div>
           </div>
           <div>
-            <h4 className="font-medium text-[var(--foreground)] mb-3">Exchange</h4>
+            <h4 className="font-medium text-[var(--foreground)] mb-3">Core</h4>
             <ul className="space-y-2 text-xs">
-              <li><Link href="/markets" className="hover:text-[var(--accent)]">Markets</Link></li>
-              <li><Link href="/exchange" className="hover:text-[var(--accent)]">Spot Trading</Link></li>
-              <li><Link href="/p2p" className="hover:text-[var(--accent)]">P2P Express</Link></li>
+              <li><Link href="/wallet" className="hover:text-[var(--accent)]">Wallet</Link></li>
+              <li><Link href="/p2p" className="hover:text-[var(--accent)]">P2P</Link></li>
             </ul>
           </div>
           <div>
-            <h4 className="font-medium text-[var(--foreground)] mb-3">Earn & Learn</h4>
+            <h4 className="font-medium text-[var(--foreground)] mb-3">Account</h4>
             <ul className="space-y-2 text-xs">
-              <li><Link href="/arbitrage" className="hover:text-[var(--accent)]">Arbitrage Scanner</Link></li>
-              <li><Link href="/copy-trading" className="hover:text-[var(--accent)]">Copy Trading</Link></li>
-              <li><Link href="/ai" className="hover:text-[var(--accent)]">Security Center</Link></li>
+              <li><Link href="/account" className="hover:text-[var(--accent)]">Settings</Link></li>
+              <li><Link href="/notifications" className="hover:text-[var(--accent)]">Notifications</Link></li>
             </ul>
           </div>
           <div>

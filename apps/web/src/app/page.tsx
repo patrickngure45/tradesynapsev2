@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { Suspense } from "react";
 
 import { SiteChrome } from "@/components/SiteChrome";
 import { HomepageStats } from "./HomepageStats";
-import { MarketPulse } from "@/components/dashboard/MarketPulse";
 
 function SectionHeader({ tone, title }: { tone: "accent" | "accent2" | "up"; title: string }) {
   const dot =
@@ -66,7 +64,7 @@ export default function Home() {
                       <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
                       <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
                     </span>
-                    <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Exchange online</div>
+                    <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Rails online</div>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
@@ -74,11 +72,11 @@ export default function Home() {
                     <span className="bg-gradient-to-br from-[var(--foreground)] to-[color-mix(in_srgb,var(--accent)_70%,var(--foreground))] bg-clip-text text-transparent">
                       Execute faster
                     </span>{" "}
-                    across spot, P2P, and wallet rails.
+                    across P2P and wallet rails.
                   </h1>
 
                   <p className="mt-3 max-w-2xl text-balance text-base leading-relaxed text-[var(--muted)] sm:text-lg">
-                    A modern command center for price discovery, escrow settlement, and on-chain deposits.
+                    A modern command center for escrow settlement and on-chain deposits.
                     Built to stay clean under pressure: fewer clicks, clearer state, and predictable flows.
                   </p>
 
@@ -90,14 +88,14 @@ export default function Home() {
                       Create account
                     </Link>
                     <Link
-                      href="/exchange"
+                      href="/wallet"
                       className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg)] px-6 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--card-2)]"
                     >
-                      Open terminal
+                      Open wallet
                     </Link>
                   </div>
 
-                  <div className="mt-7 grid max-w-xl gap-3 sm:grid-cols-3">
+                  <div className="mt-7 grid max-w-xl gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="flex -space-x-2">
@@ -105,9 +103,9 @@ export default function Home() {
                           <Coin symbol="ETH" />
                           <Coin symbol="USDT" />
                         </div>
-                        <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Execution</div>
+                        <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Wallet</div>
                       </div>
-                      <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Spot terminal + order history</div>
+                      <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Deposits, balances, withdrawals</div>
                     </div>
                     <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -123,20 +121,6 @@ export default function Home() {
                         <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Escrow</div>
                       </div>
                       <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">P2P settlement with reputation</div>
-                    </div>
-                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card)]">
-                          <span className="absolute inset-0 rounded-xl bg-[color-mix(in_srgb,var(--accent-2)_12%,transparent)]" />
-                          <svg className="relative" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2" strokeLinecap="round">
-                            <rect x="2" y="6" width="20" height="14" rx="2" />
-                            <path d="M2 10h20" />
-                            <circle cx="16" cy="15" r="2" />
-                          </svg>
-                        </span>
-                        <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Settlement</div>
-                      </div>
-                      <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Deposits, balances, withdrawals</div>
                     </div>
                   </div>
                 </div>
@@ -157,18 +141,13 @@ export default function Home() {
                         {[{
                           tone: "bg-[var(--accent)]",
                           halo: "bg-[var(--ring)]",
-                          t: "Spot terminal",
-                          d: "Order book, charts, fills",
+                          t: "Wallet ops",
+                          d: "Deposits, balances, withdrawals",
                         }, {
                           tone: "bg-[var(--up)]",
                           halo: "bg-[var(--up-bg)]",
                           t: "P2P desk",
                           d: "Escrow, payouts, disputes",
-                        }, {
-                          tone: "bg-[var(--accent-2)]",
-                          halo: "bg-[var(--ring)]",
-                          t: "Wallet ops",
-                          d: "Deposits, balances, withdrawals",
                         }].map((x) => (
                           <div key={x.t} className="relative">
                             <span className="absolute -left-8 top-2 inline-flex h-3 w-3 items-center justify-center" aria-hidden>
@@ -190,17 +169,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ── Signal Desk ─────────────────────────────────────── */}
-        <section className="fade-in-up delay-100">
-          <SectionHeader tone="accent2" title="Signal desk" />
-
-          <Suspense
-            fallback={<div className="h-56 w-full animate-pulse rounded-3xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_55%,transparent)]" />}
-          >
-            <MarketPulse />
-          </Suspense>
-        </section>
-
         {/* ── Network Stats ───────────────────────────────────── */}
         <section className="fade-in-up delay-150">
           <SectionHeader tone="up" title="Snapshot" />
@@ -213,18 +181,6 @@ export default function Home() {
 
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {[
-              {
-                href: "/exchange",
-                title: "Spot terminal",
-                desc: "Limit/market orders, depth, charts, history.",
-                iconTone: "bg-[var(--up-bg)] text-[var(--up)]",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <polyline points="22,7 13.5,15.5 8.5,10.5 2,17" />
-                    <polyline points="16,7 22,7 22,13" />
-                  </svg>
-                ),
-              },
               {
                 href: "/p2p",
                 title: "P2P desk",
@@ -253,38 +209,31 @@ export default function Home() {
                 ),
               },
               {
-                href: "/markets",
-                title: "Markets",
-                desc: "Pairs, 24h moves, volume, filters.",
-                iconTone: "bg-[var(--warn-bg)] text-[var(--warn)]",
-                icon: (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <circle cx="11" cy="11" r="8" />
-                    <path d="M21 21l-4.35-4.35" />
-                  </svg>
-                ),
-              },
-              {
-                href: "/connections",
-                title: "API connections",
-                desc: "Link exchanges. Keep credentials encrypted.",
+                href: "/arcade",
+                title: "Arcade",
+                desc: "Daily drops, reveals, and progression modules.",
                 iconTone: "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]",
                 icon: (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    <path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8" />
+                    <path d="M7 16v2" />
+                    <path d="M17 16v2" />
+                    <path d="M9 10h.01" />
+                    <path d="M15 10h.01" />
+                    <path d="M12 13h.01" />
                   </svg>
                 ),
               },
               {
-                href: "/arbitrage",
-                title: "Arbitrage scanner",
-                desc: "Cross-exchange spread detection.",
-                iconTone: "bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] text-[var(--warn)]",
+                href: "/support/help",
+                title: "Help",
+                desc: "Escrow safety tips and common questions.",
+                iconTone: "bg-[var(--warn-bg)] text-[var(--warn)]",
                 icon: (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M2 20h20" />
-                    <path d="M5 20V8l5 4 5-8 5 6v10" />
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 18h.01" />
+                    <path d="M9.09 9a3 3 0 1 1 5.83 1c-.75 1-1.92 1.5-2.42 2.5-.19.38-.28.73-.28 1.5" />
                   </svg>
                 ),
               },

@@ -13,16 +13,16 @@ export default function NotFound() {
       </p>
       <div className="mt-4 flex gap-3">
         <Link
-          href="/exchange"
+          href="/wallet"
           className="rounded-lg bg-[var(--accent)] px-5 py-2 text-xs font-medium text-white transition hover:brightness-110"
         >
-          Go to Trading
+          Open Wallet
         </Link>
         <Link
-          href="/markets"
+          href="/p2p"
           className="rounded-lg border border-[var(--border)] px-5 py-2 text-xs font-medium transition hover:bg-[color-mix(in_srgb,var(--card)_70%,transparent)]"
         >
-          Browse Markets
+          Browse P2P
         </Link>
       </div>
     </div>
