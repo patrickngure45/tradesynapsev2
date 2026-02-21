@@ -929,10 +929,31 @@ export async function scanAndCreditBscDeposits(
 
   const cursor = await getOrInitCursor(sql, chain);
   const startFromCursor = cursor + 1;
+
+  // Prefer scanning near where deposit addresses actually exist.
+  // This protects fresh deployments from large historical backfills and prevents
+  // situations where the cursor is far behind tip but users expect near-real-time crediting.
+  let minAssignedBlock: number | null = null;
+  try {
+    const rows = await sql<{ b: string | number | null }[]>`
+      SELECT min(assigned_block)::text AS b
+      FROM ex_deposit_address
+      WHERE chain = ${chain} AND status = 'active' AND assigned_block IS NOT NULL
+    `;
+    const raw = rows[0]?.b;
+    const n = raw == null ? NaN : Number(raw);
+    if (Number.isFinite(n) && n > 0) minAssignedBlock = Math.trunc(n);
+  } catch {
+    minAssignedBlock = null;
+  }
+
+  const addressFrom = minAssignedBlock != null ? Math.max(0, minAssignedBlock - 50) : null;
+
   // If the cursor is brand new (0) and the caller didn't specify a fromBlock,
   // start at the safe tip to avoid an accidental genesis-to-tip backfill.
   const defaultFrom = cursor === 0 && typeof opts?.fromBlock !== "number" ? safeTip : startFromCursor;
-  const fromBlock = Math.max(0, Math.min(safeTip, opts?.fromBlock ?? defaultFrom));
+  const computedFrom = Math.max(defaultFrom, addressFrom ?? 0);
+  const fromBlock = Math.max(0, Math.min(safeTip, opts?.fromBlock ?? computedFrom));
   const toBlock = Math.min(safeTip, fromBlock + maxBlocks - 1);
 
   // Nothing to do.

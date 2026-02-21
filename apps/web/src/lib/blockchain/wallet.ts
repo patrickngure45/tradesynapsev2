@@ -103,11 +103,35 @@ export async function getOrCreateDepositAddress(
     // Derive the address
     const wallet = deriveWallet(nextIndex);
 
+    // Best-effort: record the current chain tip at assignment time.
+    // This helps deposit scanners avoid scanning ancient history.
+    let assignedBlock: number | null = null;
+    try {
+      if (chain === "bsc") {
+        const provider = getBscProvider();
+        assignedBlock = await provider.getBlockNumber();
+      }
+    } catch {
+      assignedBlock = null;
+    }
+
     // Insert
     await txSql`
       INSERT INTO ex_deposit_address (user_id, chain, address, derivation_index)
       VALUES (${userId}, ${chain}, ${wallet.address}, ${nextIndex})
     `;
+
+    if (assignedBlock != null && Number.isFinite(assignedBlock) && assignedBlock > 0) {
+      try {
+        await txSql`
+          UPDATE ex_deposit_address
+          SET assigned_block = ${assignedBlock}
+          WHERE user_id = ${userId} AND chain = ${chain}
+        `;
+      } catch {
+        // ignore
+      }
+    }
 
     return { address: wallet.address, isNew: true };
   });
