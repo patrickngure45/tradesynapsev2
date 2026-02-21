@@ -26,7 +26,7 @@ function isEnabledInProd(): boolean {
 }
 
 function checkCronSecret(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? "").trim();
+  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
   if (!expected) return false;
   const got = request.headers.get("x-cron-secret") ?? new URL(request.url).searchParams.get("secret") ?? "";
   return got === expected;
@@ -99,12 +99,13 @@ export async function POST(request: Request) {
       }
 
       const quote = indexByBase.get(base) ?? null;
-      const usdt = quote?.priceUsdt ?? null;
+      const usdt = quote?.mid ?? null;
       if (usdt == null || !Number.isFinite(usdt) || usdt <= 0) continue;
 
       if (!fxByFiat.has(fiat)) {
         const r = await getOrComputeFxReferenceRate(sql, "USDT", fiat);
-        fxByFiat.set(fiat, Number(r.rate) || 0);
+        const rate = r ? Number(r.mid) : 0;
+        fxByFiat.set(fiat, Number.isFinite(rate) ? rate : 0);
       }
       const usdtFiat = fxByFiat.get(fiat) ?? 0;
       if (!Number.isFinite(usdtFiat) || usdtFiat <= 0) continue;

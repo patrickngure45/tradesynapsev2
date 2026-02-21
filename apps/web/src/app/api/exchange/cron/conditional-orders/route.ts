@@ -132,7 +132,7 @@ export async function POST(request: Request) {
                 LIMIT 1
               ) AS ask
             FROM ex_market m
-            WHERE m.id = ANY(${sql.array(marketIds.map((x) => x as any), "uuid")})
+            WHERE m.id = ANY(${sql.array(marketIds)}::uuid[])
           )
           SELECT
             market_id,
