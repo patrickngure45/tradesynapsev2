@@ -22,6 +22,12 @@ export function statusForApiError(code: string): number {
     case "x_user_id_mismatch":
     case "actor_not_allowed":
     case "withdrawal_address_not_allowlisted":
+    case "email_not_verified":
+    case "kyc_required_for_asset":
+    case "withdrawal_requires_kyc":
+    case "withdrawal_allowlist_cooldown":
+    case "totp_setup_required":
+    case "stepup_required":
     case "user_not_active":
     case "buyer_not_active":
     case "seller_not_active":
@@ -65,6 +71,7 @@ export function statusForApiError(code: string): number {
     case "ad_is_not_online":
     case "p2p_open_orders_limit":
     case "p2p_order_duplicate_open":
+    case "passkey_not_configured":
       return 409;
 
     // Gas token
@@ -96,6 +103,7 @@ export function statusForApiError(code: string): number {
     case "seller_not_found":
     case "seller_payment_method_required":
     case "invalid_seller_payment_method":
+    case "webauthn_verification_failed":
       return 400;
 
     // Server misconfig

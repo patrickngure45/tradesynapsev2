@@ -153,6 +153,41 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     message: "The signed-in user is not allowed to perform this action.",
   },
 
+  email_not_verified: {
+    title: "Email not verified",
+    message: "Verify your email to continue.",
+  },
+  totp_setup_required: {
+    title: "2FA required",
+    message: "Set up 2FA (authenticator app) to continue.",
+  },
+  totp_required: {
+    title: "2FA code required",
+    message: "Enter your 6-digit authenticator code to continue.",
+  },
+  invalid_totp_code: {
+    title: "Invalid 2FA code",
+    message: "That code is invalid. Try again.",
+  },
+
+  // Passkeys (WebAuthn)
+  stepup_required: {
+    title: "Passkey confirmation required",
+    message: "Confirm with your passkey to continue.",
+  },
+  passkey_not_configured: {
+    title: "No passkeys enrolled",
+    message: "Add a passkey in Account settings to use passkey confirmation.",
+  },
+  webauthn_verification_failed: {
+    title: "Passkey verification failed",
+    message: "Passkey verification failed. Please try again.",
+  },
+  invalid_or_expired_token: {
+    title: "Expired",
+    message: "This request expired. Please try again.",
+  },
+
   p2p_country_not_supported: {
     title: "Country not supported",
     message: "P2P is not available in your country yet.",
@@ -284,6 +319,18 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
   withdrawal_address_not_allowlisted: {
     title: "Address not allowlisted",
     message: "Withdrawals are allowlist-only. Add this destination address to your allowlist first.",
+  },
+  withdrawal_allowlist_cooldown: {
+    title: "Address cooling down",
+    message: "This address was added recently. Wait for the cooldown period before using it.",
+  },
+  kyc_required_for_asset: {
+    title: "Verification required",
+    message: "This asset requires additional verification to withdraw.",
+  },
+  withdrawal_requires_kyc: {
+    title: "Verification required",
+    message: "This withdrawal requires a higher verification tier.",
   },
 
   // Reviewer gating

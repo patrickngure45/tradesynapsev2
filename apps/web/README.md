@@ -1,15 +1,11 @@
 # TradeSynapse Web App
 
-Next.js (App Router) UI + API for the TradeSynapse spot exchange on BNB Smart Chain.
+Next.js (App Router) UI + API for Wallet rails and P2P escrow settlement on BNB Smart Chain.
 
 ## Features
 
-- **Real-time order book** — USDT-quoted markets with limit orders, partial fills, and maker/taker fees
-- **Exchange wallet** — Deposits, withdrawals, and ledger with hold management
-- **Portfolio dashboard** — Balances, PnL tracking, fill history
-- **Copy trading** — Follow top traders, subscribe/pause/stop copying
-- **Express router** — Net-first quote for fiat↔USDT (P2P) and fiat↔asset via USDT + best external spot estimate
-- **Arbitrage scanner** — Cross-exchange price comparison with net-cost filtering
+- **Wallet** — Deposits, withdrawals, and ledger with hold management
+- **P2P** — Escrow settlement, local payment rails, disputes, and reputation
 - **Admin dashboard** — Withdrawal review, KYC management, reconciliation, audit log
 - **Session auth** — HMAC-SHA256 signed session cookie, TOTP 2FA, email verification
 - **Notifications** — In-app alerts for orders, withdrawals, KYC, and system events
@@ -138,6 +134,32 @@ Optional env vars:
 - `SWEEP_MIN_TOKEN` — default minimum token balance to consider sweeping (default `0.001`).
 - `SWEEP_MIN_<SYMBOL>` — per-token override (e.g. `SWEEP_MIN_USDT=1`).
 - `SWEEP_ACCOUNT_GAS_LEDGER` — if `true`, records actual on-chain gas spend (from tx receipts) into the exchange ledger as a `gas_spend` journal entry (system treasury → burn/sink) for accounting.
+
+## Withdrawals (security + tier policy)
+
+Withdrawal requests are gated server-side in `POST /api/exchange/withdrawals/request`:
+
+- Email must be verified.
+- Strong auth is required: Passkey step-up (WebAuthn) OR 2FA (TOTP).
+- Non-`full` KYC withdrawals are limited to a configurable list of “stable” asset symbols with per-tier caps.
+
+Passkeys (WebAuthn) configuration:
+
+- `WEBAUTHN_ORIGIN` (default: `NEXT_PUBLIC_BASE_URL` origin) — expected origin for WebAuthn verification.
+- `WEBAUTHN_RP_ID` (default: derived from origin hostname) — RP ID.
+- `WEBAUTHN_RP_NAME` (default: `Coinwaka`) — display name shown during passkey creation.
+
+Environment variables:
+
+- `WITHDRAWAL_NO_KYC_ALLOWED_ASSETS` (default `USDT`) — comma-separated symbols allowed for `kyc_level=none`.
+- `WITHDRAWAL_BASIC_ALLOWED_ASSETS` (default `USDT,USDC,BUSD`) — comma-separated symbols allowed for `kyc_level=basic`.
+- `WITHDRAWAL_NO_KYC_MAX_SINGLE` (default `50`) — max single withdrawal amount for `none` (per asset units).
+- `WITHDRAWAL_NO_KYC_MAX_24H` (default `100`) — max total requested withdrawals in 24h for `none` (per asset units).
+- `WITHDRAWAL_BASIC_MAX_SINGLE` (default `2000`) — max single withdrawal amount for `basic` (per asset units).
+- `WITHDRAWAL_BASIC_MAX_24H` (default `5000`) — max total requested withdrawals in 24h for `basic` (per asset units).
+- `WITHDRAWAL_ALLOWLIST_MIN_AGE_HOURS` (default `0`) — optional cooldown for newly-added withdrawal addresses.
+
+Velocity (global, counts/amount across all assets) is controlled separately in `WITHDRAWAL_MAX_COUNT_1H`, `WITHDRAWAL_MAX_COUNT_24H`, and `WITHDRAWAL_MAX_AMOUNT_24H`.
 
 ## P2P market seeding
 

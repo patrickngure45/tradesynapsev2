@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -25,10 +26,22 @@ type UserProfile = {
 
 function fetchOpts(extra?: RequestInit): RequestInit {
   const opts: RequestInit = { credentials: "include", ...extra };
+  const headers = new Headers(extra?.headers);
+
+  // Attach CSRF double-submit token on mutating requests.
+  const method = String(opts.method ?? "GET").toUpperCase();
+  if (typeof document !== "undefined" && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const match = document.cookie.match(/(?:^|;\s*)__csrf=([^;]+)/);
+    const csrf = match?.[1] ?? null;
+    if (csrf && !headers.has("x-csrf-token")) headers.set("x-csrf-token", csrf);
+  }
+
   if (typeof window !== "undefined") {
     const uid = localStorage.getItem("ts_user_id");
-    if (uid) opts.headers = { ...opts.headers as Record<string,string>, "x-user-id": uid };
+    if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
   }
+
+  opts.headers = headers;
   return opts;
 }
 
@@ -93,6 +106,12 @@ export function AccountClient() {
   const [totpDisableMsg, setTotpDisableMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [copiedTotpSecret, setCopiedTotpSecret] = useState(false);
 
+  /* Passkeys (WebAuthn) */
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const [passkeys, setPasskeys] = useState<{ id: string; name: string | null; created_at: string; last_used_at: string | null }[]>([]);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeyMsg, setPasskeyMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   const load = useCallback(async () => {
     try {
       setLoadMsg(null);
@@ -110,6 +129,17 @@ export function AccountClient() {
       setTotpEnabled(!!data.user?.totp_enabled);
       setLastLoadedAt(new Date());
       setLoadMsg(null);
+
+      // Load passkeys (best-effort)
+      try {
+        const pkRes = await fetch("/api/account/passkeys", fetchOpts({ cache: "no-store" }));
+        if (pkRes.ok) {
+          const pkData = await pkRes.json();
+          setPasskeys(Array.isArray(pkData.passkeys) ? pkData.passkeys : []);
+        }
+      } catch {
+        // silent
+      }
 
       // Check for pending KYC submission
       if (normalizedKycLevel(data.user?.kyc_level) === "basic") {
@@ -130,6 +160,102 @@ export function AccountClient() {
   }, [router]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setPasskeySupported(typeof window !== "undefined" && typeof (window as any).PublicKeyCredential !== "undefined");
+  }, []);
+
+  const refreshPasskeys = async () => {
+    try {
+      const pkRes = await fetch("/api/account/passkeys", fetchOpts({ cache: "no-store" }));
+      if (!pkRes.ok) return;
+      const pkData = await pkRes.json();
+      setPasskeys(Array.isArray(pkData.passkeys) ? pkData.passkeys : []);
+    } catch {
+      // silent
+    }
+  };
+
+  const handleAddPasskey = async () => {
+    setPasskeyMsg(null);
+    if (!passkeySupported) {
+      setPasskeyMsg({ text: "Passkeys aren’t supported in this browser/device.", ok: false });
+      return;
+    }
+
+    const name = (window.prompt("Name this passkey (optional)", "This device") ?? "").trim();
+
+    setPasskeyLoading(true);
+    try {
+      const optRes = await fetch("/api/account/passkeys/register/options", fetchOpts({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(name ? { name } : {}),
+      }));
+      const optData = await optRes.json().catch(() => ({} as any));
+      if (!optRes.ok) {
+        setPasskeyMsg({ text: optData.message ?? optData.error ?? "Failed to start passkey registration", ok: false });
+        return;
+      }
+
+      const attResp = await startRegistration(optData.options);
+
+      const verRes = await fetch("/api/account/passkeys/register/verify", fetchOpts({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: name || undefined, response: attResp }),
+      }));
+      const verData = await verRes.json().catch(() => ({} as any));
+      if (!verRes.ok) {
+        setPasskeyMsg({ text: verData.message ?? verData.error ?? "Passkey verification failed", ok: false });
+        return;
+      }
+
+      setPasskeyMsg({ text: "Passkey added.", ok: true });
+      await refreshPasskeys();
+    } catch (e: any) {
+      setPasskeyMsg({ text: e?.message ?? "Passkey registration canceled", ok: false });
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
+
+  const handleConfirmPasskey = async () => {
+    setPasskeyMsg(null);
+    if (!passkeySupported) {
+      setPasskeyMsg({ text: "Passkeys aren’t supported in this browser/device.", ok: false });
+      return;
+    }
+
+    setPasskeyLoading(true);
+    try {
+      const optRes = await fetch("/api/account/passkeys/authenticate/options", fetchOpts({ method: "POST" }));
+      const optData = await optRes.json().catch(() => ({} as any));
+      if (!optRes.ok) {
+        setPasskeyMsg({ text: optData.message ?? optData.error ?? "Failed to start passkey confirmation", ok: false });
+        return;
+      }
+
+      const asrt = await startAuthentication(optData.options);
+      const verRes = await fetch("/api/account/passkeys/authenticate/verify", fetchOpts({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ response: asrt }),
+      }));
+      const verData = await verRes.json().catch(() => ({} as any));
+      if (!verRes.ok) {
+        setPasskeyMsg({ text: verData.message ?? verData.error ?? "Passkey verification failed", ok: false });
+        return;
+      }
+
+      setPasskeyMsg({ text: "Passkey confirmed (valid for a few minutes).", ok: true });
+      await refreshPasskeys();
+    } catch (e: any) {
+      setPasskeyMsg({ text: e?.message ?? "Passkey confirmation canceled", ok: false });
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
 
   /* ── Logout ──────────────────────────────────────────────────── */
   const handleLogout = async () => {
@@ -393,7 +519,7 @@ export function AccountClient() {
   const kyc = KYC_LABELS[currentKyc] ?? KYC_LABELS.none!;
   const securityChecks = {
     emailVerified: profile.email_verified,
-    totpEnabled,
+    strongAuthEnabled: totpEnabled || passkeys.length > 0,
     kycVerified: currentKyc === "verified",
   };
   const securityScore = Object.values(securityChecks).filter(Boolean).length;
@@ -458,6 +584,63 @@ export function AccountClient() {
           <Field label="Member Since" value={new Date(profile.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })} />
           <Field label="Country" value={profile.country ?? "Not set"} />
         </div>
+      </section>
+
+      {/* ────── Passkeys ────── */}
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+        <h2 className="mb-2 text-sm font-semibold tracking-tight">Passkeys</h2>
+        <p className="mb-4 text-xs text-[var(--muted)]">
+          Use a device passkey (biometrics / screen lock) for stronger security and faster verification.
+        </p>
+
+        {!passkeySupported ? (
+          <p className="text-xs text-[var(--muted)]">Passkeys aren’t available in this browser/device.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAddPasskey}
+                disabled={passkeyLoading}
+                className="rounded-lg bg-[var(--accent)] px-5 py-2 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-60"
+              >
+                {passkeyLoading ? "Working…" : "Add passkey"}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPasskey}
+                disabled={passkeyLoading || passkeys.length === 0}
+                className="rounded-lg border border-[var(--border)] px-5 py-2 text-xs font-medium text-[var(--foreground)] transition hover:bg-[var(--card-2)] disabled:opacity-60"
+              >
+                Confirm passkey
+              </button>
+              {passkeyMsg && (
+                <span className={`text-xs ${passkeyMsg.ok ? "text-emerald-500" : "text-rose-500"}`}>{passkeyMsg.text}</span>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_90%,transparent)] p-4">
+              <p className="mb-2 text-[11px] text-[var(--muted)]">Enrolled passkeys</p>
+              {passkeys.length === 0 ? (
+                <p className="text-xs text-[var(--muted)]">No passkeys yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {passkeys.map((pk) => (
+                    <div key={pk.id} className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium">{pk.name ?? "Passkey"}</p>
+                        <p className="text-[11px] text-[var(--muted)]">Added {new Date(pk.created_at).toLocaleDateString()}</p>
+                      </div>
+                      <div className="text-[11px] text-[var(--muted)]">
+                        {pk.last_used_at ? `Last used ${new Date(pk.last_used_at).toLocaleDateString()}` : "Not used yet"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ────── Email Verification ────── */}
@@ -832,7 +1015,7 @@ export function AccountClient() {
         </div>
         <div className="grid gap-2 text-xs">
           <StatusRow label="Email verified" ok={securityChecks.emailVerified} />
-          <StatusRow label="2FA enabled" ok={securityChecks.totpEnabled} />
+          <StatusRow label="Strong auth enabled" ok={securityChecks.strongAuthEnabled} />
           <StatusRow label="KYC verified" ok={securityChecks.kycVerified} />
         </div>
       </section>
