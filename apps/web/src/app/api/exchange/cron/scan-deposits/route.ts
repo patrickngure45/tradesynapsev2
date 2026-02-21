@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
-import { releaseJobLock, tryAcquireJobLock } from "@/lib/system/jobLock";
+import { releaseJobLock, renewJobLock, tryAcquireJobLock } from "@/lib/system/jobLock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +49,20 @@ export async function POST(req: NextRequest) {
       },
       { status: 429 },
     );
+  }
+
+  // Keep the lock alive while scanning. This allows a short TTL (fast recovery after crashes)
+  // without having long-running scans expire the lock and overlap.
+  const renewEveryMs = clampInt(Math.floor(lockTtlMs / 2), 10_000, 30_000);
+  let renewTimer: ReturnType<typeof setInterval> | null = null;
+  try {
+    renewTimer = setInterval(() => {
+      renewJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs }).catch(() => {
+        // ignore
+      });
+    }, renewEveryMs);
+  } catch {
+    // ignore
   }
 
   const beat = async (details?: Record<string, unknown>) => {
@@ -152,6 +166,13 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   } finally {
+    if (renewTimer) {
+      try {
+        clearInterval(renewTimer);
+      } catch {
+        // ignore
+      }
+    }
     try {
       await releaseJobLock(sql as any, { key: lockKey, holderId });
     } catch {
