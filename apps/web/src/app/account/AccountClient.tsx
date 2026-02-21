@@ -162,8 +162,18 @@ export function AccountClient() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    setPasskeySupported(typeof window !== "undefined" && typeof (window as any).PublicKeyCredential !== "undefined");
+    setPasskeySupported(typeof window !== "undefined" && typeof window.PublicKeyCredential !== "undefined");
   }, []);
+
+  const msgFrom = (v: unknown, fallback: string) => {
+    if (!v || typeof v !== "object") return fallback;
+    const o = v as Record<string, unknown>;
+    const m = o.message;
+    const e = o.error;
+    if (typeof m === "string" && m.trim()) return m;
+    if (typeof e === "string" && e.trim()) return e;
+    return fallback;
+  };
 
   const refreshPasskeys = async () => {
     try {
@@ -192,29 +202,37 @@ export function AccountClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(name ? { name } : {}),
       }));
-      const optData = await optRes.json().catch(() => ({} as any));
+      const optData = (await optRes.json().catch(() => ({}))) as unknown;
       if (!optRes.ok) {
-        setPasskeyMsg({ text: optData.message ?? optData.error ?? "Failed to start passkey registration", ok: false });
+        setPasskeyMsg({ text: msgFrom(optData, "Failed to start passkey registration"), ok: false });
         return;
       }
 
-      const attResp = await startRegistration(optData.options);
+      const optObj = optData && typeof optData === "object" ? (optData as Record<string, unknown>) : null;
+      const regOptions = optObj?.options;
+      if (!regOptions) {
+        setPasskeyMsg({ text: "Invalid passkey registration options", ok: false });
+        return;
+      }
+
+      const attResp = await startRegistration(regOptions as Parameters<typeof startRegistration>[0]);
 
       const verRes = await fetch("/api/account/passkeys/register/verify", fetchOpts({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name || undefined, response: attResp }),
       }));
-      const verData = await verRes.json().catch(() => ({} as any));
+      const verData = (await verRes.json().catch(() => ({}))) as unknown;
       if (!verRes.ok) {
-        setPasskeyMsg({ text: verData.message ?? verData.error ?? "Passkey verification failed", ok: false });
+        setPasskeyMsg({ text: msgFrom(verData, "Passkey verification failed"), ok: false });
         return;
       }
 
       setPasskeyMsg({ text: "Passkey added.", ok: true });
       await refreshPasskeys();
-    } catch (e: any) {
-      setPasskeyMsg({ text: e?.message ?? "Passkey registration canceled", ok: false });
+    } catch (e: unknown) {
+      const text = e instanceof Error ? e.message : "Passkey registration canceled";
+      setPasskeyMsg({ text, ok: false });
     } finally {
       setPasskeyLoading(false);
     }
@@ -230,28 +248,36 @@ export function AccountClient() {
     setPasskeyLoading(true);
     try {
       const optRes = await fetch("/api/account/passkeys/authenticate/options", fetchOpts({ method: "POST" }));
-      const optData = await optRes.json().catch(() => ({} as any));
+      const optData = (await optRes.json().catch(() => ({}))) as unknown;
       if (!optRes.ok) {
-        setPasskeyMsg({ text: optData.message ?? optData.error ?? "Failed to start passkey confirmation", ok: false });
+        setPasskeyMsg({ text: msgFrom(optData, "Failed to start passkey confirmation"), ok: false });
         return;
       }
 
-      const asrt = await startAuthentication(optData.options);
+      const optObj = optData && typeof optData === "object" ? (optData as Record<string, unknown>) : null;
+      const authOptions = optObj?.options;
+      if (!authOptions) {
+        setPasskeyMsg({ text: "Invalid passkey authentication options", ok: false });
+        return;
+      }
+
+      const asrt = await startAuthentication(authOptions as Parameters<typeof startAuthentication>[0]);
       const verRes = await fetch("/api/account/passkeys/authenticate/verify", fetchOpts({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ response: asrt }),
       }));
-      const verData = await verRes.json().catch(() => ({} as any));
+      const verData = (await verRes.json().catch(() => ({}))) as unknown;
       if (!verRes.ok) {
-        setPasskeyMsg({ text: verData.message ?? verData.error ?? "Passkey verification failed", ok: false });
+        setPasskeyMsg({ text: msgFrom(verData, "Passkey verification failed"), ok: false });
         return;
       }
 
       setPasskeyMsg({ text: "Passkey confirmed (valid for a few minutes).", ok: true });
       await refreshPasskeys();
-    } catch (e: any) {
-      setPasskeyMsg({ text: e?.message ?? "Passkey confirmation canceled", ok: false });
+    } catch (e: unknown) {
+      const text = e instanceof Error ? e.message : "Passkey confirmation canceled";
+      setPasskeyMsg({ text, ok: false });
     } finally {
       setPasskeyLoading(false);
     }

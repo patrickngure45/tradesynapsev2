@@ -10,6 +10,7 @@
  */
 
 import "dotenv/config";
+import type { IncomingMessage } from "node:http";
 import { createServer } from "node:http";
 import { parse } from "node:url";
 import next from "next";
@@ -52,12 +53,14 @@ const handle = app.getRequestHandler();
 // Next.js dev server uses WebSocket upgrades for HMR. If we attach our own
 // `upgrade` handler we must forward unknown upgrades to Next, otherwise the
 // sockets can leak/hang and dev can crash.
-let handleUpgrade: undefined | ((req: any, socket: any, head: any) => void);
+type UpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
+let handleUpgrade: UpgradeHandler | undefined;
 
 app
   .prepare()
   .then(() => {
-  handleUpgrade = (app as any).getUpgradeHandler ? (app as any).getUpgradeHandler() : undefined;
+  const maybe = app as unknown as { getUpgradeHandler?: () => UpgradeHandler };
+  handleUpgrade = typeof maybe.getUpgradeHandler === "function" ? maybe.getUpgradeHandler() : undefined;
   const sql = createSql();
 
   const bytesToMb = (b: number) => Math.round((b / 1024 / 1024) * 10) / 10;
@@ -145,13 +148,14 @@ app
     memTimer = setInterval(() => {
       const m = process.memoryUsage();
       const wsClients = getClients().size;
+      const ab = (m as unknown as { arrayBuffers?: number }).arrayBuffers ?? 0;
       console.log(
         `🧠 mem rss=${bytesToMb(m.rss)}MB heapUsed=${bytesToMb(m.heapUsed)}MB heapTotal=${bytesToMb(m.heapTotal)}MB ` +
-          `ext=${bytesToMb(m.external)}MB ab=${bytesToMb((m as any).arrayBuffers ?? 0)}MB wsClients=${wsClients}`,
+          `ext=${bytesToMb(m.external)}MB ab=${bytesToMb(ab)}MB wsClients=${wsClients}`,
       );
     }, memoryLogIntervalMs);
     // Don't keep the process alive purely because of this timer.
-    (memTimer as any).unref?.();
+    (memTimer as unknown as { unref?: () => void }).unref?.();
   }
 
   server.listen(port, bindHost, () => {

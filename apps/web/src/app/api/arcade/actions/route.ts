@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   }
 
   const limit = q.limit ?? 25;
-  const module = q.module ? String(q.module).trim() : null;
+  const moduleKey = q.module ? String(q.module).trim() : null;
 
   const sql = getSql();
 
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
         SELECT id::text AS id, module, profile, status, requested_at, resolves_at, resolved_at, input_json, outcome_json
         FROM arcade_action
         WHERE user_id = ${actingUserId}::uuid
-          ${module ? sql`AND module = ${module}` : sql``}
+          ${moduleKey ? sql`AND module = ${moduleKey}` : sql``}
         ORDER BY requested_at DESC
         LIMIT ${limit}
       `;

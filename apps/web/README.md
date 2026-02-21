@@ -137,7 +137,7 @@ These are the common operational jobs:
 	- Or allowlisted tokens:
 		- `GET /api/exchange/cron/sweep-deposits?secret=...&execute=1&tokens=1&symbols=USDT%2CUSDC%2CWBNB`
 
-- Conditional orders (Stop‑Limit) trigger (every **2–5 seconds** for a fast UI, or every **10–15 seconds** to reduce load)
+- Conditional orders (Stop‑Limit, OCO) trigger (every **2–5 seconds** for a fast UI, or every **10–15 seconds** to reduce load)
 	- Disabled by default in production; enable with `EXCHANGE_ENABLE_CONDITIONAL_ORDERS=1`
 	- `POST /api/exchange/cron/conditional-orders?secret=...&limit=50`
 

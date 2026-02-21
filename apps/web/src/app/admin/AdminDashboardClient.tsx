@@ -105,7 +105,7 @@ function getCsrfToken(): string | null {
   return match?.[1] ?? null;
 }
 
-async function adminFetch(path: string, init?: RequestInit) {
+async function adminFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const mergedInit: RequestInit = {
     ...(init ?? {}),
     credentials: "include",
@@ -132,8 +132,11 @@ async function adminFetch(path: string, init?: RequestInit) {
   } catch {
     json = { _raw: text };
   }
-  if (!res.ok) throw new Error((json as any)?.error ?? `http_${res.status}`);
-  return json as any;
+
+  const obj = json && typeof json === "object" ? (json as Record<string, unknown>) : null;
+  const err = obj && typeof obj.error === "string" ? obj.error : null;
+  if (!res.ok) throw new Error(err ?? `http_${res.status}`);
+  return json as T;
 }
 
 function Badge({ text, variant }: { text: string; variant: "green" | "red" | "amber" | "blue" | "gray" }) {
@@ -189,81 +192,100 @@ function asStr(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function normalizeWalletData(raw: any): WalletData {
-  const onChain = Array.isArray(raw?.onChain)
-    ? raw.onChain.map((b: any) => ({
-        symbol: asStr(b?.symbol, ""),
-        balance: asStr(b?.balance, "0"),
-        contractAddress: typeof b?.contractAddress === "string" ? b.contractAddress : null,
-      }))
+function normalizeWalletData(raw: unknown): WalletData {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const health = r.health && typeof r.health === "object" ? (r.health as Record<string, unknown>) : {};
+  const userCounts = r.userCounts && typeof r.userCounts === "object" ? (r.userCounts as Record<string, unknown>) : {};
+
+  const onChain = Array.isArray(r.onChain)
+    ? (r.onChain as unknown[]).map((b) => {
+        const br = b && typeof b === "object" ? (b as Record<string, unknown>) : {};
+        return {
+          symbol: asStr(br.symbol, ""),
+          balance: asStr(br.balance, "0"),
+          contractAddress: typeof br.contractAddress === "string" ? br.contractAddress : null,
+        };
+      })
     : [];
 
-  const assets = Array.isArray(raw?.assets)
-    ? raw.assets.map((a: any) => ({
-        id: asStr(a?.id, ""),
-        chain: asStr(a?.chain, "bsc"),
-        symbol: asStr(a?.symbol, ""),
-        name: typeof a?.name === "string" ? a.name : null,
-        decimals: asNum(a?.decimals, 18),
-      }))
+  const assets = Array.isArray(r.assets)
+    ? (r.assets as unknown[]).map((a) => {
+        const ar = a && typeof a === "object" ? (a as Record<string, unknown>) : {};
+        return {
+          id: asStr(ar.id, ""),
+          chain: asStr(ar.chain, "bsc"),
+          symbol: asStr(ar.symbol, ""),
+          name: typeof ar.name === "string" ? ar.name : null,
+          decimals: asNum(ar.decimals, 18),
+        };
+      })
     : [];
 
-  const ledger = Array.isArray(raw?.ledger)
-    ? raw.ledger.map((row: any) => ({
-        asset_id: asStr(row?.asset_id, ""),
-        symbol: asStr(row?.symbol, ""),
-        chain: asStr(row?.chain, "bsc"),
-        total_posted: asStr(row?.total_posted, "0"),
-        total_held: asStr(row?.total_held, "0"),
-        total_available: asStr(row?.total_available, "0"),
-        num_accounts: asStr(row?.num_accounts, "0"),
-      }))
+  const ledger = Array.isArray(r.ledger)
+    ? (r.ledger as unknown[]).map((row) => {
+        const rr = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+        return {
+          asset_id: asStr(rr.asset_id, ""),
+          symbol: asStr(rr.symbol, ""),
+          chain: asStr(rr.chain, "bsc"),
+          total_posted: asStr(rr.total_posted, "0"),
+          total_held: asStr(rr.total_held, "0"),
+          total_available: asStr(rr.total_available, "0"),
+          num_accounts: asStr(rr.num_accounts, "0"),
+        };
+      })
     : [];
 
-  const fees = Array.isArray(raw?.fees)
-    ? raw.fees.map((f: any) => ({
-        symbol: asStr(f?.symbol, ""),
-        chain: asStr(f?.chain, "bsc"),
-        total_fees: asStr(f?.total_fees, "0"),
-      }))
+  const fees = Array.isArray(r.fees)
+    ? (r.fees as unknown[]).map((f) => {
+        const fr = f && typeof f === "object" ? (f as Record<string, unknown>) : {};
+        return {
+          symbol: asStr(fr.symbol, ""),
+          chain: asStr(fr.chain, "bsc"),
+          total_fees: asStr(fr.total_fees, "0"),
+        };
+      })
     : [];
 
-  const pendingWithdrawals = Array.isArray(raw?.pendingWithdrawals)
-    ? raw.pendingWithdrawals.map((pw: any) => ({
-        symbol: asStr(pw?.symbol, ""),
-        chain: asStr(pw?.chain, "bsc"),
-        total_pending: asStr(pw?.total_pending, "0"),
-        count: asStr(pw?.count, "0"),
-      }))
+  const pendingWithdrawals = Array.isArray(r.pendingWithdrawals)
+    ? (r.pendingWithdrawals as unknown[]).map((pw) => {
+        const pr = pw && typeof pw === "object" ? (pw as Record<string, unknown>) : {};
+        return {
+          symbol: asStr(pr.symbol, ""),
+          chain: asStr(pr.chain, "bsc"),
+          total_pending: asStr(pr.total_pending, "0"),
+          count: asStr(pr.count, "0"),
+        };
+      })
     : [];
 
   return {
-    address: asStr(raw?.address, ""),
+    address: asStr(r.address, ""),
     onChain,
     assets,
     ledger,
     fees,
     pendingWithdrawals,
     health: {
-      pendingWithdrawals: asNum(raw?.health?.pendingWithdrawals, 0),
-      pendingWithdrawalAmount: asStr(raw?.health?.pendingWithdrawalAmount, "0"),
-      outboxOpen: asNum(raw?.health?.outboxOpen, 0),
-      outboxDead: asNum(raw?.health?.outboxDead, 0),
-      outboxWithErrors: asNum(raw?.health?.outboxWithErrors, 0),
-      depositAddresses: asNum(raw?.health?.depositAddresses, 0),
-      allowlistApproved: asNum(raw?.health?.allowlistApproved, 0),
-      hotWalletBnb: asStr(raw?.health?.hotWalletBnb, "0"),
-      hotWalletHasGas: Boolean(raw?.health?.hotWalletHasGas),
+      pendingWithdrawals: asNum(health.pendingWithdrawals, 0),
+      pendingWithdrawalAmount: asStr(health.pendingWithdrawalAmount, "0"),
+      outboxOpen: asNum(health.outboxOpen, 0),
+      outboxDead: asNum(health.outboxDead, 0),
+      outboxWithErrors: asNum(health.outboxWithErrors, 0),
+      depositAddresses: asNum(health.depositAddresses, 0),
+      allowlistApproved: asNum(health.allowlistApproved, 0),
+      hotWalletBnb: asStr(health.hotWalletBnb, "0"),
+      hotWalletHasGas: Boolean(health.hotWalletHasGas),
     },
     userCounts: {
-      total: asStr(raw?.userCounts?.total, "0"),
-      admins: asStr(raw?.userCounts?.admins, "0"),
-      with_email: asStr(raw?.userCounts?.with_email, "0"),
-      with_ledger: asStr(raw?.userCounts?.with_ledger, "0"),
-      total_rows: asStr(raw?.userCounts?.total_rows, "0"),
-      active_non_system: asStr(raw?.userCounts?.active_non_system, "0"),
-      banned_non_system: asStr(raw?.userCounts?.banned_non_system, "0"),
-      system_rows: asStr(raw?.userCounts?.system_rows, "0"),
+      total: asStr(userCounts.total, "0"),
+      admins: asStr(userCounts.admins, "0"),
+      with_email: asStr(userCounts.with_email, "0"),
+      with_ledger: asStr(userCounts.with_ledger, "0"),
+      total_rows: asStr(userCounts.total_rows, "0"),
+      active_non_system: asStr(userCounts.active_non_system, "0"),
+      banned_non_system: asStr(userCounts.banned_non_system, "0"),
+      system_rows: asStr(userCounts.system_rows, "0"),
     },
   };
 }
@@ -276,7 +298,7 @@ export function AdminDashboardClient() {
 
   const fetchSystemStatus = useCallback(async () => {
     try {
-      const data = await adminFetch("/api/admin/status");
+      const data = await adminFetch<AdminSystemStatus>("/api/admin/status");
       setSysStatus(data);
       setSysStatusError(null);
     } catch (e) {
@@ -415,7 +437,9 @@ export function AdminDashboardClient() {
     setWdLoading(true);
     setError(null);
     try {
-      const data = await adminFetch(`/api/exchange/admin/withdrawals?status=${wdFilter}`);
+      const data = await adminFetch<{ withdrawals?: Withdrawal[] }>(
+        `/api/exchange/admin/withdrawals?status=${wdFilter}`,
+      );
       setWithdrawals(data.withdrawals ?? []);
     } catch (e: any) {
       setError(e.message);
@@ -499,7 +523,7 @@ export function AdminDashboardClient() {
     setReconLoading(true);
     setError(null);
     try {
-      const data = await adminFetch("/api/exchange/admin/reconciliation");
+      const data = await adminFetch<{ reconciliation?: ReconciliationReport | null }>("/api/exchange/admin/reconciliation");
       setReconReport(data.reconciliation ?? null);
     } catch (e: any) {
       setError(e.message);
@@ -513,7 +537,9 @@ export function AdminDashboardClient() {
     setError(null);
     try {
       const params = new URLSearchParams({ limit: String(DL_PAGE_SIZE), offset: String(offset) });
-      const data = await adminFetch(`/api/exchange/admin/outbox/dead-letters?${params}`);
+      const data = await adminFetch<{ dead_letters?: DeadLetter[]; total?: number }>(
+        `/api/exchange/admin/outbox/dead-letters?${params}`,
+      );
       setDeadLetters(data.dead_letters ?? []);
       setDlTotal(data.total ?? data.dead_letters?.length ?? 0);
       setDlOffset(offset);
@@ -546,7 +572,9 @@ export function AdminDashboardClient() {
     setError(null);
     try {
       const params = new URLSearchParams({ status: kycFilter, limit: String(KYC_PAGE_SIZE), offset: String(offset) });
-      const data = await adminFetch(`/api/exchange/admin/kyc-review?${params}`);
+      const data = await adminFetch<{ submissions?: KycSubmission[]; total?: number }>(
+        `/api/exchange/admin/kyc-review?${params}`,
+      );
       setKycSubmissions(data.submissions ?? []);
       setKycTotal(data.total ?? data.submissions?.length ?? 0);
       setKycOffset(offset);
@@ -626,7 +654,9 @@ export function AdminDashboardClient() {
     try {
       const params = new URLSearchParams({ limit: "50", offset: String(offset) });
       if (auditFilter.trim()) params.set("action", auditFilter.trim());
-      const data = await adminFetch(`/api/exchange/admin/audit-log?${params}`);
+      const data = await adminFetch<{ rows?: AuditRow[]; total?: number }>(
+        `/api/exchange/admin/audit-log?${params}`,
+      );
       setAuditRows(data.rows ?? []);
       setAuditTotal(data.total ?? 0);
       setAuditOffset(offset);
