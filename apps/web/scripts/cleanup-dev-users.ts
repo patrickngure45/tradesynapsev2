@@ -79,7 +79,18 @@ async function main() {
         END IF;
 
         IF to_regclass('p2p_dispute') IS NOT NULL THEN
-          EXECUTE 'DELETE FROM p2p_dispute WHERE from_user_id IN (SELECT id FROM _cleanup_target_users) OR to_user_id IN (SELECT id FROM _cleanup_target_users)';
+          -- Disputes are attached to orders; delete any dispute for a targeted user's orders
+          -- and any dispute opened by a targeted user.
+          EXECUTE '
+            DELETE FROM p2p_dispute d
+            USING p2p_order o
+            WHERE d.order_id = o.id
+              AND (o.maker_id IN (SELECT id FROM _cleanup_target_users)
+                OR o.taker_id IN (SELECT id FROM _cleanup_target_users)
+                OR o.buyer_id IN (SELECT id FROM _cleanup_target_users)
+                OR o.seller_id IN (SELECT id FROM _cleanup_target_users))
+          ';
+          EXECUTE 'DELETE FROM p2p_dispute WHERE opened_by_user_id IN (SELECT id FROM _cleanup_target_users)';
         END IF;
 
         IF to_regclass('p2p_order') IS NOT NULL THEN
