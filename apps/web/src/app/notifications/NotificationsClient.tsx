@@ -71,6 +71,9 @@ function iconForType(type: string) {
       return "!";
     case "p2p_feedback_received":
       return "✓";
+    case "arcade_ready":
+    case "arcade_hint_ready":
+      return "✦";
     default:
       return "◆";
   }
@@ -88,6 +91,9 @@ function colorForType(type: string) {
     case "p2p_payment_confirmed":
     case "p2p_order_created":
       return "text-[var(--accent)]";
+    case "arcade_ready":
+    case "arcade_hint_ready":
+      return "text-[var(--accent-2)]";
     case "p2p_feedback_received":
       return "text-[var(--up)]";
     case "p2p_dispute_opened":
@@ -266,10 +272,10 @@ export function NotificationsClient() {
             {filter === "unread" ? "No unread notifications" : "No notifications yet"}
           </p>
           <Link
-            href="/exchange"
+            href="/wallet"
             className="mt-4 inline-block text-xs text-[var(--accent)] hover:underline"
           >
-            Start trading to receive updates
+            Open your wallet to get started
           </Link>
         </div>
       ) : (
