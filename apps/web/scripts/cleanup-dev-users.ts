@@ -124,7 +124,22 @@ async function main() {
         END IF;
 
         IF to_regclass('message') IS NOT NULL THEN
-          EXECUTE 'DELETE FROM message WHERE user_id IN (SELECT id FROM _cleanup_target_users)';
+          -- MVP schema uses sender_user_id.
+          EXECUTE 'DELETE FROM message WHERE sender_user_id IN (SELECT id FROM _cleanup_target_users)';
+        END IF;
+
+        IF to_regclass('evidence_object') IS NOT NULL THEN
+          EXECUTE '
+            DELETE FROM evidence_object
+            WHERE submitted_by_user_id IN (SELECT id FROM _cleanup_target_users)
+          ';
+          EXECUTE '
+            DELETE FROM evidence_object eo
+            USING trade t
+            WHERE eo.trade_id = t.id
+              AND (t.buyer_user_id IN (SELECT id FROM _cleanup_target_users)
+                OR t.seller_user_id IN (SELECT id FROM _cleanup_target_users))
+          ';
         END IF;
 
         IF to_regclass('wallet') IS NOT NULL THEN
@@ -192,31 +207,10 @@ async function main() {
       WHERE user_id IN (SELECT id FROM _cleanup_target_users)
     `;
 
-    await txSql`
-      DELETE FROM ex_journal_line jl
-      USING ex_ledger_account la
-      WHERE jl.account_id = la.id
-        AND la.user_id IN (SELECT id FROM _cleanup_target_users)
-    `;
-
-    await txSql`
-      DELETE FROM ex_hold h
-      USING ex_ledger_account la
-      WHERE h.account_id = la.id
-        AND la.user_id IN (SELECT id FROM _cleanup_target_users)
-    `;
-
-    await txSql`
-      DELETE FROM ex_ledger_account
-      WHERE user_id IN (SELECT id FROM _cleanup_target_users)
-    `;
-
-    await txSql`
-      DELETE FROM ex_journal_entry je
-      WHERE NOT EXISTS (
-        SELECT 1 FROM ex_journal_line jl WHERE jl.entry_id = je.id
-      )
-    `;
+    // IMPORTANT:
+    // Do NOT delete exchange ledger/journal history here.
+    // The ledger uses balancing triggers that will fail if lines are removed.
+    // Instead we "tombstone" the user record below and remove user-facing rows (ads, orders, sessions, etc.).
 
     // Generic single-column FKs to app_user
     await txSql`
@@ -262,16 +256,22 @@ async function main() {
       END $$;
     `;
 
-    const deletedUsers = await txSql<{ count: string }[]>`
-      WITH d AS (
-        DELETE FROM app_user
+    const tombstoned = await txSql<{ count: string }[]>`
+      WITH u AS (
+        UPDATE app_user
+        SET
+          status = 'banned',
+          kyc_level = 'none',
+          email = NULL,
+          display_name = NULL,
+          password_hash = NULL
         WHERE id IN (SELECT id FROM _cleanup_target_users)
         RETURNING id
       )
-      SELECT count(*)::text AS count FROM d
+      SELECT count(*)::text AS count FROM u
     `;
 
-    console.log(`[cleanup-dev-users] deleted users: ${deletedUsers[0]?.count ?? "0"}`);
+    console.log(`[cleanup-dev-users] tombstoned users: ${tombstoned[0]?.count ?? "0"}`);
   });
 }
 
