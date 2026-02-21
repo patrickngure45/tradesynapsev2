@@ -130,10 +130,39 @@ Run a quick end-to-end verification of the Arcade endpoints:
 npm run smoke:arcade
 ```
 
-For production, run it against Railway with a real session cookie (must include `__csrf`):
+For production, run it against your deployed host (e.g. Coinwaka) with a real session cookie (must include `__csrf`):
 
 ```bash
 BASE=https://your-app.up.railway.app COOKIE='...; __csrf=...; ...' npm run smoke:arcade
+```
+
+Alternative auth (sometimes easier to paste):
+
+```bash
+BASE=https://coinwaka.com PP_SESSION='...' CSRF='...' npm run smoke:arcade
+```
+
+### Seeding a dedicated test user (recommended)
+
+To fully exercise shard-costing modules (insight packs, creation, mutation, fusion) in a fresh test account, you can seed Arcade inventory directly via helper scripts.
+
+Find user id by email:
+
+```bash
+EMAIL=you@example.com npm run user:find
+```
+
+Grant shards:
+
+```bash
+USER_ID=<uuid> SHARDS=500 npm run arcade:grant-shards -- --apply
+```
+
+Grant a cosmetic (use two distinct cosmetics to enable fusion smoke):
+
+```bash
+USER_ID=<uuid> KIND=cosmetic CODE=test_cosmetic_a RARITY=common QTY=1 npm run arcade:grant-item -- --apply
+USER_ID=<uuid> KIND=cosmetic CODE=test_cosmetic_b RARITY=common QTY=1 npm run arcade:grant-item -- --apply
 ```
 
 ## Deposits (permanent address) + fast settlement
