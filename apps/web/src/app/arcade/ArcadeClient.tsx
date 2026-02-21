@@ -215,6 +215,27 @@ export function ArcadeClient() {
   const [wheelError, setWheelError] = useState<string | null>(null);
   const [wheelLast, setWheelLast] = useState<any | null>(null);
 
+  const [createProfile, setCreateProfile] = useState<"low" | "medium" | "high">("low");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createActions, setCreateActions] = useState<ArcadeActionRow[]>([]);
+  const [createRevealLoadingId, setCreateRevealLoadingId] = useState<string | null>(null);
+  const [createRevealError, setCreateRevealError] = useState<string | null>(null);
+  const [createLastReveal, setCreateLastReveal] = useState<any | null>(null);
+
+  const [mutationProfile, setMutationProfile] = useState<"low" | "medium" | "high">("low");
+  const [mutationKey, setMutationKey] = useState<string>("");
+  const [mutationLoading, setMutationLoading] = useState(false);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [mutationLast, setMutationLast] = useState<any | null>(null);
+
+  const [fusionProfile, setFusionProfile] = useState<"low" | "medium" | "high">("low");
+  const [fusionKeyA, setFusionKeyA] = useState<string>("");
+  const [fusionKeyB, setFusionKeyB] = useState<string>("");
+  const [fusionLoading, setFusionLoading] = useState(false);
+  const [fusionError, setFusionError] = useState<string | null>(null);
+  const [fusionLast, setFusionLast] = useState<any | null>(null);
+
   const [streakProfile, setStreakProfile] = useState<"low" | "medium" | "high">("low");
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState<string | null>(null);
@@ -262,6 +283,25 @@ export function ArcadeClient() {
     return Number(row?.quantity ?? 0) || 0;
   }, [invItems]);
 
+  const cosmeticItems = useMemo(() => {
+    return invItems.filter((i) => i.kind === "cosmetic");
+  }, [invItems]);
+
+  useEffect(() => {
+    if (!mutationKey && cosmeticItems.length > 0) {
+      const first = cosmeticItems[0]!;
+      setMutationKey(`${first.kind}::${first.code}::${first.rarity}`);
+    }
+    if (!fusionKeyA && cosmeticItems.length > 0) {
+      const first = cosmeticItems[0]!;
+      setFusionKeyA(`${first.kind}::${first.code}::${first.rarity}`);
+    }
+    if (!fusionKeyB && cosmeticItems.length > 1) {
+      const second = cosmeticItems[1]!;
+      setFusionKeyB(`${second.kind}::${second.code}::${second.rarity}`);
+    }
+  }, [cosmeticItems, mutationKey, fusionKeyA, fusionKeyB]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -295,8 +335,26 @@ export function ArcadeClient() {
     }
   }
 
+  async function refreshCreationActions() {
+    try {
+      const res = await fetchJsonOrThrow<{ ok: true; actions: ArcadeActionRow[] }>(
+        "/api/arcade/actions?module=blind_creation&limit=20",
+        {
+          cache: "no-store",
+        },
+      );
+      setCreateActions(res.actions ?? []);
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     void refreshVaultActions();
+  }, []);
+
+  useEffect(() => {
+    void refreshCreationActions();
   }, []);
 
   async function refreshCalendarStatus() {
@@ -752,6 +810,168 @@ export function ArcadeClient() {
     }
   }
 
+  async function createBlindCreation() {
+    setCreateError(null);
+    setCreateLastReveal(null);
+    setCreateLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const created = await fetchJsonOrThrow<{
+        ok: true;
+        action_id: string;
+        module: string;
+        profile: "low" | "medium" | "high";
+        resolves_at: string;
+        server_commit_hash: string;
+      }>("/api/arcade/creation/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: createProfile, client_commit_hash: clientCommit }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${created.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      await Promise.all([refreshCreationActions(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setCreateError(e.code);
+      else setCreateError("Network error");
+    } finally {
+      setCreateLoading(false);
+    }
+  }
+
+  async function revealBlindCreation(actionId: string) {
+    setCreateRevealError(null);
+    setCreateLastReveal(null);
+    setCreateRevealLoadingId(actionId);
+
+    try {
+      let seed: string | null = null;
+      try {
+        seed = localStorage.getItem(`arcade_seed:${actionId}`);
+      } catch {
+        seed = null;
+      }
+      if (!seed) {
+        setCreateRevealError("missing_client_seed");
+        return;
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/creation/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: actionId, client_seed: seed }),
+      });
+
+      setCreateLastReveal(reveal.result);
+      await Promise.all([refreshCreationActions(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setCreateRevealError(e.code);
+      else setCreateRevealError("Network error");
+    } finally {
+      setCreateRevealLoadingId(null);
+    }
+  }
+
+  async function runMutation() {
+    if (!mutationKey) return;
+    const [kind, code, rarity] = mutationKey.split("::");
+    if (!kind || !code || !rarity) return;
+
+    setMutationError(null);
+    setMutationLast(null);
+    setMutationLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<CommitResponse>("/api/arcade/mutation/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: mutationProfile, client_commit_hash: clientCommit, item: { kind, code, rarity } }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/mutation/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setMutationLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setMutationError(e.code);
+      else setMutationError("Network error");
+    } finally {
+      setMutationLoading(false);
+    }
+  }
+
+  async function runFusion() {
+    if (!fusionKeyA || !fusionKeyB) return;
+    const [ka, ca, ra] = fusionKeyA.split("::");
+    const [kb, cb, rb] = fusionKeyB.split("::");
+    if (!ka || !ca || !ra || !kb || !cb || !rb) return;
+    if (fusionKeyA === fusionKeyB) {
+      setFusionError("must_choose_two_distinct_items");
+      return;
+    }
+
+    setFusionError(null);
+    setFusionLast(null);
+    setFusionLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<CommitResponse>("/api/arcade/fusion/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profile: fusionProfile,
+          client_commit_hash: clientCommit,
+          item_a: { kind: ka, code: ca, rarity: ra },
+          item_b: { kind: kb, code: cb, rarity: rb },
+        }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/fusion/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setFusionLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setFusionError(e.code);
+      else setFusionError("Network error");
+    } finally {
+      setFusionLoading(false);
+    }
+  }
+
   async function claimStreakProtector() {
     setStreakError(null);
     setStreakLast(null);
@@ -887,6 +1107,313 @@ export function ArcadeClient() {
           {progError ? (
             <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
               Error: <span className="font-semibold">{progError}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 25%, var(--ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blind creation</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Forge now · reveal later</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Costs 25 shards now · reveals ~30 minutes later · commit→reveal proof</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={createProfile}
+                  onChange={(e) => setCreateProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Blind creation volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={createBlindCreation}
+                disabled={createLoading || invLoading || invShards < 25}
+              >
+                {createLoading ? "Forging…" : "Forge"}
+              </button>
+            </div>
+          </div>
+
+          {createError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{createError}</span>
+            </div>
+          )}
+
+          {createRevealError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Reveal error: <span className="font-semibold">{createRevealError}</span>
+            </div>
+          )}
+
+          {createActions.length > 0 ? (
+            <div className="mt-5 grid gap-3">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Recent forges</div>
+                <div className="mt-3 grid gap-2">
+                  {createActions.slice(0, 8).map((a) => {
+                    const canReveal = a.status === "ready";
+                    const outcomeLabel = a.outcome_json?.outcome?.label ?? null;
+                    return (
+                      <div key={a.id} className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-[var(--foreground)]">{a.id.slice(0, 8)}…</span>
+                            <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{a.status}</span>
+                          </div>
+                          {a.resolves_at ? (
+                            <div className="mt-1 text-xs text-[var(--muted)]">Resolves at: <span className="font-mono">{String(a.resolves_at)}</span></div>
+                          ) : null}
+                          {outcomeLabel ? (
+                            <div className="mt-1 text-xs text-[var(--muted)]">Outcome: <span className="font-semibold text-[var(--foreground)]">{outcomeLabel}</span></div>
+                          ) : null}
+                        </div>
+
+                        <div className="shrink-0">
+                          {a.status === "resolved" ? (
+                            <span className="text-xs font-semibold text-[var(--muted)]">Revealed</span>
+                          ) : (
+                            <button
+                              className={buttonClassName({ variant: "secondary", size: "sm" })}
+                              onClick={() => revealBlindCreation(a.id)}
+                              disabled={!canReveal || createRevealLoadingId === a.id}
+                            >
+                              {createRevealLoadingId === a.id ? "Revealing…" : canReveal ? "Reveal" : "Not ready"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {createLastReveal?.outcome ? (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Latest reveal</div>
+                  <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{createLastReveal.outcome.label}</div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {createLastReveal.outcome.rarity}</div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 14% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 90% 72%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Mutation</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Transform one cosmetic</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Costs 15 shards · commit→reveal proof · bounded upgrade chance</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Item</span>
+                <select
+                  value={mutationKey}
+                  onChange={(e) => setMutationKey(e.target.value)}
+                  className="max-w-[260px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Mutation item"
+                >
+                  {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
+                  {cosmeticItems.map((i) => (
+                    <option key={`${i.kind}::${i.code}::${i.rarity}`} value={`${i.kind}::${i.code}::${i.rarity}`}>
+                      {(i.metadata_json?.label ?? i.code) + ` (${i.rarity}) x${i.quantity}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={mutationProfile}
+                  onChange={(e) => setMutationProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Mutation volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={runMutation}
+                disabled={mutationLoading || invLoading || invShards < 15 || cosmeticItems.length === 0 || !mutationKey}
+              >
+                {mutationLoading ? "Mutating…" : "Mutate"}
+              </button>
+            </div>
+          </div>
+
+          {mutationError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{mutationError}</span>
+            </div>
+          )}
+
+          {mutationLast?.outcome ? (
+            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{mutationLast.outcome.label}</div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {mutationLast.outcome.rarity}</div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 18% 28%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 78%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Fusion</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Combine two cosmetics</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Costs 25 shards · commit→reveal proof · bounded upgrade chance</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">A</span>
+                <select
+                  value={fusionKeyA}
+                  onChange={(e) => setFusionKeyA(e.target.value)}
+                  className="max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Fusion item A"
+                >
+                  {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
+                  {cosmeticItems.map((i) => (
+                    <option key={`a:${i.kind}::${i.code}::${i.rarity}`} value={`${i.kind}::${i.code}::${i.rarity}`}>
+                      {(i.metadata_json?.label ?? i.code) + ` (${i.rarity})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">B</span>
+                <select
+                  value={fusionKeyB}
+                  onChange={(e) => setFusionKeyB(e.target.value)}
+                  className="max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Fusion item B"
+                >
+                  {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
+                  {cosmeticItems.map((i) => (
+                    <option key={`b:${i.kind}::${i.code}::${i.rarity}`} value={`${i.kind}::${i.code}::${i.rarity}`}>
+                      {(i.metadata_json?.label ?? i.code) + ` (${i.rarity})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={fusionProfile}
+                  onChange={(e) => setFusionProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Fusion volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={runFusion}
+                disabled={fusionLoading || invLoading || invShards < 25 || cosmeticItems.length < 2 || !fusionKeyA || !fusionKeyB}
+              >
+                {fusionLoading ? "Fusing…" : "Fuse"}
+              </button>
+            </div>
+          </div>
+
+          {fusionError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{fusionError}</span>
+            </div>
+          )}
+
+          {fusionLast?.outcome ? (
+            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{fusionLast.outcome.label}</div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {fusionLast.outcome.rarity}</div>
             </div>
           ) : null}
         </div>

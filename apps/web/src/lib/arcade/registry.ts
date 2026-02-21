@@ -1,5 +1,8 @@
 export type ArcadeModuleKey =
   | "crafting"
+  | "blind_creation"
+  | "mutation"
+  | "fusion"
   | "boost_draft"
   | "daily_drop"
   | "calendar_daily"
@@ -20,6 +23,9 @@ export type ArcadeModuleMeta = {
 export const ARCADE_MODULES: ArcadeModuleMeta[] = [
   { key: "progression", label: "Progression", volatility: false, fairness: false, description: "XP, tiers, prestige, and cosmetics." },
   { key: "crafting", label: "Crafting", volatility: false, fairness: false, description: "Deterministic shards and recipes." },
+  { key: "blind_creation", label: "Blind creation", volatility: true, fairness: true, description: "Spend shards to forge now, reveal later." },
+  { key: "mutation", label: "Mutation", volatility: true, fairness: true, description: "Transform a cosmetic into a new one (may upgrade)." },
+  { key: "fusion", label: "Fusion", volatility: true, fairness: true, description: "Combine two cosmetics into one (bounded upgrade chance)." },
   { key: "flash_mission", label: "Flash missions", volatility: true, fairness: true, description: "Complete real actions and claim bounded rewards." },
   { key: "streak_protector", label: "Streak protector", volatility: true, fairness: true, description: "Weekly roll that can save a missed day." },
   { key: "daily_drop", label: "Daily drop", volatility: true, fairness: true, description: "One per day badge claim." },
