@@ -28,10 +28,22 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const execute = (url.searchParams.get("execute") ?? "").trim() === "1";
   const gasTopups = (url.searchParams.get("gas_topups") ?? "").trim() === "1";
+  const tokensParam = (url.searchParams.get("tokens") ?? "").trim();
+  const scanTokens = tokensParam === "" ? true : !(tokensParam === "0" || tokensParam.toLowerCase() === "false");
   const tokenSymbolsRaw = (url.searchParams.get("symbols") ?? "").trim();
-  const tokenSymbols = tokenSymbolsRaw
-    ? tokenSymbolsRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
-    : undefined;
+
+  // Production safety: sweeping tokens across all enabled assets can be very expensive.
+  // Default to a small allowlist unless explicitly overridden via symbols=...
+  const defaultSymbols = String(process.env.SWEEP_DEFAULT_SYMBOLS ?? "USDT,USDC,WBNB")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+  const tokenSymbols = !scanTokens
+    ? ([] as string[])
+    : tokenSymbolsRaw
+      ? tokenSymbolsRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+      : defaultSymbols;
 
   try {
     const result = await sweepBscDeposits(sql as any, {

@@ -61,6 +61,11 @@ function envNum(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function clampInt(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
 async function ensureSystemUser(sql: Sql, userId: string): Promise<void> {
   await sql`
     INSERT INTO app_user (id, status, kyc_level, country)
@@ -161,7 +166,12 @@ async function buildTokenList(
   defaultMinSweep: number,
   opts?: { tokenSymbols?: string[] },
 ): Promise<SweepToken[]> {
-  const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+  // If the caller provided an explicit empty list, treat it as "sweep no tokens".
+  if (opts?.tokenSymbols && opts.tokenSymbols.length === 0) return [];
+
+  const tokenSymbols = (opts?.tokenSymbols ?? [])
+    .map((s) => String(s || "").trim().toUpperCase())
+    .filter(Boolean);
   const dbAssets = await sql<
     {
       symbol: string;
@@ -267,7 +277,10 @@ export async function sweepBscDeposits(
   const minBnbWei = ethers.parseEther(MIN_BNB);
 
   const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
-  const tokens = await buildTokenList(sql, DEFAULT_MIN_SWEEP, { tokenSymbols });
+  const tokensAll = await buildTokenList(sql, DEFAULT_MIN_SWEEP, { tokenSymbols: opts?.tokenSymbols ?? tokenSymbols });
+
+  const maxTokens = clampInt(envNum("SWEEP_MAX_TOKENS", 10), 0, 50);
+  const tokens = maxTokens === 0 ? [] : tokensAll.slice(0, maxTokens);
 
   console.log("--- DEPOSIT SWEEPER ---");
   console.log(`Mode: ${EXECUTE ? "EXECUTE" : "PLAN ONLY"}`);
@@ -279,13 +292,22 @@ export async function sweepBscDeposits(
   console.log(`Gas price: ${ethers.formatUnits(gasPrice, "gwei")} gwei`);
   console.log(`Token gas cost: ${ethers.formatEther(tokenGasCost)} BNB per token transfer`);
   console.log(`Native gas cost: ${ethers.formatEther(nativeGasCost)} BNB`);
-  console.log(`Tokens tracked: ${tokens.map((t) => t.symbol).join(", ")} (${tokens.length} total)`);
 
+  if (tokens.length === 0) {
+    console.log("Tokens tracked: (none)");
+  } else {
+    const sample = tokens.slice(0, 20).map((t) => t.symbol).join(", ");
+    const suffix = tokens.length > 20 ? ` …(+${tokens.length - 20})` : "";
+    console.log(`Tokens tracked: ${sample}${suffix} (${tokens.length} total)`);
+  }
+
+  const maxDeposits = clampInt(envNum("SWEEP_MAX_DEPOSITS_PER_RUN", 200), 1, 5000);
   const deposits = await sql<DepositRow[]>`
     SELECT address, derivation_index
     FROM ex_deposit_address
     WHERE chain = 'bsc' OR chain = 'BSC'
     ORDER BY derivation_index ASC
+    LIMIT ${maxDeposits}
   `;
 
   if (deposits.length === 0) {
