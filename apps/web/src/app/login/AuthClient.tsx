@@ -18,7 +18,7 @@ export function AuthClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("next") || "/exchange";
+  const redirectTo = searchParams.get("next") || "/wallet";
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

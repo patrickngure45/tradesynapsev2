@@ -102,10 +102,10 @@ export function VerifyEmailClient() {
       </p>
       <div className="mt-6 flex justify-center gap-3">
         <Link
-          href="/exchange"
+          href="/wallet"
           className="rounded-lg bg-[var(--accent)] px-5 py-2 text-xs font-medium text-white transition hover:brightness-110"
         >
-          Start Trading
+          Open Wallet
         </Link>
         <Link
           href="/account"
