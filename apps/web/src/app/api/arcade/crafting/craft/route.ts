@@ -6,6 +6,7 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { findRecipe, SHARD_ITEM } from "@/lib/arcade/crafting";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
+import { enforceArcadeSafety } from "@/lib/arcade/safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,11 @@ export async function POST(request: Request) {
     const out = await retryOnceOnTransientDbError(async () => {
       return await sql.begin(async (tx) => {
         const txSql = tx as unknown as typeof sql;
+
+        const safe = await enforceArcadeSafety(txSql as any, { userId: actingUserId, module: "crafting", shardSpend: recipe.cost_shards });
+        if (!safe.ok) {
+          return { kind: "err" as const, err: apiError(safe.error, { details: safe.details }) };
+        }
 
         const shardRows = await txSql<{ id: string; quantity: number }[]>`
           SELECT id::text AS id, quantity

@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, randomSeedB64, sha256Hex } from "@/lib/uncertainty/hash";
+import { enforceArcadeSafety } from "@/lib/arcade/safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +50,9 @@ export async function POST(request: Request) {
       return await sql.begin(async (tx) => {
         const txSql = tx as unknown as typeof sql;
 
+        const safe = await enforceArcadeSafety(txSql as any, { userId: actingUserId, module: moduleKey });
+        if (!safe.ok) return { kind: "err" as const, err: apiError(safe.error, { details: safe.details }) };
+
         const [action] = await txSql<{ id: string; requested_at: string }[]>`
           INSERT INTO arcade_action (
             user_id,
@@ -79,11 +83,13 @@ export async function POST(request: Request) {
           VALUES (${actingUserId}::uuid, ${moduleKey}, ${claimDateIso}::date, ${action!.id}::uuid)
         `;
 
-        return { action_id: action!.id, requested_at: action!.requested_at };
+        return { kind: "ok" as const, action_id: action!.id, requested_at: action!.requested_at };
       });
     });
 
-    return Response.json({ ok: true, action_id: row.action_id, module: moduleKey, profile, server_commit_hash: serverCommit }, { status: 200 });
+    if ((row as any).kind === "err") return (row as any).err;
+
+    return Response.json({ ok: true, action_id: (row as any).action_id, module: moduleKey, profile, server_commit_hash: serverCommit }, { status: 200 });
   } catch (e) {
     const dep = responseForDbError("arcade_draft_commit", e);
     if (dep) return dep;

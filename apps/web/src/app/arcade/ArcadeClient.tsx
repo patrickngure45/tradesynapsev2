@@ -127,6 +127,15 @@ type ProgressionResponse = {
   progression: { xp: number; tier: number; prestige: number; next_tier_xp: number | null };
 };
 
+type SafetyResponse = {
+  ok: true;
+  limits: {
+    self_excluded_until: string | null;
+    daily_action_limit: number | null;
+    daily_shard_spend_limit: number | null;
+  };
+};
+
 type RevealResponse = {
   ok: true;
   action_id: string;
@@ -222,6 +231,13 @@ export function ArcadeClient() {
   const [progError, setProgError] = useState<string | null>(null);
   const [progression, setProgression] = useState<ProgressionResponse["progression"] | null>(null);
   const [prestigeLoading, setPrestigeLoading] = useState(false);
+
+  const [safetyLoading, setSafetyLoading] = useState(false);
+  const [safetyError, setSafetyError] = useState<string | null>(null);
+  const [safety, setSafety] = useState<SafetyResponse["limits"] | null>(null);
+  const [selfExcludeHours, setSelfExcludeHours] = useState<number>(0);
+  const [dailyActionLimit, setDailyActionLimit] = useState<string>("");
+  const [dailyShardSpendLimit, setDailyShardSpendLimit] = useState<string>("");
 
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
@@ -320,6 +336,53 @@ export function ArcadeClient() {
     }
   }
 
+  async function refreshSafety() {
+    setSafetyError(null);
+    setSafetyLoading(true);
+    try {
+      const res = await fetchJsonOrThrow<SafetyResponse>("/api/arcade/safety", { cache: "no-store" });
+      setSafety(res.limits);
+      setDailyActionLimit(
+        typeof res.limits.daily_action_limit === "number" ? String(res.limits.daily_action_limit) : "",
+      );
+      setDailyShardSpendLimit(
+        typeof res.limits.daily_shard_spend_limit === "number" ? String(res.limits.daily_shard_spend_limit) : "",
+      );
+    } catch (e) {
+      if (e instanceof ApiError) setSafetyError(e.code);
+      else setSafetyError("Network error");
+    } finally {
+      setSafetyLoading(false);
+    }
+  }
+
+  async function saveSafety() {
+    setSafetyError(null);
+    setSafetyLoading(true);
+    try {
+      const nAction = dailyActionLimit.trim() ? Number(dailyActionLimit.trim()) : null;
+      const nShard = dailyShardSpendLimit.trim() ? Number(dailyShardSpendLimit.trim()) : null;
+
+      const res = await fetchJsonOrThrow<SafetyResponse>("/api/arcade/safety", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          self_exclude_hours: Number(selfExcludeHours || 0),
+          daily_action_limit: Number.isFinite(nAction as any) ? nAction : null,
+          daily_shard_spend_limit: Number.isFinite(nShard as any) ? nShard : null,
+        }),
+      });
+
+      setSafety(res.limits);
+      setSelfExcludeHours(0);
+    } catch (e) {
+      if (e instanceof ApiError) setSafetyError(e.code);
+      else setSafetyError("Network error");
+    } finally {
+      setSafetyLoading(false);
+    }
+  }
+
   async function doPrestigeReset() {
     setProgError(null);
     setPrestigeLoading(true);
@@ -348,6 +411,10 @@ export function ArcadeClient() {
 
   useEffect(() => {
     void refreshProgression();
+  }, []);
+
+  useEffect(() => {
+    void refreshSafety();
   }, []);
 
   async function refreshInventory() {
@@ -1774,6 +1841,91 @@ export function ArcadeClient() {
           <a href="/arcade/transparency" className="text-xs font-semibold text-[var(--accent)] hover:underline">
             View transparency dashboard →
           </a>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Safety & export</div>
+            <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">Control your arcade usage</div>
+            <div className="mt-1 text-xs text-[var(--muted)]">Self-exclusion and daily limits are enforced server-side.</div>
+          </div>
+          <a
+            className={buttonClassName({ variant: "secondary", size: "xs" })}
+            href="/api/arcade/export"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Download export
+          </a>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Self-exclusion</div>
+            <div className="mt-2 text-xs text-[var(--muted)]">
+              Current: <span className="font-mono text-[var(--foreground)]">{safety?.self_excluded_until ?? "off"}</span>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+                type="number"
+                min={0}
+                max={24 * 365}
+                value={selfExcludeHours}
+                onChange={(e) => setSelfExcludeHours(Math.max(0, Math.floor(Number(e.target.value || 0))))}
+              />
+              <span className="text-xs text-[var(--muted)]">hours</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Daily actions</div>
+            <div className="mt-2 text-xs text-[var(--muted)]">0 or blank disables.</div>
+            <input
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+              inputMode="numeric"
+              value={dailyActionLimit}
+              onChange={(e) => setDailyActionLimit(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="e.g. 50"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Daily shard spend</div>
+            <div className="mt-2 text-xs text-[var(--muted)]">0 or blank disables.</div>
+            <input
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+              inputMode="numeric"
+              value={dailyShardSpendLimit}
+              onChange={(e) => setDailyShardSpendLimit(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="e.g. 500"
+            />
+          </div>
+        </div>
+
+        {safetyError ? (
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            Error: <span className="font-semibold">{safetyError}</span>
+          </div>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            className={buttonClassName({ variant: "ghost", size: "xs" })}
+            onClick={refreshSafety}
+            disabled={safetyLoading}
+          >
+            {safetyLoading ? "…" : "Reload"}
+          </button>
+          <button
+            className={buttonClassName({ variant: "primary", size: "xs" })}
+            onClick={saveSafety}
+            disabled={safetyLoading}
+          >
+            {safetyLoading ? "Saving…" : "Save"}
+          </button>
         </div>
       </section>
     </div>

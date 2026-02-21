@@ -8,6 +8,7 @@ import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
 import { resolveRarityWheel } from "@/lib/arcade/rarityWheel";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
 import { addArcadeXp } from "@/lib/arcade/progression";
+import { enforceArcadeSafety } from "@/lib/arcade/safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,11 @@ export async function POST(request: Request) {
     const out = await retryOnceOnTransientDbError(async () => {
       return await sql.begin(async (tx) => {
         const txSql = tx as unknown as typeof sql;
+
+        const safe = await enforceArcadeSafety(txSql as any, { userId: actingUserId, module: MODULE_KEY, shardSpend: SPIN_COST_SHARDS });
+        if (!safe.ok) {
+          return { kind: "err" as const, err: apiError(safe.error, { details: safe.details }) };
+        }
 
         const actions = await txSql<
           {

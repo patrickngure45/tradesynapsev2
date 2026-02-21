@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, randomSeedB64, sha256Hex } from "@/lib/uncertainty/hash";
+import { enforceArcadeSafety } from "@/lib/arcade/safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +45,9 @@ export async function POST(request: Request) {
       return await sql.begin(async (tx) => {
         const txSql = tx as unknown as typeof sql;
 
+        const safe = await enforceArcadeSafety(txSql as any, { userId: actingUserId, module: MODULE_KEY });
+        if (!safe.ok) return { kind: "deny" as const, err: apiError(safe.error, { details: safe.details }) };
+
         // Simple anti-spam: max 5 commits in the last 60s.
         const [lim] = await txSql<{ c: string }[]>`
           SELECT count(*)::text AS c
@@ -82,6 +86,7 @@ export async function POST(request: Request) {
       });
     });
 
+    if ((row as any).kind === "deny") return (row as any).err;
     if ((row as any).kind === "err") return apiError("rate_limit_exceeded", { details: "Too many spins. Please wait a moment." });
 
     return Response.json(

@@ -6,6 +6,7 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, randomSeedB64, sha256Hex } from "@/lib/uncertainty/hash";
 import { pickDailyMissions } from "@/lib/arcade/missions";
+import { enforceArcadeSafety } from "@/lib/arcade/safety";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +57,9 @@ export async function POST(request: Request) {
     const row = await retryOnceOnTransientDbError(async () => {
       return await sql.begin(async (tx) => {
         const txSql = tx as unknown as typeof sql;
+
+        const safe = await enforceArcadeSafety(txSql as any, { userId: actingUserId, module: MODULE_KEY });
+        if (!safe.ok) return { kind: "err" as const, err: apiError(safe.error, { details: safe.details }) };
 
         // Verify completion today.
         const since = `${todayIso}T00:00:00.000Z`;
