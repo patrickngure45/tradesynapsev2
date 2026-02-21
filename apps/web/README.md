@@ -52,13 +52,25 @@ npm run db:migrate
 4. Start the dev server:
 
 ```bash
-npm run dev
+npm run dev:server
 ```
 
-Or start the dev server + the deposit watcher together:
+`dev:server` runs the repo's custom server (`server.ts`) which keeps HTTP + `/ws` on the same port and is the most reliable way to run local `/api/*` routes in this codebase.
+
+Or start Next's built-in dev server + the deposit watcher together:
 
 ```bash
 npm run dev:all
+```
+
+If you prefer the custom server + deposit watcher, run these in two terminals instead:
+
+```bash
+npm run dev:server
+```
+
+```bash
+npm run deposit:watch:bsc
 ```
 
 Open `http://localhost:3000`.
