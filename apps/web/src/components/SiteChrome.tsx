@@ -38,6 +38,12 @@ const products = [
 
 const tools: Array<{ href: string; label: string }> = [];
 
+const quickActions = [
+  { href: "/wallet", label: "Deposit" },
+  { href: "/wallet/withdraw", label: "Withdraw" },
+  { href: "/terminal", label: "Trade" },
+] as const;
+
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -119,6 +125,24 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     );
   };
 
+  const ActionLink = ({ href, label }: { href: string; label: string }) => {
+    const active = pathname === href || (href !== "/" && pathname?.startsWith(href + "/"));
+    return (
+      <Link
+        href={href}
+        onClick={() => setMobileOpen(false)}
+        className={
+          "inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs font-extrabold tracking-tight transition " +
+          (active
+            ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--card))] text-[var(--foreground)]"
+            : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]")
+        }
+      >
+        {label}
+      </Link>
+    );
+  };
+
   return (
     <div className="flex min-h-screen flex-col font-sans text-[var(--foreground)]">
       <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
@@ -151,6 +175,15 @@ export function SiteChrome({ children }: { children: ReactNode }) {
               <NLink key={p.href} {...p} />
             ))}
           </nav>
+
+          {/* Desktop Quick Actions */}
+          <div className="hidden md:flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-1">
+              {quickActions.map((a) => (
+                <ActionLink key={a.href} href={a.href} label={a.label} />
+              ))}
+            </div>
+          </div>
 
           {/* Desktop User Nav */}
           <nav className="hidden shrink-0 ml-auto items-center gap-2 md:flex lg:gap-3">
@@ -260,6 +293,14 @@ export function SiteChrome({ children }: { children: ReactNode }) {
         {/* Mobile Drawer */}
         {mobileOpen && (
           <div className="border-t border-[var(--border)] bg-[var(--background)] px-6 py-4 md:hidden animate-in slide-in-from-top-2">
+              <div className="mb-4">
+                <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Quick actions</div>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {quickActions.map((a) => (
+                    <ActionLink key={a.href} href={a.href} label={a.label} />
+                  ))}
+                </div>
+              </div>
             <nav className="grid gap-4 text-base">
               <div className="font-semibold text-[var(--muted)] text-xs uppercase tracking-wider">Core</div>
               {products.map((p) => (
