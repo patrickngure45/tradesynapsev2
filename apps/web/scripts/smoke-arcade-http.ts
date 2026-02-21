@@ -22,6 +22,13 @@ Usage examples:
 
 Optional:
   CRON_SECRET=...  (used to call /api/arcade/cron/resolve-ready during the run)
+
+Creation reveal waiting (optional):
+  - By default, blind creation is scheduled (~30 min) and the smoke test will NOT wait.
+  - To wait until resolves_at and attempt reveal in the same run:
+      WAIT_CREATION=1 npm run smoke:arcade
+    or:
+      npm run smoke:arcade -- --wait-creation
 */
 
 import { webcrypto } from "node:crypto";
@@ -203,6 +210,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, Math.max(0, Math.floor(ms))));
 }
 
+function hasArg(name: string): boolean {
+  return process.argv.includes(name);
+}
+
+function wantWaitCreation(): boolean {
+  const env = (process.env.WAIT_CREATION ?? "").trim();
+  if (env === "1" || env.toLowerCase() === "true") return true;
+  return hasArg("--wait-creation");
+}
+
 async function main() {
   const auth = buildAuthHeaders();
   const cronSecret = optEnv("CRON_SECRET") ?? optEnv("EXCHANGE_CRON_SECRET") ?? null;
@@ -345,9 +362,25 @@ async function main() {
       const actionId = String(created.json.action_id);
       console.log(`[creation] created action=${actionId.slice(0, 8)}… resolves_at=${created.json?.resolves_at ?? "?"}`);
 
+      const resolvesAt = typeof created.json?.resolves_at === "string" ? created.json.resolves_at : null;
+      const resolvesAtMs = resolvesAt ? Date.parse(resolvesAt) : NaN;
+
       if (cronSecret) {
         const cron = await fetchJson(`/api/arcade/cron/resolve-ready?secret=${encodeURIComponent(cronSecret)}`, { method: "GET" });
         console.log(`[creation] cron resolve-ready status=${cron.status}`);
+      }
+
+      if (wantWaitCreation() && Number.isFinite(resolvesAtMs)) {
+        const now = Date.now();
+        const waitMs = resolvesAtMs - now + 2_000; // small skew buffer
+        if (waitMs > 0) {
+          const mins = Math.ceil(waitMs / 60_000);
+          console.log(`[creation] waiting ~${mins} min until resolves_at...`);
+          await sleep(waitMs);
+          if (cronSecret) {
+            await fetchJson(`/api/arcade/cron/resolve-ready?secret=${encodeURIComponent(cronSecret)}`, { method: "GET" });
+          }
+        }
       }
 
       // Poll actions until the status changes to ready/resolved (max ~2 min).
