@@ -136,6 +136,16 @@ type SafetyResponse = {
   };
 };
 
+type CommunityStatusResponse = {
+  ok: true;
+  module: string;
+  week_start: string;
+  threshold: number;
+  progress: number;
+  unlocked: boolean;
+  claimed: boolean;
+};
+
 type RevealResponse = {
   ok: true;
   action_id: string;
@@ -235,6 +245,16 @@ export function ArcadeClient() {
   const [fusionLoading, setFusionLoading] = useState(false);
   const [fusionError, setFusionError] = useState<string | null>(null);
   const [fusionLast, setFusionLast] = useState<any | null>(null);
+
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityError, setCommunityError] = useState<string | null>(null);
+  const [communityStatus, setCommunityStatus] = useState<CommunityStatusResponse | null>(null);
+  const [communityClaiming, setCommunityClaiming] = useState(false);
+
+  const [insightProfile, setInsightProfile] = useState<"low" | "medium" | "high">("low");
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insightError, setInsightError] = useState<string | null>(null);
+  const [insightLast, setInsightLast] = useState<any | null>(null);
 
   const [streakProfile, setStreakProfile] = useState<"low" | "medium" | "high">("low");
   const [streakLoading, setStreakLoading] = useState(false);
@@ -414,6 +434,74 @@ export function ArcadeClient() {
     }
   }
 
+  async function refreshCommunity() {
+    setCommunityError(null);
+    setCommunityLoading(true);
+    try {
+      const res = await fetchJsonOrThrow<CommunityStatusResponse>("/api/arcade/community/status", { cache: "no-store" });
+      setCommunityStatus(res);
+    } catch (e) {
+      if (e instanceof ApiError) setCommunityError(e.code);
+      else setCommunityError("Network error");
+    } finally {
+      setCommunityLoading(false);
+    }
+  }
+
+  async function claimCommunity() {
+    setCommunityError(null);
+    setCommunityClaiming(true);
+    try {
+      await fetchJsonOrThrow<{ ok: true }>("/api/arcade/community/claim", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      await Promise.all([refreshCommunity(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setCommunityError(e.code);
+      else setCommunityError("Network error");
+    } finally {
+      setCommunityClaiming(false);
+    }
+  }
+
+  async function openInsightPack() {
+    setInsightError(null);
+    setInsightLast(null);
+    setInsightLoading(true);
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<CommitResponse>("/api/arcade/insight/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: insightProfile, client_commit_hash: clientCommit }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/insight/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setInsightLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setInsightError(e.code);
+      else setInsightError("Network error");
+    } finally {
+      setInsightLoading(false);
+    }
+  }
+
   async function saveSafety() {
     setSafetyError(null);
     setSafetyLoading(true);
@@ -473,6 +561,10 @@ export function ArcadeClient() {
 
   useEffect(() => {
     void refreshSafety();
+  }, []);
+
+  useEffect(() => {
+    void refreshCommunity();
   }, []);
 
   async function refreshInventory() {
@@ -1107,6 +1199,149 @@ export function ArcadeClient() {
           {progError ? (
             <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
               Error: <span className="font-semibold">{progError}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 16% 26%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Community event</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+            <button className={buttonClassName({ variant: "ghost", size: "xs" })} onClick={refreshCommunity} disabled={communityLoading}>
+              {communityLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly unlock</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Global arcade actions unlock a one-time claim for everyone.</div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                Week start: <span className="font-mono">{communityStatus?.week_start ?? "…"}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Progress</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">
+                  {typeof communityStatus?.progress === "number" ? communityStatus.progress : "…"}
+                </span>
+                <span className="text-xs text-[var(--muted)]">/</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">
+                  {typeof communityStatus?.threshold === "number" ? communityStatus.threshold : "…"}
+                </span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={claimCommunity}
+                disabled={communityClaiming || communityLoading || !communityStatus?.unlocked || Boolean(communityStatus?.claimed)}
+              >
+                {communityStatus?.claimed ? "Claimed" : communityClaiming ? "Claiming…" : communityStatus?.unlocked ? "Claim (40 shards)" : "Locked"}
+              </button>
+            </div>
+          </div>
+
+          {communityError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{communityError}</span>
+            </div>
+          )}
+
+          {communityStatus?.unlocked ? (
+            <div className="mt-4 text-xs text-[var(--muted)]">Unlocked: yes · Claim is per-user (tracked in your arcade state).</div>
+          ) : (
+            <div className="mt-4 text-xs text-[var(--muted)]">Unlocked: no · Keep playing any arcade module to advance progress.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 18% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Insight packs</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Open an informational card</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Costs 20 shards · commit→reveal fairness proof · not financial advice</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={insightProfile}
+                  onChange={(e) => setInsightProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Insight pack volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={openInsightPack}
+                disabled={insightLoading || invLoading || invShards < 20}
+              >
+                {insightLoading ? "Opening…" : "Open (20)"}
+              </button>
+            </div>
+          </div>
+
+          {insightError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{insightError}</span>
+            </div>
+          )}
+
+          {insightLast?.outcome ? (
+            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{insightLast.outcome.label}</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{insightLast.outcome.rarity}</div>
+              </div>
+              <div className="mt-2 text-xs text-[var(--muted)]">{insightLast.outcome.metadata?.text ?? ""}</div>
+              <div className="mt-3 text-[11px] text-[var(--muted)]">{insightLast.outcome.metadata?.disclaimer ?? ""}</div>
             </div>
           ) : null}
         </div>
