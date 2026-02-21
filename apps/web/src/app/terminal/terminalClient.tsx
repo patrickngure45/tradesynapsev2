@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { fetchJsonOrThrow } from "@/lib/api/client";
 import { buttonClassName } from "@/components/ui/Button";
-import { createChart, type IChartApi } from "lightweight-charts";
+import { createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
 
 type MarketRow = {
   id: string;
@@ -12,12 +12,36 @@ type MarketRow = {
   symbol: string;
   base_symbol: string;
   quote_symbol: string;
-  last: string | null;
-  change_pct_24h: string | null;
-  volume_quote_24h: string | null;
+  tick_size: string;
+  lot_size: string;
+  maker_fee_bps: number;
+  taker_fee_bps: number;
+  book: { bid: string | null; ask: string | null; mid: string | null };
+  stats: {
+    open: string;
+    last: string;
+    high: string;
+    low: string;
+    volume: string;
+    quote_volume: string;
+    trade_count: number;
+  } | null;
 };
 
 type Candle = { t: string; o: string; h: string; l: string; c: string; v: string };
+
+type DepthLevel = { price: string; quantity: string; order_count: number };
+type TradeRow = { id: string; price: string; quantity: string; created_at: string };
+type OpenOrderRow = {
+  id: string;
+  side: "buy" | "sell";
+  type: "limit" | "market";
+  price: string;
+  quantity: string;
+  remaining_quantity: string;
+  status: string;
+  created_at: string;
+};
 
 type PanelKind = "chart" | "orderbook" | "tape" | "orderEntry" | "openOrders" | "fills" | "watch";
 type SlotId = "A" | "B" | "C" | "D";
@@ -76,6 +100,18 @@ function formatNum(v: string | null): string {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function fmtCompact(v: string, maxFrac = 8): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString(undefined, { maximumFractionDigits: maxFrac });
+}
+
+function cssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
 }
 
 function titleForPanel(kind: PanelKind): string {
@@ -178,6 +214,7 @@ function Slot({
 function ChartPanel({ marketId }: { marketId: string | null }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
   const loadCandles = useCallback(async () => {
     if (!marketId) return;
@@ -187,14 +224,9 @@ function ChartPanel({ marketId }: { marketId: string | null }) {
       withDevUserHeader({ cache: "no-store" }),
     );
     const candles = Array.isArray(data.candles) ? data.candles : [];
-    const series = chartRef.current?.addCandlestickSeries({
-      upColor: "rgba(0, 208, 132, 1)",
-      downColor: "rgba(255, 76, 81, 1)",
-      borderVisible: false,
-      wickUpColor: "rgba(0, 208, 132, 1)",
-      wickDownColor: "rgba(255, 76, 81, 1)",
-    });
+    const series = seriesRef.current;
     if (!series) return;
+
     series.setData(
       candles
         .slice()
@@ -214,12 +246,14 @@ function ChartPanel({ marketId }: { marketId: string | null }) {
 
     const el = ref.current;
     chartRef.current?.remove();
+    chartRef.current = null;
+    seriesRef.current = null;
 
     const chart = createChart(el, {
       autoSize: true,
       layout: {
         background: { color: "transparent" },
-        textColor: "rgba(190, 205, 235, 0.85)",
+        textColor: cssVar("--foreground", "rgba(190, 205, 235, 0.85)"),
       },
       grid: {
         vertLines: { color: "rgba(255,255,255,0.06)" },
@@ -231,12 +265,24 @@ function ChartPanel({ marketId }: { marketId: string | null }) {
     });
 
     chartRef.current = chart;
+
+    const up = cssVar("--up", "#00d084");
+    const down = cssVar("--down", "#ff4c51");
+    seriesRef.current = chart.addCandlestickSeries({
+      upColor: up,
+      downColor: down,
+      borderVisible: false,
+      wickUpColor: up,
+      wickDownColor: down,
+    });
+
     void loadCandles();
     const t = setInterval(loadCandles, 15_000);
     return () => {
       clearInterval(t);
       chart.remove();
       chartRef.current = null;
+      seriesRef.current = null;
     };
   }, [loadCandles]);
 
@@ -248,6 +294,407 @@ function ChartPanel({ marketId }: { marketId: string | null }) {
         </div>
       ) : null}
       <div ref={ref} className="h-[320px] w-full rounded-xl border border-[var(--border)] bg-[var(--bg)]" />
+    </div>
+  );
+}
+
+function OrderbookPanel({ marketId }: { marketId: string | null }) {
+  const [bids, setBids] = useState<DepthLevel[]>([]);
+  const [asks, setAsks] = useState<DepthLevel[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!marketId) return;
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ market_id: marketId, levels: "14" });
+      const data = await fetchJsonOrThrow<{ depth?: { bids?: DepthLevel[]; asks?: DepthLevel[] } }>(
+        `/api/exchange/marketdata/depth?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setBids(Array.isArray(data.depth?.bids) ? (data.depth!.bids as any) : []);
+      setAsks(Array.isArray(data.depth?.asks) ? (data.depth!.asks as any) : []);
+    } catch {
+      setBids([]);
+      setAsks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [marketId]);
+
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (!marketId) return <Placeholder title="Orderbook" hint="Select a market." />;
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+        <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Asks</div>
+        <div className="border-t border-[var(--border)]">
+          {loading && asks.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-[var(--muted)]">Loading…</div>
+          ) : asks.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-[var(--muted)]">No asks</div>
+          ) : (
+            <table className="w-full text-[11px]">
+              <tbody>
+                {asks.slice(0, 14).map((a) => (
+                  <tr key={`a-${a.price}`} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-3 py-1 font-semibold text-[var(--down)]">{fmtCompact(a.price, 8)}</td>
+                    <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(a.quantity, 8)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+        <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Bids</div>
+        <div className="border-t border-[var(--border)]">
+          {loading && bids.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-[var(--muted)]">Loading…</div>
+          ) : bids.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-[var(--muted)]">No bids</div>
+          ) : (
+            <table className="w-full text-[11px]">
+              <tbody>
+                {bids.slice(0, 14).map((b) => (
+                  <tr key={`b-${b.price}`} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-3 py-1 font-semibold text-[var(--up)]">{fmtCompact(b.price, 8)}</td>
+                    <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(b.quantity, 8)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TapePanel({ marketId }: { marketId: string | null }) {
+  const [trades, setTrades] = useState<TradeRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!marketId) return;
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ market_id: marketId, limit: "60" });
+      const data = await fetchJsonOrThrow<{ trades?: any[] }>(
+        `/api/exchange/marketdata/trades?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setTrades(Array.isArray((data as any).trades) ? ((data as any).trades as any[]) : []);
+    } catch {
+      setTrades([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [marketId]);
+
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 2500);
+    return () => clearInterval(t);
+  }, [load]);
+
+  if (!marketId) return <Placeholder title="Tape" hint="Select a market." />;
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Executions</div>
+        <div className="text-[10px] text-[var(--muted)]">{loading ? "sync" : `${trades.length}`}</div>
+      </div>
+      <div className="border-t border-[var(--border)]">
+        {trades.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-[var(--muted)]">No trades</div>
+        ) : (
+          <table className="w-full text-[11px]">
+            <tbody>
+              {trades.slice(0, 60).map((t) => (
+                <tr key={t.id} className="border-b border-[var(--border)] last:border-b-0">
+                  <td className="px-3 py-1 font-semibold text-[var(--foreground)]">{fmtCompact(t.price, 8)}</td>
+                  <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(t.quantity, 8)}</td>
+                  <td className="px-3 py-1 text-right text-[10px] text-[var(--muted)]">
+                    {new Date(t.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OpenOrdersPanel({ marketId }: { marketId: string | null }) {
+  const [orders, setOrders] = useState<OpenOrderRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams();
+      if (marketId) qs.set("market_id", marketId);
+      const data = await fetchJsonOrThrow<{ orders?: any[] }>(
+        `/api/exchange/orders?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setOrders(Array.isArray((data as any).orders) ? ((data as any).orders as any[]) : []);
+    } catch {
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [marketId]);
+
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Open orders</div>
+        <div className="text-[10px] text-[var(--muted)]">{loading ? "sync" : `${orders.length}`}</div>
+      </div>
+      <div className="border-t border-[var(--border)]">
+        {orders.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-[var(--muted)]">No orders</div>
+        ) : (
+          <table className="w-full text-[11px]">
+            <tbody>
+              {orders.slice(0, 20).map((o) => (
+                <tr key={o.id} className="border-b border-[var(--border)] last:border-b-0">
+                  <td className={"px-3 py-1 font-extrabold " + (o.side === "buy" ? "text-[var(--up)]" : "text-[var(--down)]")}>
+                    {o.side.toUpperCase()}
+                  </td>
+                  <td className="px-3 py-1 text-[var(--foreground)]">{o.type === "market" ? "MKT" : fmtCompact(o.price, 8)}</td>
+                  <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(o.remaining_quantity, 8)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FillsPanel({ marketId }: { marketId: string | null }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ status: "all", limit: "40" });
+      if (marketId) qs.set("market_id", marketId);
+      const data = await fetchJsonOrThrow<{ orders?: any[] }>(
+        `/api/exchange/orders/history?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setRows(Array.isArray((data as any).orders) ? ((data as any).orders as any[]) : []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [marketId]);
+
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 6000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Fills</div>
+        <div className="text-[10px] text-[var(--muted)]">{loading ? "sync" : `${rows.length}`}</div>
+      </div>
+      <div className="border-t border-[var(--border)]">
+        {rows.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-[var(--muted)]">No history</div>
+        ) : (
+          <table className="w-full text-[11px]">
+            <tbody>
+              {rows.slice(0, 18).map((o) => {
+                const fills = Array.isArray(o.fills) ? o.fills : [];
+                const lastFill = fills.length > 0 ? fills[fills.length - 1] : null;
+                return (
+                  <tr key={String(o.id)} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className={"px-3 py-1 font-extrabold " + (String(o.side) === "buy" ? "text-[var(--up)]" : "text-[var(--down)]")}>
+                      {String(o.side).toUpperCase()}
+                    </td>
+                    <td className="px-3 py-1 text-[var(--foreground)]">{String(o.type) === "market" ? "MKT" : fmtCompact(String(o.price), 8)}</td>
+                    <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(String(o.quantity), 8)}</td>
+                    <td className="px-3 py-1 text-right text-[10px] text-[var(--muted)]">
+                      {lastFill?.created_at ? new Date(String(lastFill.created_at)).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : ""}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrderEntryPanel({ market }: { market: MarketRow | null }) {
+  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [type, setType] = useState<"limit" | "market">("limit");
+  const [price, setPrice] = useState<string>("");
+  const [qty, setQty] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setErr(null);
+    setPrice("");
+    setQty("");
+  }, [market?.id]);
+
+  const hint = useMemo(() => {
+    if (!market) return "Select a market.";
+    const bid = market.book?.bid ? fmtCompact(market.book.bid, 8) : "—";
+    const ask = market.book?.ask ? fmtCompact(market.book.ask, 8) : "—";
+    return `Bid ${bid} · Ask ${ask} · tick ${market.tick_size} · lot ${market.lot_size}`;
+  }, [market]);
+
+  const submit = async () => {
+    if (!market) return;
+    setErr(null);
+    setSubmitting(true);
+    try {
+      const payload =
+        type === "market"
+          ? { market_id: market.id, side, type: "market", quantity: qty }
+          : { market_id: market.id, side, type: "limit", price, quantity: qty };
+
+      await fetchJsonOrThrow("/api/exchange/orders", withDevUserHeader({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }));
+
+      setQty("");
+    } catch (e: any) {
+      const msg = e?.message ? String(e.message) : "order_failed";
+      setErr(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!market) return <Placeholder title="Order" hint="Select a market." />;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">{hint}</div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setSide("buy")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-extrabold tracking-tight transition " +
+            (side === "buy"
+              ? "border-[var(--up)] bg-[color-mix(in_srgb,var(--up)_12%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Buy
+        </button>
+        <button
+          type="button"
+          onClick={() => setSide("sell")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-extrabold tracking-tight transition " +
+            (side === "sell"
+              ? "border-[var(--down)] bg-[color-mix(in_srgb,var(--down)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Sell
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setType("limit")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "limit"
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Limit
+        </button>
+        <button
+          type="button"
+          onClick={() => setType("market")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "market"
+              ? "border-[var(--accent-2)] bg-[color-mix(in_srgb,var(--accent-2)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Market
+        </button>
+      </div>
+
+      {type === "limit" ? (
+        <input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="Price"
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+        />
+      ) : null}
+
+      <input
+        value={qty}
+        onChange={(e) => setQty(e.target.value)}
+        placeholder="Quantity"
+        className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+      />
+
+      {err ? <div className="text-xs text-[var(--down)]">{err}</div> : null}
+
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting}
+        className={
+          "w-full rounded-xl px-3 py-2 text-xs font-extrabold tracking-tight text-white hover:brightness-110 disabled:opacity-60 " +
+          (side === "buy" ? "bg-[var(--up)]" : "bg-[var(--down)]")
+        }
+      >
+        {submitting ? "Submitting…" : side === "buy" ? "Place Buy" : "Place Sell"}
+      </button>
+
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 text-xs text-[var(--muted)]">
+        Pro order types (Stop, OCO, Trailing) will live here next.
+      </div>
     </div>
   );
 }
@@ -301,11 +748,33 @@ export function TerminalClient() {
       symbol: String(x.symbol ?? ""),
       base_symbol: String(x.base_symbol ?? ""),
       quote_symbol: String(x.quote_symbol ?? ""),
-      last: x.last ?? null,
-      change_pct_24h: x.change_pct_24h ?? null,
-      volume_quote_24h: x.volume_quote_24h ?? null,
+      tick_size: String(x.tick_size ?? "0.00000001"),
+      lot_size: String(x.lot_size ?? "0.00000001"),
+      maker_fee_bps: Number(x.maker_fee_bps ?? 0) || 0,
+      taker_fee_bps: Number(x.taker_fee_bps ?? 0) || 0,
+      book: {
+        bid: x.book?.bid ?? null,
+        ask: x.book?.ask ?? null,
+        mid: x.book?.mid ?? null,
+      },
+      stats: x.stats
+        ? {
+            open: String(x.stats.open ?? "0"),
+            last: String(x.stats.last ?? "0"),
+            high: String(x.stats.high ?? "0"),
+            low: String(x.stats.low ?? "0"),
+            volume: String(x.stats.volume ?? "0"),
+            quote_volume: String(x.stats.quote_volume ?? "0"),
+            trade_count: Number(x.stats.trade_count ?? 0) || 0,
+          }
+        : null,
     }));
-    setMarkets(mapped.filter((r) => r.id && r.symbol));
+    const clean = mapped.filter((r) => r.id && r.symbol);
+    setMarkets(clean);
+
+    if (!selectedMarketId && clean.length > 0) {
+      setSelectedMarketId(clean[0]!.id);
+    }
   }, []);
 
   useEffect(() => {
@@ -356,8 +825,8 @@ export function TerminalClient() {
             <div className="mt-1 flex items-baseline gap-2">
               <div className="text-sm font-extrabold text-[var(--foreground)]">{selected?.symbol ?? "Select market"}</div>
               <div className="text-[11px] text-[var(--muted)]">
-                {selected?.last ? `Last ${formatNum(selected.last)}` : ""}
-                {selected?.change_pct_24h ? ` · 24h ${formatPct(selected.change_pct_24h)}` : ""}
+                {selected?.stats?.last ? `Last ${formatNum(selected.stats.last)}` : ""}
+                {selected?.stats?.quote_volume ? ` · Vol ${formatNum(selected.stats.quote_volume)}` : ""}
               </div>
             </div>
           </div>
@@ -411,7 +880,7 @@ export function TerminalClient() {
               >
                 <div className="text-xs font-extrabold text-[var(--foreground)] truncate">{m.symbol}</div>
                 <div className="mt-0.5 text-[10px] text-[var(--muted)] truncate">
-                  {m.last ? `Last ${formatNum(m.last)}` : "—"} · {m.change_pct_24h ? formatPct(m.change_pct_24h) : "—"}
+                  {m.stats?.last ? `Last ${formatNum(m.stats.last)}` : "—"} · {m.book?.bid ? `B ${fmtCompact(m.book.bid, 6)}` : "B —"} / {m.book?.ask ? `A ${fmtCompact(m.book.ask, 6)}` : "A —"}
                 </div>
               </button>
             ))}
@@ -438,15 +907,15 @@ export function TerminalClient() {
           {layout.slots.A === "chart" ? (
             <ChartPanel marketId={selectedMarketId} />
           ) : layout.slots.A === "orderEntry" ? (
-            <Placeholder title="Order entry" hint="Coming next: limit/market + advanced order types." />
+            <OrderEntryPanel market={selected} />
           ) : layout.slots.A === "orderbook" ? (
-            <Placeholder title="Orderbook" hint="Coming next: depth ladder + imbalance view." />
+            <OrderbookPanel marketId={selectedMarketId} />
           ) : layout.slots.A === "tape" ? (
-            <Placeholder title="Tape" hint="Coming next: executions grouped by burst." />
+            <TapePanel marketId={selectedMarketId} />
           ) : layout.slots.A === "openOrders" ? (
-            <Placeholder title="Open orders" hint="Coming next: cancel + filters." />
+            <OpenOrdersPanel marketId={selectedMarketId} />
           ) : layout.slots.A === "fills" ? (
-            <Placeholder title="Fills" hint="Coming next: slippage + fees per fill." />
+            <FillsPanel marketId={selectedMarketId} />
           ) : (
             <Placeholder title="Watchlist" hint="Use /home to manage your watchlist." />
           )}
@@ -463,15 +932,15 @@ export function TerminalClient() {
           {layout.slots.B === "chart" ? (
             <ChartPanel marketId={selectedMarketId} />
           ) : layout.slots.B === "orderEntry" ? (
-            <Placeholder title="Order entry" hint="Coming next: post-only, tif, and order preview." />
+            <OrderEntryPanel market={selected} />
           ) : layout.slots.B === "orderbook" ? (
-            <Placeholder title="Orderbook" hint="Coming next: depth + ladder." />
+            <OrderbookPanel marketId={selectedMarketId} />
           ) : layout.slots.B === "tape" ? (
-            <Placeholder title="Tape" hint="Coming next: execution bursts." />
+            <TapePanel marketId={selectedMarketId} />
           ) : layout.slots.B === "openOrders" ? (
-            <Placeholder title="Open orders" hint="Coming next: cancel / modify." />
+            <OpenOrdersPanel marketId={selectedMarketId} />
           ) : layout.slots.B === "fills" ? (
-            <Placeholder title="Fills" hint="Coming next: fill explanations." />
+            <FillsPanel marketId={selectedMarketId} />
           ) : (
             <Placeholder title="Watchlist" hint="Use /home to manage your watchlist." />
           )}
@@ -488,15 +957,15 @@ export function TerminalClient() {
           {layout.slots.C === "chart" ? (
             <ChartPanel marketId={selectedMarketId} />
           ) : layout.slots.C === "orderEntry" ? (
-            <Placeholder title="Order entry" hint="Coming next: OCO / stop-limit." />
+            <OrderEntryPanel market={selected} />
           ) : layout.slots.C === "orderbook" ? (
-            <Placeholder title="Orderbook" hint="Coming next: depth ladder." />
+            <OrderbookPanel marketId={selectedMarketId} />
           ) : layout.slots.C === "tape" ? (
-            <Placeholder title="Tape" hint="Coming next: executions." />
+            <TapePanel marketId={selectedMarketId} />
           ) : layout.slots.C === "openOrders" ? (
-            <Placeholder title="Open orders" hint="Coming next: cancel + status." />
+            <OpenOrdersPanel marketId={selectedMarketId} />
           ) : layout.slots.C === "fills" ? (
-            <Placeholder title="Fills" hint="Coming next: fees/slippage." />
+            <FillsPanel marketId={selectedMarketId} />
           ) : (
             <Placeholder title="Watchlist" hint="Use /home to manage your watchlist." />
           )}
@@ -513,15 +982,15 @@ export function TerminalClient() {
           {layout.slots.D === "chart" ? (
             <ChartPanel marketId={selectedMarketId} />
           ) : layout.slots.D === "orderEntry" ? (
-            <Placeholder title="Order entry" hint="Coming next: limit/market." />
+            <OrderEntryPanel market={selected} />
           ) : layout.slots.D === "orderbook" ? (
-            <Placeholder title="Orderbook" hint="Coming next: depth." />
+            <OrderbookPanel marketId={selectedMarketId} />
           ) : layout.slots.D === "tape" ? (
-            <Placeholder title="Tape" hint="Coming next: executions." />
+            <TapePanel marketId={selectedMarketId} />
           ) : layout.slots.D === "openOrders" ? (
-            <Placeholder title="Open orders" hint="Coming next: cancel." />
+            <OpenOrdersPanel marketId={selectedMarketId} />
           ) : layout.slots.D === "fills" ? (
-            <Placeholder title="Fills" hint="Coming next: details." />
+            <FillsPanel marketId={selectedMarketId} />
           ) : (
             <Placeholder title="Watchlist" hint="Use /home to manage your watchlist." />
           )}
