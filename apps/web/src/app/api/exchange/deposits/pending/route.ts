@@ -33,9 +33,6 @@ export async function GET(request: Request) {
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
     if (activeErr) return apiError(activeErr);
 
-    const provider = getBscProvider();
-    const tip = await provider.getBlockNumber();
-
     const rows = await retryOnceOnTransientDbError(async () => {
       return await sql<
         {
@@ -72,9 +69,21 @@ export async function GET(request: Request) {
       `;
     });
 
+    // Best-effort: confirmations are derived from tip. If RPC is flaky, still return
+    // the pending rows so the UI can show the tx hashes and amounts.
+    let tip: number | null = null;
+    let tip_error: string | null = null;
+    try {
+      const provider = getBscProvider();
+      tip = await provider.getBlockNumber();
+    } catch (e) {
+      tip_error = e instanceof Error ? e.message : String(e);
+    }
+
     const deposits = rows.map((r) => {
       const blockNumber = Number(r.block_number);
-      const confirmations = Number.isFinite(blockNumber) && blockNumber > 0 ? Math.max(0, tip - blockNumber + 1) : 0;
+      const confirmations =
+        tip != null && Number.isFinite(blockNumber) && blockNumber > 0 ? Math.max(0, tip - blockNumber + 1) : 0;
       return {
         id: r.id,
         chain: r.chain,
@@ -96,12 +105,20 @@ export async function GET(request: Request) {
       user_id: actingUserId,
       chain: "bsc",
       tip,
+      tip_error,
       confirmations_required: confirmationsRequired,
       deposits,
     });
   } catch (e) {
     const resp = responseForDbError("exchange.deposits.pending", e);
     if (resp) return resp;
-    throw e;
+    const message = e instanceof Error ? e.message : String(e);
+    return Response.json(
+      {
+        error: "internal_error",
+        details: { message },
+      },
+      { status: 500 },
+    );
   }
 }
