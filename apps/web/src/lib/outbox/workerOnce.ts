@@ -17,6 +17,8 @@ import { handleTradingBotExecution } from "@/lib/outbox/handlers/tradingBotExecu
 import { handleTradingBotUnwind } from "@/lib/outbox/handlers/tradingBotUnwind";
 import { handleWithdrawalBroadcast } from "@/lib/outbox/handlers/exchangeWithdrawalBroadcast";
 import { handleWithdrawalRequestedRiskSignal } from "@/lib/outbox/handlers/exchangeWithdrawalRisk";
+import { handleArcadeActionReady } from "@/lib/outbox/handlers/arcadeActionReady";
+import { handleArcadeActionHintReady } from "@/lib/outbox/handlers/arcadeActionHintReady";
 
 function getPayload(ev: OutboxRow): Record<string, unknown> {
   if (ev.payload_json && typeof ev.payload_json === "object" && !Array.isArray(ev.payload_json)) {
@@ -34,6 +36,24 @@ async function dispatch(sql: Sql, ev: OutboxRow): Promise<void> {
   const payload = getPayload(ev);
 
   switch (ev.topic) {
+    case "arcade.action.hint_ready": {
+      const userId = String(payload.user_id ?? payload.userId ?? "");
+      const actionId = String(payload.action_id ?? payload.actionId ?? "");
+      const module = String(payload.module ?? "");
+      if (!userId || !actionId) return;
+      await handleArcadeActionHintReady(sql as any, { userId, actionId, module });
+      return;
+    }
+
+    case "arcade.action.ready": {
+      const userId = String(payload.user_id ?? payload.userId ?? "");
+      const actionId = String(payload.action_id ?? payload.actionId ?? "");
+      const module = String(payload.module ?? "");
+      if (!userId || !actionId) return;
+      await handleArcadeActionReady(sql as any, { userId, actionId, module });
+      return;
+    }
+
     case "ex.withdrawal.requested": {
       const withdrawalId = String(payload.withdrawal_id ?? "");
       if (!withdrawalId) return;
