@@ -4,7 +4,7 @@
  */
 
 import { cmp3818, fromBigInt3818, toBigInt3818 } from "@/lib/exchange/fixed3818";
-import type { MarketStats, TopLevel } from "@/app/exchange/types";
+import type { MarketStats, TopLevel } from "@/lib/exchange/types";
 
 const SCALE = 10n ** 18n;
 

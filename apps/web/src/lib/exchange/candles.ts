@@ -3,7 +3,7 @@
  */
 
 import { add3818, cmp3818 } from "@/lib/exchange/fixed3818";
-import type { Candle, Trade } from "@/app/exchange/types";
+import type { Candle, Trade } from "@/lib/exchange/types";
 
 export function bucket1mUtcIso(createdAtIso: string): string {
   const d = new Date(createdAtIso);
