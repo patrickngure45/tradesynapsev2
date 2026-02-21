@@ -3,7 +3,7 @@ Smoke test for Arcade endpoints.
 
 Supports three auth modes:
 1) COOKIE (recommended for prod):
-   - Export your cookie string from the browser (session + __csrf), set COOKIE env var.
+  - Export your cookie string from the browser (pp_session + __csrf), set COOKIE env var.
    - Script will auto-send x-csrf-token using __csrf cookie value.
 
 2) INTERNAL service token (prod):
@@ -14,12 +14,14 @@ Supports three auth modes:
    - Set X_USER_ID env var.
 
 Usage examples:
-  BASE=https://tradesynapsev2-production.up.railway.app COOKIE='__Host-...=...; __csrf=...' npm run smoke:arcade
+  BASE=https://tradesynapsev2-production.up.railway.app COOKIE='pp_session=...; __csrf=...' npm run smoke:arcade
   BASE=http://localhost:3000 X_USER_ID=... npm run smoke:arcade
 
 Optional:
   CRON_SECRET=...  (used to call /api/arcade/cron/resolve-ready during the run)
 */
+
+import { webcrypto } from "node:crypto";
 
 type Json = any;
 
@@ -27,6 +29,8 @@ type AuthHeaders = {
   headers: Record<string, string>;
   csrfToken: string | null;
 };
+
+const cryptoImpl: Crypto = (globalThis as any).crypto ?? (webcrypto as unknown as Crypto);
 
 function requiredEnv(name: string): string {
   const v = (process.env[name] ?? "").trim();
@@ -58,6 +62,19 @@ function parseCookieValue(cookieHeader: string, name: string): string | null {
 function buildAuthHeaders(): AuthHeaders {
   const cookie = optEnv("COOKIE");
   if (cookie) {
+    const hasSession = cookie.includes("pp_session=");
+    const hasCsrf = cookie.includes("__csrf=");
+    if (!hasSession || !hasCsrf) {
+      console.error(
+        `[smoke:arcade] COOKIE is missing required cookies. Need both pp_session and __csrf. ` +
+          `Have pp_session=${hasSession} __csrf=${hasCsrf}.`,
+      );
+      console.error(
+        `[smoke:arcade] Tip: open DevTools → Network → any /api/ request → copy the full request Cookie header.`,
+      );
+      throw new Error("invalid_cookie");
+    }
+
     const csrf = parseCookieValue(cookie, "__csrf");
     return {
       csrfToken: csrf,
@@ -415,7 +432,10 @@ async function main() {
 async function sha256Hex(input: string): Promise<string> {
   // Node 18+ has WebCrypto.
   const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  if (!cryptoImpl?.subtle?.digest) {
+    throw new Error("webcrypto_unavailable");
+  }
+  const digest = await cryptoImpl.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
