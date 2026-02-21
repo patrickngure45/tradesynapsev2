@@ -88,6 +88,54 @@ The web service only runs migrations + serves HTTP/WebSocket traffic. For produc
 Sweeps should run as a scheduled job (or a separate service invoked on a timer):
 - `npm run sweep:deposits`
 
+## Cron jobs (cron-job.org / Railway)
+
+This app exposes several production cron endpoints that are safe to run from a scheduler.
+
+### Required (Arcade delayed actions)
+
+Some Arcade modules create `scheduled` actions that must be moved to `ready` on a timer.
+Run this every **1–2 minutes**:
+
+- `GET /api/arcade/cron/resolve-ready?secret=...`
+
+### Recommended (exchange ops)
+
+These are the common operational jobs:
+
+- Outbox worker (every **1 minute**)
+	- `GET /api/exchange/cron/outbox-worker?secret=...&max_ms=20000&batch=50&max_batches=10`
+
+- Deposit scan (native) (every **2 minutes**)
+	- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&tokens=0&max_ms=20000&max_blocks=200&blocks_per_batch=50`
+
+- Deposit scan (token logs) (every **10–15 minutes**, offset from native scan)
+	- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=0&tokens=1&symbols=USDT%2CUSDC&max_ms=20000&max_blocks=60&blocks_per_batch=60`
+
+- Sweep deposits (every **5–15 minutes**)
+	- `GET /api/exchange/cron/sweep-deposits?secret=...`
+
+**Avoid overlap**: `scan-deposits` uses an in-process lock. If two scans overlap, one may return `429 scan_in_progress`.
+The simplest fix is scheduling offsets (e.g. token scan at minute `:05, :15, :25, ...` if native scan runs at `:00, :02, :04, ...`).
+
+### Security note
+
+The `secret=...` value is a bearer credential. Rotate it before any real funds / mainnet usage.
+
+## Smoke testing (Arcade)
+
+Run a quick end-to-end verification of the Arcade endpoints:
+
+```bash
+npm run smoke:arcade
+```
+
+For production, run it against Railway with a real session cookie (must include `__csrf`):
+
+```bash
+BASE=https://your-app.up.railway.app COOKIE='...; __csrf=...; ...' npm run smoke:arcade
+```
+
 ## Deposits (permanent address) + fast settlement
 
 - Each user has **one permanent deposit address per chain** (e.g. BSC).
