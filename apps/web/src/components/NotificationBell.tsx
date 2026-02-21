@@ -70,6 +70,8 @@ function iconForType(type: string) {
       return "!";
     case "p2p_feedback_received":
       return "✓";
+    case "price_alert":
+      return "⟲";
     default:
       return "◆";
   }
@@ -92,6 +94,7 @@ function colorForType(type: string) {
     case "p2p_dispute_opened":
     case "p2p_dispute_resolved":
     case "p2p_order_expiring":
+    case "price_alert":
       return "text-[var(--warn)]";
     case "order_canceled":
     case "withdrawal_rejected":
