@@ -38,6 +38,7 @@
     "cleanup:users": "tsx scripts/cleanup-to-core-users.ts",
     "cleanup:dev-users": "tsx scripts/cleanup-dev-users.ts",
     "cleanup:agents": "tsx scripts/cleanup-agent-balances.ts",
+    "cleanup:reset-balances": "tsx scripts/reset-user-balances.ts",
     "p2p:seed": "tsx scripts/seed-p2p-sellers.ts",
     "p2p:seed:light": "cross-env P2P_SEED_ADS_PER_SIDE=1 tsx scripts/seed-p2p-sellers.ts",
     "p2p:seed:dense": "cross-env P2P_SEED_ADS_PER_SIDE=4 tsx scripts/seed-p2p-sellers.ts",

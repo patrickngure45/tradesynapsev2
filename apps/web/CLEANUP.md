@@ -54,6 +54,22 @@ Execute:
 CONFIRM_CLEANUP=DELETE_DEV_USERS npm run cleanup:dev-users
 ```
 
+## 4) Reset dummy balances for real users (keep accounts)
+
+If a real user (email+password) has dev-credit balances / test withdrawals, you can zero them out safely via a balancing journal entry (no history deletion).
+
+Dry run:
+
+```bash
+EMAILS="admin@coinwaka.com" npm run cleanup:reset-balances
+```
+
+Execute:
+
+```bash
+CONFIRM_CLEANUP=RESET_USER_BALANCES EMAILS="admin@coinwaka.com" npm run cleanup:reset-balances
+```
+
 ## Notes
 
 - Never run these scripts unless `DATABASE_URL` points at the intended database.
