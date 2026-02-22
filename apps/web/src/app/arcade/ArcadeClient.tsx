@@ -379,6 +379,12 @@ export function ArcadeClient() {
     return Number(row?.quantity ?? 0) || 0;
   }, [invItems]);
 
+  const seasonSetKeyQty = useMemo(() => {
+    return invItems
+      .filter((i) => i.kind === "key" && /^season_\d{4}-\d{2}-\d{2}_set_(starter|collector)_key$/.test(String(i.code ?? "")))
+      .reduce((acc, r) => acc + (Number(r.quantity ?? 0) || 0), 0);
+  }, [invItems]);
+
   const cosmeticItems = useMemo(() => {
     return invItems.filter((i) => i.kind === "cosmetic");
   }, [invItems]);
@@ -1522,7 +1528,9 @@ export function ArcadeClient() {
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
-                  <option value="high">High</option>
+                  <option value="high" disabled={gateKeyQty + seasonSetKeyQty <= 0}>
+                    High{gateKeyQty + seasonSetKeyQty <= 0 ? " (Key)" : ""}
+                  </option>
                 </select>
               </div>
 

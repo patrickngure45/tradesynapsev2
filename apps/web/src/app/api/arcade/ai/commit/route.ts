@@ -17,6 +17,7 @@ const postSchema = z.object({
 });
 
 const MODULE_KEY = "ai_oracle";
+const GATE_KEY_CODE = "gate_key";
 
 export async function POST(request: Request) {
   const actingUserId = getActingUserId(request);
@@ -62,6 +63,26 @@ export async function POST(request: Request) {
             AND requested_at >= (now() - interval '60 seconds')
         `;
         if (Number(lim?.c ?? "0") >= 5) return { kind: "err" as const };
+
+        // Outcome-based unlocks: profile=high requires a key.
+        // Accept either the global Gate Key OR any season set key earned from collections.
+        if (profile === "high") {
+          const rows = await txSql<{ code: string }[]>`
+            SELECT code
+            FROM arcade_inventory
+            WHERE user_id = ${actingUserId}::uuid
+              AND kind = 'key'
+              AND quantity > 0
+              AND (
+                code = ${GATE_KEY_CODE}
+                OR code LIKE 'season\\_%\\_set\\_%\\_key'
+              )
+            LIMIT 1
+          `;
+          if (!rows.length) {
+            return { kind: "deny" as const, err: apiError("arcade_key_required", { details: { key: GATE_KEY_CODE } }) };
+          }
+        }
 
         const [action] = await txSql<{ id: string; requested_at: string }[]>`
           INSERT INTO arcade_action (

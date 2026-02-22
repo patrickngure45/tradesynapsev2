@@ -273,7 +273,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 
 ## 7) Cross-module synergies
 - [x] “Keys & Gates”: rare keys unlock entry into premium modules.
-- [ ] Outcome-based unlocks: completing sets unlocks new volatility modes.
+- [x] Outcome-based unlocks: completing sets unlocks new volatility modes.
 
 ## 8) Safety, compliance, and anti-abuse
 - [x] Rate-limit every module (per-user/day) via server-side safety limits.
