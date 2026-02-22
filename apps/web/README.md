@@ -36,6 +36,12 @@ Key variables:
 - `PROOFPACK_SESSION_SECRET` — 32+ char secret for session signing
 - `NEXT_PUBLIC_BASE_URL` — Public URL (default `http://localhost:3000`)
 
+Exchange safety (optional; defaults to OFF unless set):
+- `EXCHANGE_MAX_OPEN_ORDERS_PER_USER` — max open orders per user
+- `EXCHANGE_MAX_ORDER_NOTIONAL` — max notional per order (price × quantity)
+- `EXCHANGE_PRICE_BAND_BPS` — rejects limit orders too far from reference price
+- `EXCHANGE_CANCEL_MAX_PER_MIN` — per-user cancel rate limit
+
 Gas (BSC):
 - Gas fees are modeled and paid in `BNB`.
 
@@ -137,9 +143,13 @@ These are the common operational jobs:
 	- Or allowlisted tokens:
 		- `GET /api/exchange/cron/sweep-deposits?secret=...&execute=1&tokens=1&symbols=USDT%2CUSDC%2CWBNB`
 
-- Conditional orders (Stop‑Limit, OCO) trigger (every **2–5 seconds** for a fast UI, or every **10–15 seconds** to reduce load)
+- Conditional orders (Stop‑Limit, OCO, Trailing Stop) trigger (every **2–5 seconds** for a fast UI, or every **10–15 seconds** to reduce load)
 	- Disabled by default in production; enable with `EXCHANGE_ENABLE_CONDITIONAL_ORDERS=1`
 	- `POST /api/exchange/cron/conditional-orders?secret=...&limit=50`
+
+	Notes:
+	- The cron handler writes a service heartbeat (`exchange:conditional-orders`) visible in the admin dashboard system status.
+	- `POST /api/exchange/orders` supports idempotent retries via `x-idempotency-key` (or `idempotency_key` in JSON body).
 
 **Avoid overlap**: `scan-deposits` uses a distributed DB lock. If two scans overlap, one returns `429 scan_in_progress`.
 Run the scan job every 2–3 minutes (not every minute) and keep `EXCHANGE_SCAN_LOCK_TTL_MS` short.
