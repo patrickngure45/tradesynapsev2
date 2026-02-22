@@ -306,6 +306,13 @@ export function AdminDashboardClient() {
   const [digestRunning, setDigestRunning] = useState(false);
   const [digestMsg, setDigestMsg] = useState<string | null>(null);
 
+  const [deferredLoading, setDeferredLoading] = useState(false);
+  const [deferredErr, setDeferredErr] = useState<string | null>(null);
+  const [deferredTotal, setDeferredTotal] = useState<number>(0);
+  const [deferredUsers, setDeferredUsers] = useState<
+    Array<{ user_id: string; email: string | null; count: number; oldest_at: string; newest_at: string; types_json: any }>
+  >([]);
+
   const fetchSystemStatus = useCallback(async () => {
     try {
       const data = await adminFetch<AdminSystemStatus>("/api/admin/status");
@@ -330,6 +337,47 @@ export function AdminDashboardClient() {
       setDigestRunning(false);
     }
   }, [fetchSystemStatus]);
+
+  const loadDeferred = useCallback(async () => {
+    setDeferredLoading(true);
+    setDeferredErr(null);
+    try {
+      const data = await adminFetch<{ total?: number; users?: any[] }>("/api/admin/notifications-deferred?limit=10");
+      setDeferredTotal(Number(data.total ?? 0) || 0);
+      setDeferredUsers(Array.isArray(data.users) ? (data.users as any) : []);
+    } catch (e) {
+      setDeferredErr(e instanceof Error ? e.message : "deferred_failed");
+      setDeferredTotal(0);
+      setDeferredUsers([]);
+    } finally {
+      setDeferredLoading(false);
+    }
+  }, []);
+
+  const exportDeferredForUser = useCallback(async (userId: string) => {
+    try {
+      const data = await adminFetch<{ user_id?: string; deferred?: any[] }>(
+        `/api/admin/notifications-deferred?user_id=${encodeURIComponent(userId)}`,
+      );
+      downloadJson(`deferred-notifications-${userId}.json`, data);
+    } catch (e) {
+      setDeferredErr(e instanceof Error ? e.message : "export_failed");
+    }
+  }, []);
+
+  const clearDeferredForUser = useCallback(async (userId: string) => {
+    if (!confirm("Clear deferred notifications for this user?")) return;
+    try {
+      await adminFetch("/api/admin/notifications-deferred", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      await loadDeferred();
+    } catch (e) {
+      setDeferredErr(e instanceof Error ? e.message : "clear_failed");
+    }
+  }, [loadDeferred]);
 
   useEffect(() => {
     fetchSystemStatus();
@@ -909,6 +957,68 @@ export function AdminDashboardClient() {
         </div>
 
         {digestMsg ? <div className="text-[10px] text-[var(--muted)]">Digest: {digestMsg}</div> : null}
+
+        <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Deferred notifications</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[10px] text-[var(--muted)]">{deferredLoading ? "sync" : `${deferredTotal}`}</div>
+              <button
+                type="button"
+                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+                onClick={loadDeferred}
+                disabled={deferredLoading}
+              >
+                {deferredLoading ? "loading" : "load"}
+              </button>
+            </div>
+          </div>
+          <div className="border-t border-[var(--border)]">
+            {deferredErr ? <div className="px-3 py-2 text-[10px] text-[var(--down)]">{deferredErr}</div> : null}
+            {deferredUsers.length === 0 ? (
+              <div className="px-3 py-3 text-xs text-[var(--muted)]">No deferred notifications.</div>
+            ) : (
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--muted)]">
+                    <th className="px-3 py-2 text-left">User</th>
+                    <th className="px-3 py-2 text-right">Count</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {deferredUsers.slice(0, 8).map((u) => (
+                    <tr key={u.user_id} className="border-b border-[var(--border)] last:border-b-0">
+                      <td className="px-3 py-2">
+                        <div className="truncate font-semibold text-[var(--foreground)]">{u.email || u.user_id}</div>
+                        <div className="mt-0.5 text-[10px] text-[var(--muted)]">{u.user_id}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-[var(--foreground)]">{u.count}</td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void exportDeferredForUser(u.user_id)}
+                            className="rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+                          >
+                            export
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void clearDeferredForUser(u.user_id)}
+                            className="rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+                          >
+                            clear
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
 
         {sysStatus ? (
           <>
