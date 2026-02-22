@@ -30,6 +30,65 @@ import {
 } from "./src/lib/ws/channels";
 
 const dev = process.env.NODE_ENV !== "production";
+
+function isPlaceholderSecret(raw: string): boolean {
+  const v = String(raw ?? "").trim();
+  if (!v) return true;
+  const lower = v.toLowerCase();
+  if (lower.includes("change-me")) return true;
+  if (lower.includes("changeme")) return true;
+  if (lower.includes("replace")) return true;
+  if (lower.includes("placeholder")) return true;
+  if (lower === "dev" || lower === "test" || lower === "password") return true;
+  return false;
+}
+
+function assertProdPreflight(): void {
+  if (dev) return;
+
+  const problems: string[] = [];
+
+  const sessionSecret = String(process.env.PROOFPACK_SESSION_SECRET ?? "").trim();
+  if (isPlaceholderSecret(sessionSecret) || sessionSecret.length < 32) {
+    problems.push("PROOFPACK_SESSION_SECRET must be set to a strong random value (>= 32 chars)");
+  }
+
+  const bootstrap = String(process.env.PROOFPACK_SESSION_BOOTSTRAP_KEY ?? "").trim();
+  if (isPlaceholderSecret(bootstrap) || bootstrap.length < 16) {
+    problems.push("PROOFPACK_SESSION_BOOTSTRAP_KEY must be set in production (>= 16 chars)");
+  }
+
+  const adminKey = String(process.env.EXCHANGE_ADMIN_KEY ?? "").trim();
+  if (isPlaceholderSecret(adminKey) || adminKey.length < 16) {
+    problems.push("EXCHANGE_ADMIN_KEY must be set in production (>= 16 chars)");
+  }
+
+  const enableConditional = String(process.env.EXCHANGE_ENABLE_CONDITIONAL_ORDERS ?? "").trim() === "1";
+  const enablePriceAlerts = String(process.env.EXCHANGE_ENABLE_PRICE_ALERTS ?? "").trim() === "1";
+  const enableOutboxCron = true; // outbox worker cron endpoint exists and is expected in prod.
+
+  if (enableConditional || enablePriceAlerts || enableOutboxCron) {
+    const cron = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
+    if (isPlaceholderSecret(cron) || cron.length < 16) {
+      problems.push("EXCHANGE_CRON_SECRET (or CRON_SECRET) must be set in production (>= 16 chars)");
+    }
+  }
+
+  const requireSigned = String(process.env.PROOFPACK_REQUIRE_SIGNED ?? "").trim() === "1";
+  if (requireSigned) {
+    const pk = String(process.env.PROOFPACK_SIGNING_PRIVATE_KEY ?? process.env.PROOFPACK_SIGNING_PRIVATE_KEY_B64 ?? "").trim();
+    if (isPlaceholderSecret(pk) || pk.length < 32) {
+      problems.push("PROOFPACK_SIGNING_PRIVATE_KEY(_B64) must be set when PROOFPACK_REQUIRE_SIGNED=1");
+    }
+  }
+
+  if (problems.length) {
+    const msg =
+      "Refusing to start in production due to missing/placeholder secrets:\n" +
+      problems.map((p) => "- " + p).join("\n");
+    throw new Error(msg);
+  }
+}
 // Next.js 16 uses Turbopack by default in dev in some setups.
 // We run a custom server (`tsx server.ts`), and on Windows it’s easy to end up with
 // a corrupted Turbopack cache DB which prevents startup.
@@ -38,6 +97,9 @@ const dev = process.env.NODE_ENV !== "production";
 if (dev) {
   process.env.NEXT_DISABLE_TURBOPACK ??= "1";
 }
+
+// Production safety: refuse to boot with placeholder secrets.
+assertProdPreflight();
 // IMPORTANT: Windows and some shells set HOSTNAME to the machine name (e.g. "Janjaa").
 // Using that as the bind address makes the server listen only on a single LAN IP,
 // which breaks access via localhost/127.0.0.1.

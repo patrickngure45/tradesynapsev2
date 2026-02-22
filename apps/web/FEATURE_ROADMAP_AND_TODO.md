@@ -354,5 +354,5 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 
 ## H) Security & hygiene (do before production marketing)
 - [ ] Rotate any secrets that have been exposed in local files, screenshots, logs, or chat history.
-- [ ] Add a preflight check that refuses to start in production with placeholder secrets.
+- [x] Add a preflight check that refuses to start in production with placeholder secrets.
 
