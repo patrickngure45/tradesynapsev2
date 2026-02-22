@@ -445,6 +445,16 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Order not found",
     message: "That order id was not found.",
   },
+
+  // Exchange (pro trading)
+  post_only_would_take: {
+    title: "Post-only rejected",
+    message: "This order would immediately take liquidity. Adjust the price or disable post-only.",
+  },
+  fok_insufficient_liquidity: {
+    title: "Fill-or-kill failed",
+    message: "There is not enough liquidity to fill the entire order immediately.",
+  },
   market_not_found: {
     title: "Market not found",
     message: "That market was not found.",

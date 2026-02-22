@@ -50,6 +50,8 @@ describe("statusForApiError", () => {
     "insufficient_balance",
     "order_state_conflict",
     "market_disabled",
+    "post_only_would_take",
+    "fok_insufficient_liquidity",
   ])("maps %s → 409", (code) => {
     expect(statusForApiError(code)).toBe(409);
   });

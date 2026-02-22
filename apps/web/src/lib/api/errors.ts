@@ -70,7 +70,8 @@ export function statusForApiError(code: string): number {
     case "withdrawal_risk_blocked":
     case "ad_is_not_online":
     case "p2p_open_orders_limit":
-    case "p2p_order_duplicate_open":
+    case "post_only_would_take":
+    case "fok_insufficient_liquidity":
     case "passkey_not_configured":
       return 409;
 
