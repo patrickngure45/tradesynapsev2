@@ -142,6 +142,20 @@ type AdminSystemStatus = {
   }>;
 };
 
+type EmailOutboxStatus = {
+  ok: true;
+  missing: boolean;
+  counts: { pending: number; sending: number; sent: number; failed: number };
+  recent_failed: Array<{
+    id: string;
+    to_email: string;
+    subject: string;
+    attempts: number;
+    last_error: string | null;
+    updated_at: string;
+  }>;
+};
+
 // --- Helpers ---
 function getCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
@@ -349,6 +363,10 @@ export function AdminDashboardClient() {
     Array<{ user_id: string; email: string | null; count: number; oldest_at: string; newest_at: string; types_json: any }>
   >([]);
 
+  const [emailOutbox, setEmailOutbox] = useState<EmailOutboxStatus | null>(null);
+  const [emailOutboxLoading, setEmailOutboxLoading] = useState(false);
+  const [emailOutboxErr, setEmailOutboxErr] = useState<string | null>(null);
+
   const fetchSystemStatus = useCallback(async () => {
     try {
       const data = await adminFetch<AdminSystemStatus>("/api/admin/status");
@@ -357,6 +375,20 @@ export function AdminDashboardClient() {
     } catch (e) {
       setSysStatus(null);
       setSysStatusError(e instanceof Error ? e.message : "status_failed");
+    }
+  }, []);
+
+  const loadEmailOutbox = useCallback(async () => {
+    setEmailOutboxLoading(true);
+    setEmailOutboxErr(null);
+    try {
+      const data = await adminFetch<EmailOutboxStatus>("/api/admin/email/outbox");
+      setEmailOutbox(data);
+    } catch (e) {
+      setEmailOutbox(null);
+      setEmailOutboxErr(e instanceof Error ? e.message : "email_outbox_failed");
+    } finally {
+      setEmailOutboxLoading(false);
     }
   }, []);
 
@@ -420,6 +452,12 @@ export function AdminDashboardClient() {
     const t = setInterval(fetchSystemStatus, 20_000);
     return () => clearInterval(t);
   }, [fetchSystemStatus]);
+
+  useEffect(() => {
+    loadEmailOutbox();
+    const t = setInterval(loadEmailOutbox, 30_000);
+    return () => clearInterval(t);
+  }, [loadEmailOutbox]);
 
   const sysBadge = (() => {
     if (sysStatusError) return <Badge text="System: unknown" variant="gray" />;
@@ -1170,6 +1208,65 @@ export function AdminDashboardClient() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Email outbox</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[10px] text-[var(--muted)]">
+                {emailOutboxLoading
+                  ? "sync"
+                  : emailOutbox?.missing
+                    ? "missing"
+                    : `${emailOutbox?.counts?.pending ?? 0} pending • ${emailOutbox?.counts?.failed ?? 0} failed`}
+              </div>
+              <button
+                type="button"
+                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+                onClick={loadEmailOutbox}
+                disabled={emailOutboxLoading}
+              >
+                {emailOutboxLoading ? "loading" : "refresh"}
+              </button>
+            </div>
+          </div>
+          <div className="border-t border-[var(--border)]">
+            {emailOutboxErr ? <div className="px-3 py-2 text-[10px] text-[var(--down)]">{emailOutboxErr}</div> : null}
+            {emailOutbox?.missing ? (
+              <div className="px-3 py-3 text-xs text-[var(--muted)]">
+                Outbox table not found (migration not applied yet).
+              </div>
+            ) : emailOutbox?.recent_failed?.length ? (
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--muted)]">
+                    <th className="px-3 py-2 text-left">To</th>
+                    <th className="px-3 py-2 text-left">Subject</th>
+                    <th className="px-3 py-2 text-right">Attempts</th>
+                    <th className="px-3 py-2 text-right">Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emailOutbox.recent_failed.slice(0, 5).map((r) => (
+                    <tr key={r.id} className="border-b border-[var(--border)] last:border-b-0">
+                      <td className="px-3 py-2">
+                        <div className="truncate font-semibold text-[var(--foreground)]">{r.to_email}</div>
+                        <div className="mt-0.5 truncate text-[10px] text-[var(--muted)]">{r.last_error || "failed"}</div>
+                      </td>
+                      <td className="px-3 py-2 text-[var(--foreground)]">
+                        <div className="truncate">{r.subject}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-[var(--foreground)]">{r.attempts}</td>
+                      <td className="px-3 py-2 text-right text-[10px] text-[var(--muted)]">{r.updated_at}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="px-3 py-3 text-xs text-[var(--muted)]">No failed emails.</div>
             )}
           </div>
         </div>
