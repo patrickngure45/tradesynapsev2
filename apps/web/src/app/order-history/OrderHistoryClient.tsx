@@ -30,12 +30,26 @@ type Order = {
   fills: Fill[];
 };
 
+type ExplainOrderResponse = {
+  ok: true;
+  kind: "exchange_order";
+  id: string;
+  status: string;
+  state: string;
+  summary: string;
+  blockers: string[];
+  next_steps: string[];
+  ai?: unknown;
+};
+
 export function OrderHistoryClient() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [explainById, setExplainById] = useState<Record<string, { summary: string; blockers: string[]; next_steps: string[] } | null>>({});
+  const [explainErrorById, setExplainErrorById] = useState<Record<string, string | null>>({});
 
   const fetchOrders = useCallback(async () => {
     setError(null);
@@ -56,13 +70,37 @@ export function OrderHistoryClient() {
     fetchOrders();
   }, [fetchOrders]);
 
+  const loadExplain = useCallback(async (id: string) => {
+    if (Object.prototype.hasOwnProperty.call(explainById, id)) return;
+    setExplainErrorById((prev) => ({ ...prev, [id]: null }));
+    try {
+      const res = await fetchJsonOrThrow<ExplainOrderResponse>(`/api/explain/order?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      setExplainById((prev) => ({
+        ...prev,
+        [id]: {
+          summary: String(res.summary ?? ""),
+          blockers: Array.isArray(res.blockers) ? res.blockers.map((x) => String(x)) : [],
+          next_steps: Array.isArray(res.next_steps) ? res.next_steps.map((x) => String(x)) : [],
+        },
+      }));
+    } catch (e) {
+      setExplainById((prev) => ({ ...prev, [id]: null }));
+      setExplainErrorById((prev) => ({
+        ...prev,
+        [id]: e instanceof Error ? e.message : "Failed to load explanation",
+      }));
+    }
+  }, [explainById]);
+
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const willExpand = !next.has(id);
+      if (willExpand) next.add(id);
+      else next.delete(id);
       return next;
     });
+    void loadExplain(id);
   };
 
   const statusBadge = (status: string) => {
@@ -207,6 +245,28 @@ export function OrderHistoryClient() {
                 {isExpanded && order.fills.length === 0 && (
                   <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-3 text-xs text-[var(--muted)]">
                     No fills yet
+                  </div>
+                )}
+
+                {isExpanded && (
+                  <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-3">
+                    <div className="mb-2 text-xs font-medium text-[var(--muted)]">Status explanation</div>
+                    {explainErrorById[order.id] ? (
+                      <div className="text-xs text-[var(--muted)]">{explainErrorById[order.id]}</div>
+                    ) : explainById[order.id] ? (
+                      <div className="grid gap-2">
+                        <div className="text-sm font-semibold text-[var(--foreground)]">{explainById[order.id]!.summary}</div>
+                        {explainById[order.id]!.next_steps.length > 0 && (
+                          <ul className="list-disc pl-5 text-xs text-[var(--muted)]">
+                            {explainById[order.id]!.next_steps.slice(0, 3).map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-[var(--muted)]">Loading…</div>
+                    )}
                   </div>
                 )}
               </div>

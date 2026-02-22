@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 import { apiError, apiZodError } from "@/lib/api/errors";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
-import { requireActiveUser } from "@/lib/auth/activeUser";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { maybeRephraseExplainFields, wantAiFromQueryParam } from "@/lib/explain/aiRephrase";
@@ -22,28 +21,28 @@ function explain(status: string, row: { tx_hash: string | null; failure_reason: 
         state: "requested",
         summary: "Withdrawal request received.",
         blockers: ["Awaiting review/approval"],
-        next_steps: ["Wait for approval", "Check Notifications for updates"],
+        next_steps: ["Approve or reject", "Check allowlist / step-up requirements"],
       };
     case "needs_review":
       return {
         state: "needs_review",
         summary: "Withdrawal needs manual review.",
         blockers: ["Manual review required"],
-        next_steps: ["Wait for admin review", "Check if allowlist / step-up is required"],
+        next_steps: ["Review risk context", "Approve or reject"],
       };
     case "approved":
       return {
         state: "approved",
         summary: "Withdrawal approved and queued for broadcast.",
         blockers: ["Broadcast pending"],
-        next_steps: ["Wait for broadcast", "Ensure hot wallet has gas"],
+        next_steps: ["Broadcast transaction", "Ensure hot wallet has gas"],
       };
     case "broadcasted":
       return {
         state: "broadcasted",
         summary: "Withdrawal broadcasted to the chain.",
         blockers: [],
-        next_steps: [row.tx_hash ? `Track tx: ${row.tx_hash}` : "Track the transaction in your wallet"],
+        next_steps: [row.tx_hash ? `Track tx: ${row.tx_hash}` : "Track the transaction"],
       };
     case "confirmed":
       return {
@@ -57,14 +56,14 @@ function explain(status: string, row: { tx_hash: string | null; failure_reason: 
         state: "rejected",
         summary: "Withdrawal rejected.",
         blockers: ["Rejected"],
-        next_steps: [row.failure_reason ? `Reason: ${row.failure_reason}` : "Review the rejection reason in Notifications"],
+        next_steps: [row.failure_reason ? `Reason: ${row.failure_reason}` : "Document the rejection reason"],
       };
     case "failed":
       return {
         state: "failed",
         summary: "Withdrawal failed.",
         blockers: ["On-chain or system failure"],
-        next_steps: [row.failure_reason ? `Reason: ${row.failure_reason}` : "Try again later"],
+        next_steps: [row.failure_reason ? `Reason: ${row.failure_reason}` : "Investigate logs and retry if safe"],
       };
     case "canceled":
       return {
@@ -78,25 +77,21 @@ function explain(status: string, row: { tx_hash: string | null; failure_reason: 
         state: status,
         summary: "Withdrawal status updated.",
         blockers: [],
-        next_steps: ["Check Notifications"],
+        next_steps: ["Check withdrawal details"],
       };
   }
 }
 
 /**
- * GET /api/explain/withdrawal?id=<uuid>
+ * GET /api/admin/explain/withdrawal?id=<uuid>[&ai=1]
  */
 export async function GET(request: Request) {
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
-
   const sql = getSql();
-  try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
-    if (activeErr) return apiError(activeErr);
 
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
+
+  try {
     const url = new URL(request.url);
     let q: z.infer<typeof querySchema>;
     try {
@@ -137,7 +132,6 @@ export async function GET(request: Request) {
         FROM ex_withdrawal_request w
         JOIN ex_asset a ON a.id = w.asset_id
         WHERE w.id = ${q.id}::uuid
-          AND w.user_id = ${actingUserId}::uuid
         LIMIT 1
       `;
       return rows[0] ?? null;
@@ -149,7 +143,7 @@ export async function GET(request: Request) {
 
     const ai = await maybeRephraseExplainFields({
       sql,
-      actingUserId,
+      actingUserId: admin.userId,
       wantAi: wantAiFromQueryParam(q.ai ?? null),
       kind: "withdrawal",
       fields: {
@@ -180,8 +174,8 @@ export async function GET(request: Request) {
       ...(ai ?? {}),
     });
   } catch (e) {
-    const resp = responseForDbError("explain.withdrawal", e);
+    const resp = responseForDbError("admin.explain.withdrawal", e);
     if (resp) return resp;
-    throw e;
+    return apiError("internal_error");
   }
 }

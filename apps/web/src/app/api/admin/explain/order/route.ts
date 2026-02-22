@@ -1,8 +1,7 @@
 import { z } from "zod";
 
 import { apiError, apiZodError } from "@/lib/api/errors";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
-import { requireActiveUser } from "@/lib/auth/activeUser";
+import { requireAdminForApi } from "@/lib/auth/admin";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { maybeRephraseExplainFields, wantAiFromQueryParam } from "@/lib/explain/aiRephrase";
@@ -36,7 +35,7 @@ function explain(status: string) {
         state: "filled",
         summary: "Order fully filled.",
         blockers: [],
-        next_steps: ["View your balances", "View order history"],
+        next_steps: ["No action needed"],
       };
     case "canceled":
       return {
@@ -50,25 +49,21 @@ function explain(status: string) {
         state: status,
         summary: "Order status updated.",
         blockers: [],
-        next_steps: ["Check order history"],
+        next_steps: ["Check order details"],
       };
   }
 }
 
 /**
- * GET /api/explain/order?id=<uuid>
+ * GET /api/admin/explain/order?id=<uuid>[&ai=1]
  */
 export async function GET(request: Request) {
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
-
   const sql = getSql();
-  try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
-    if (activeErr) return apiError(activeErr);
 
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
+
+  try {
     const url = new URL(request.url);
     let q: z.infer<typeof querySchema>;
     try {
@@ -107,7 +102,6 @@ export async function GET(request: Request) {
         FROM ex_order o
         JOIN ex_market m ON m.id = o.market_id
         WHERE o.id = ${q.id}::uuid
-          AND o.user_id = ${actingUserId}::uuid
         LIMIT 1
       `;
       return rows[0] ?? null;
@@ -118,7 +112,7 @@ export async function GET(request: Request) {
     const ex = explain(row.status);
     const ai = await maybeRephraseExplainFields({
       sql,
-      actingUserId,
+      actingUserId: admin.userId,
       wantAi: wantAiFromQueryParam(q.ai ?? null),
       kind: "exchange_order",
       fields: {
@@ -150,8 +144,8 @@ export async function GET(request: Request) {
       ...(ai ?? {}),
     });
   } catch (e) {
-    const resp = responseForDbError("explain.order", e);
+    const resp = responseForDbError("admin.explain.order", e);
     if (resp) return resp;
-    throw e;
+    return apiError("internal_error");
   }
 }

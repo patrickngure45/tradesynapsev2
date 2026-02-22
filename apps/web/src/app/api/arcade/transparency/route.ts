@@ -146,6 +146,32 @@ export async function GET(request: Request) {
         ORDER BY day ASC
       `;
 
+      const oracleAll = await sql<{ rarity: string; count: string }[]>`
+        SELECT
+          coalesce((outcome_json->>'tier'), 'unknown') AS rarity,
+          count(*)::text AS count
+        FROM arcade_action
+        WHERE user_id = ${actingUserId}::uuid
+          AND status = 'resolved'
+          AND module = 'ai_oracle'
+        GROUP BY 1
+        ORDER BY count(*) DESC
+      `;
+
+      const oracle7d = await sql<{ day: string; rarity: string; count: string }[]>`
+        SELECT
+          to_char(date_trunc('day', resolved_at), 'YYYY-MM-DD') AS day,
+          coalesce((outcome_json->>'tier'), 'unknown') AS rarity,
+          count(*)::text AS count
+        FROM arcade_action
+        WHERE user_id = ${actingUserId}::uuid
+          AND status = 'resolved'
+          AND module = 'ai_oracle'
+          AND resolved_at >= now() - interval '7 days'
+        GROUP BY 1, 2
+        ORDER BY day ASC
+      `;
+
       const boostSpend7d = await sql<{ day: string; code: string; count: string }[]>`
         SELECT
           to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
@@ -174,6 +200,42 @@ export async function GET(request: Request) {
           coalesce((SELECT count(*) FROM arcade_consumption WHERE user_id = ${actingUserId}::uuid AND context_type = 'crafting_craft' AND created_at >= now() - interval '7 days'), 0)::text AS craft_events
       `;
 
+      const latency7d = await sql<
+        {
+          module: string;
+          n: string;
+          p50_s: string | null;
+          p95_s: string | null;
+          avg_s: string | null;
+        }[]
+      >`
+        SELECT
+          module,
+          count(*)::text AS n,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch from (resolved_at - requested_at)))::text AS p50_s,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY extract(epoch from (resolved_at - requested_at)))::text AS p95_s,
+          avg(extract(epoch from (resolved_at - requested_at)))::text AS avg_s
+        FROM arcade_action
+        WHERE user_id = ${actingUserId}::uuid
+          AND status = 'resolved'
+          AND resolved_at >= now() - interval '7 days'
+        GROUP BY 1
+        ORDER BY module ASC
+      `;
+
+      const overdue = await sql<{ module: string; count: string }[]>`
+        SELECT
+          module,
+          count(*)::text AS count
+        FROM arcade_action
+        WHERE user_id = ${actingUserId}::uuid
+          AND status IN ('committed', 'scheduled')
+          AND resolves_at IS NOT NULL
+          AND resolves_at < now()
+        GROUP BY 1
+        ORDER BY count(*) DESC
+      `;
+
       return {
         counts: {
           actions_total: Number(counts?.actions_total ?? "0"),
@@ -197,6 +259,18 @@ export async function GET(request: Request) {
           distribution_all_time: draftAll.map((r) => ({ rarity: r.rarity, count: Number(r.count ?? "0") })),
           distribution_7d: draft7d.map((r) => ({ day: r.day, rarity: r.rarity, count: Number(r.count ?? "0") })),
         },
+        ai_oracle: {
+          distribution_all_time: oracleAll.map((r) => ({ rarity: r.rarity, count: Number(r.count ?? "0") })),
+          distribution_7d: oracle7d.map((r) => ({ day: r.day, rarity: r.rarity, count: Number(r.count ?? "0") })),
+        },
+        latency_7d: latency7d.map((r) => ({
+          module: r.module,
+          n: Number(r.n ?? "0"),
+          p50_s: Number(r.p50_s ?? "0"),
+          p95_s: Number(r.p95_s ?? "0"),
+          avg_s: Number(r.avg_s ?? "0"),
+        })),
+        overdue: overdue.map((r) => ({ module: r.module, count: Number(r.count ?? "0") })),
         boost_consumption_7d: boostSpend7d.map((r) => ({ day: r.day, code: r.code, count: Number(r.count ?? "0") })),
         crafting_7d: {
           items_salvaged: Number(craft7d?.items_salvaged ?? "0"),

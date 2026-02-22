@@ -72,6 +72,18 @@ type WithdrawalRow = {
   updated_at: string;
 };
 
+type ExplainWithdrawalResponse = {
+  ok: true;
+  kind: "withdrawal";
+  id: string;
+  status: string;
+  state: string;
+  summary: string;
+  blockers: string[];
+  next_steps: string[];
+  ai?: unknown;
+};
+
 type ArcadeInventoryResponse = {
   ok: true;
   shards: number;
@@ -108,6 +120,12 @@ export function WithdrawClient() {
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [allowlist, setAllowlist] = useState<AllowlistRow[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
+
+  const [openExplainWithdrawalId, setOpenExplainWithdrawalId] = useState<string | null>(null);
+  const [explainByWithdrawalId, setExplainByWithdrawalId] = useState<
+    Record<string, { summary: string; blockers: string[]; next_steps: string[] } | null>
+  >({});
+  const [explainErrorByWithdrawalId, setExplainErrorByWithdrawalId] = useState<Record<string, string | null>>({});
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastKind, setToastKind] = useState<ToastKind>("info");
@@ -301,6 +319,31 @@ export function WithdrawClient() {
       setError(toClientApiError(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadExplainWithdrawal = async (id: string) => {
+    if (Object.prototype.hasOwnProperty.call(explainByWithdrawalId, id)) return;
+    setExplainErrorByWithdrawalId((prev) => ({ ...prev, [id]: null }));
+    try {
+      const res = await fetchJsonOrThrow<ExplainWithdrawalResponse>(
+        `/api/explain/withdrawal?id=${encodeURIComponent(id)}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setExplainByWithdrawalId((prev) => ({
+        ...prev,
+        [id]: {
+          summary: String(res.summary ?? ""),
+          blockers: Array.isArray(res.blockers) ? res.blockers.map((x) => String(x)) : [],
+          next_steps: Array.isArray(res.next_steps) ? res.next_steps.map((x) => String(x)) : [],
+        },
+      }));
+    } catch (e) {
+      setExplainByWithdrawalId((prev) => ({ ...prev, [id]: null }));
+      setExplainErrorByWithdrawalId((prev) => ({
+        ...prev,
+        [id]: e instanceof ApiError ? e.code : e instanceof Error ? e.message : "Network error",
+      }));
     }
   };
 
@@ -771,17 +814,70 @@ export function WithdrawClient() {
                     ) : null}
                   </div>
 
-                  {w.status === "requested" ? (
+                  <div className="flex shrink-0 flex-col items-end gap-2">
                     <button
                       type="button"
-                      className={buttonClassName({ variant: "danger", size: "xs" })}
-                      onClick={() => void handleCancel(w.id)}
+                      className={buttonClassName({ variant: "secondary", size: "xs" })}
+                      onClick={() => {
+                        const next = openExplainWithdrawalId === w.id ? null : w.id;
+                        setOpenExplainWithdrawalId(next);
+                        if (next) void loadExplainWithdrawal(w.id);
+                      }}
                       disabled={loading}
                     >
-                      Cancel
+                      {openExplainWithdrawalId === w.id ? "Hide" : "Explain"}
                     </button>
-                  ) : null}
+
+                    {w.status === "requested" ? (
+                      <button
+                        type="button"
+                        className={buttonClassName({ variant: "danger", size: "xs" })}
+                        onClick={() => void handleCancel(w.id)}
+                        disabled={loading}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+
+                {openExplainWithdrawalId === w.id ? (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)]/25 p-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Status explanation</div>
+
+                    {explainErrorByWithdrawalId[w.id] ? (
+                      <div className="mt-2 text-xs text-[var(--muted)]">Unable to load explanation: {explainErrorByWithdrawalId[w.id]}</div>
+                    ) : explainByWithdrawalId[w.id] ? (
+                      <div className="mt-2 grid gap-3">
+                        <div className="text-sm font-semibold text-[var(--foreground)]">{explainByWithdrawalId[w.id]!.summary}</div>
+
+                        {explainByWithdrawalId[w.id]!.blockers.length > 0 ? (
+                          <div>
+                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blockers</div>
+                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                              {explainByWithdrawalId[w.id]!.blockers.map((b, i) => (
+                                <li key={i}>{b}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {explainByWithdrawalId[w.id]!.next_steps.length > 0 ? (
+                          <div>
+                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Next steps</div>
+                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                              {explainByWithdrawalId[w.id]!.next_steps.slice(0, 4).map((s, i) => (
+                                <li key={i}>{s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-[var(--muted)]">Loading…</div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))
           )}

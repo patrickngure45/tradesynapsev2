@@ -94,6 +94,18 @@ type Message = {
   is_image: boolean;
 };
 
+type ExplainResponse = {
+    ok: true;
+    kind: string;
+    id: string;
+    status: string;
+    state: string;
+    summary: string;
+    blockers: string[];
+    next_steps: string[];
+    ai?: unknown;
+};
+
 type P2POrderAction = "PAY_CONFIRMED" | "RELEASE" | "CANCEL";
 
 type OrderDialogState =
@@ -116,6 +128,8 @@ export default function OrderPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<null | { code: string; message: string }>(null);
+        const [explain, setExplain] = useState<null | { summary: string; blockers: string[]; next_steps: string[] }>(null);
+        const [explainError, setExplainError] = useState<string | null>(null);
   const [msgInput, setMsgInput] = useState("");
     const [chatSending, setChatSending] = useState(false);
     const [chatError, setChatError] = useState<string | null>(null);
@@ -258,6 +272,34 @@ export default function OrderPage() {
             if (interval) clearInterval(interval);
         };
   }, [id]);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (!id || !order?.status) return;
+            setExplainError(null);
+            try {
+                const res = await fetchJsonOrThrow<ExplainResponse>(
+                    `/api/explain/p2p-order?id=${encodeURIComponent(id)}`,
+                    withDevUserHeader({ cache: "no-store" }),
+                );
+                if (cancelled) return;
+                setExplain({
+                    summary: String(res.summary ?? ""),
+                    blockers: Array.isArray(res.blockers) ? res.blockers.map((x) => String(x)) : [],
+                    next_steps: Array.isArray(res.next_steps) ? res.next_steps.map((x) => String(x)) : [],
+                });
+            } catch (e) {
+                if (cancelled) return;
+                if (e instanceof ApiError) setExplainError(e.code);
+                else setExplainError("Network error");
+                setExplain(null);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [id, order?.status]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -813,6 +855,46 @@ export default function OrderPage() {
                             <div className="mt-2 text-[10px] text-[var(--muted)]">
                                 Signal rule: pay only to the payout details shown on this page. Ignore any different details sent via chat.
                             </div>
+                        </div>
+
+                        <div className="relative mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
+                            <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+                                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Status explanation</div>
+                                <div className="h-px flex-1 bg-[var(--border)]" />
+                            </div>
+
+                            {explainError ? (
+                                <div className="mt-3 text-xs text-[var(--muted)]">Unable to load explanation: {explainError}</div>
+                            ) : !explain ? (
+                                <div className="mt-3 text-xs text-[var(--muted)]">Loading…</div>
+                            ) : (
+                                <div className="mt-3 grid gap-3">
+                                    <div className="text-sm font-semibold text-[var(--foreground)]">{explain.summary}</div>
+
+                                    {explain.blockers.length > 0 && (
+                                        <div>
+                                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blockers</div>
+                                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                                                {explain.blockers.map((b, i) => (
+                                                    <li key={i}>{b}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {explain.next_steps.length > 0 && (
+                                        <div>
+                                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Next steps</div>
+                                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                                                {explain.next_steps.map((s, i) => (
+                                                    <li key={i}>{s}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

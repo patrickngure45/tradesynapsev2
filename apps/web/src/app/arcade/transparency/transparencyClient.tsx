@@ -27,6 +27,12 @@ type TransparencyResponse = {
     distribution_all_time: Array<{ rarity: string; count: number }>;
     distribution_7d: Array<{ day: string; rarity: string; count: number }>;
   };
+  ai_oracle: {
+    distribution_all_time: Array<{ rarity: string; count: number }>;
+    distribution_7d: Array<{ day: string; rarity: string; count: number }>;
+  };
+  latency_7d: Array<{ module: string; n: number; p50_s: number; p95_s: number; avg_s: number }>;
+  overdue: Array<{ module: string; count: number }>;
   boost_consumption_7d: Array<{ day: string; code: string; count: number }>;
   crafting_7d: {
     items_salvaged: number;
@@ -35,6 +41,18 @@ type TransparencyResponse = {
     craft_events: number;
   };
 };
+
+function fmtSeconds(s: number) {
+  if (!Number.isFinite(s) || s <= 0) return "0s";
+  if (s < 1) return `${Math.round(s * 1000)}ms`;
+  if (s < 60) return `${Math.round(s * 10) / 10}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s - m * 60);
+  if (m < 60) return `${m}m ${rem}s`;
+  const h = Math.floor(m / 60);
+  const mm = m - h * 60;
+  return `${h}h ${mm}m`;
+}
 
 function toneForRarity(rarity: string): { dot: string; bg: string; text: string } {
   const r = String(rarity ?? "").toLowerCase();
@@ -70,7 +88,7 @@ export function ArcadeTransparencyClient() {
     };
   }, []);
 
-  function distFor(key: "daily_drop" | "calendar_daily" | "time_vault" | "boost_draft") {
+  function distFor(key: "daily_drop" | "calendar_daily" | "time_vault" | "boost_draft" | "ai_oracle") {
     const rows = (data as any)?.[key]?.distribution_all_time ?? [];
     const total = rows.reduce((acc: number, r: any) => acc + (Number.isFinite(r.count) ? r.count : 0), 0);
     return { rows: rows as Array<{ rarity: string; count: number }>, total };
@@ -80,6 +98,7 @@ export function ArcadeTransparencyClient() {
   const calDist = useMemo(() => distFor("calendar_daily"), [data]);
   const vaultDist = useMemo(() => distFor("time_vault"), [data]);
   const draftDist = useMemo(() => distFor("boost_draft"), [data]);
+  const oracleDist = useMemo(() => distFor("ai_oracle"), [data]);
 
   const boostSpend = useMemo(() => {
     const rows = data?.boost_consumption_7d ?? [];
@@ -88,6 +107,28 @@ export function ArcadeTransparencyClient() {
     const list = Array.from(byCode.entries()).map(([code, count]) => ({ code, count }));
     list.sort((a, b) => b.count - a.count);
     return list.slice(0, 10);
+  }, [data]);
+
+  const latency = useMemo(() => {
+    const rows = data?.latency_7d ?? [];
+    const list = rows
+      .map((r) => ({
+        module: r.module,
+        n: Number(r.n) || 0,
+        p50_s: Number(r.p50_s) || 0,
+        p95_s: Number(r.p95_s) || 0,
+        avg_s: Number(r.avg_s) || 0,
+      }))
+      .filter((r) => r.n > 0);
+    list.sort((a, b) => b.p95_s - a.p95_s);
+    return list;
+  }, [data]);
+
+  const overdue = useMemo(() => {
+    const rows = data?.overdue ?? [];
+    const list = rows.map((r) => ({ module: r.module, count: Number(r.count) || 0 })).filter((r) => r.count > 0);
+    list.sort((a, b) => b.count - a.count);
+    return list;
   }, [data]);
 
   if (loading) {
@@ -145,6 +186,7 @@ export function ArcadeTransparencyClient() {
         { key: "calendar_daily" as const, title: "Calendar distribution", dist: calDist },
         { key: "time_vault" as const, title: "Time vault distribution", dist: vaultDist },
         { key: "boost_draft" as const, title: "Boost draft distribution", dist: draftDist },
+        { key: "ai_oracle" as const, title: "AI Oracle tier distribution", dist: oracleDist },
       ] as const).map((s) => (
         <section key={s.key} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
           <div className="flex items-center gap-3">
@@ -184,6 +226,65 @@ export function ArcadeTransparencyClient() {
           )}
         </section>
       ))}
+
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <div className="flex items-center gap-3">
+          <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+            <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+          </span>
+          <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Resolution latency (7d)</div>
+          <div className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+
+        {latency.length === 0 ? (
+          <div className="mt-5 text-sm text-[var(--muted)]">No resolved actions in the last 7 days.</div>
+        ) : (
+          <div className="mt-5 grid gap-2">
+            {latency.map((r) => (
+              <div key={r.module} className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4 md:grid-cols-4">
+                <div>
+                  <div className="text-xs font-semibold text-[var(--foreground)]">{r.module}</div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">n={r.n}</div>
+                </div>
+                <div className="text-xs text-[var(--muted)]">
+                  <span className="font-semibold text-[var(--foreground)]">p50</span> {fmtSeconds(r.p50_s)}
+                </div>
+                <div className="text-xs text-[var(--muted)]">
+                  <span className="font-semibold text-[var(--foreground)]">p95</span> {fmtSeconds(r.p95_s)}
+                </div>
+                <div className="text-xs text-[var(--muted)]">
+                  <span className="font-semibold text-[var(--foreground)]">avg</span> {fmtSeconds(r.avg_s)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+        <div className="flex items-center gap-3">
+          <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--warn)]" />
+            <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+          </span>
+          <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Overdue actions</div>
+          <div className="h-px flex-1 bg-[var(--border)]" />
+        </div>
+
+        {overdue.length === 0 ? (
+          <div className="mt-5 text-sm text-[var(--muted)]">No overdue actions right now.</div>
+        ) : (
+          <div className="mt-5 grid gap-2">
+            {overdue.map((r) => (
+              <div key={r.module} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3">
+                <div className="text-sm font-semibold text-[var(--foreground)]">{r.module}</div>
+                <div className="text-xs font-bold text-[var(--muted)]">×{r.count}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
         <div className="flex items-center gap-3">

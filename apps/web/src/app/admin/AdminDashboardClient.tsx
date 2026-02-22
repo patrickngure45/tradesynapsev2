@@ -17,6 +17,42 @@ type Withdrawal = {
   created_at: string;
 };
 
+type ExplainWithdrawalResponse = {
+  ok: true;
+  kind: "withdrawal";
+  id: string;
+  status: string;
+  state: string;
+  summary: string;
+  blockers: string[];
+  next_steps: string[];
+  ai?: unknown;
+};
+
+type ExplainAdminOrderResponse = {
+  ok: true;
+  kind: "exchange_order";
+  id: string;
+  status: string;
+  state: string;
+  summary: string;
+  blockers: string[];
+  next_steps: string[];
+  ai?: unknown;
+};
+
+type ExplainAdminP2pOrderResponse = {
+  ok: true;
+  kind: "p2p_order";
+  id: string;
+  status: string;
+  state: string;
+  summary: string;
+  blockers: string[];
+  next_steps: string[];
+  ai?: unknown;
+};
+
 type ReconciliationReport = {
   ok: boolean;
   checks: Array<{ name: string; ok: boolean; detail?: string }>;
@@ -404,6 +440,9 @@ export function AdminDashboardClient() {
   const [wdFilter, setWdFilter] = useState<string>("review");
   const [wdLoading, setWdLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [openExplainWithdrawalId, setOpenExplainWithdrawalId] = useState<string | null>(null);
+  const [explainByWithdrawalId, setExplainByWithdrawalId] = useState<Record<string, { summary: string; blockers: string[]; next_steps: string[] } | null>>({});
+  const [explainErrorByWithdrawalId, setExplainErrorByWithdrawalId] = useState<Record<string, string | null>>({});
 
   // Reconciliation state
   const [reconReport, setReconReport] = useState<ReconciliationReport | null>(null);
@@ -485,6 +524,71 @@ export function AdminDashboardClient() {
   const [auditFilter, setAuditFilter] = useState("");
   const [auditLoading, setAuditLoading] = useState(false);
 
+  // Explain tools (orders)
+  const [explainOrderId, setExplainOrderId] = useState("");
+  const [explainOrderLoading, setExplainOrderLoading] = useState(false);
+  const [explainOrderError, setExplainOrderError] = useState<string | null>(null);
+  const [explainOrderResult, setExplainOrderResult] = useState<
+    null | { summary: string; blockers: string[]; next_steps: string[]; status: string; state: string }
+  >(null);
+
+  const [explainP2pOrderId, setExplainP2pOrderId] = useState("");
+  const [explainP2pOrderLoading, setExplainP2pOrderLoading] = useState(false);
+  const [explainP2pOrderError, setExplainP2pOrderError] = useState<string | null>(null);
+  const [explainP2pOrderResult, setExplainP2pOrderResult] = useState<
+    null | { summary: string; blockers: string[]; next_steps: string[]; status: string; state: string }
+  >(null);
+
+  const runExplainOrder = useCallback(async () => {
+    const id = explainOrderId.trim();
+    if (!id) return;
+    setExplainOrderLoading(true);
+    setExplainOrderError(null);
+    setExplainOrderResult(null);
+    try {
+      const res = await adminFetch<ExplainAdminOrderResponse>(
+        `/api/admin/explain/order?id=${encodeURIComponent(id)}`,
+        { cache: "no-store" },
+      );
+      setExplainOrderResult({
+        summary: asStr((res as any)?.summary, ""),
+        blockers: Array.isArray((res as any)?.blockers) ? (res as any).blockers.map((x: any) => String(x)) : [],
+        next_steps: Array.isArray((res as any)?.next_steps) ? (res as any).next_steps.map((x: any) => String(x)) : [],
+        status: asStr((res as any)?.status, ""),
+        state: asStr((res as any)?.state, ""),
+      });
+    } catch (e: any) {
+      setExplainOrderError(e?.message ?? "explain_failed");
+    } finally {
+      setExplainOrderLoading(false);
+    }
+  }, [explainOrderId]);
+
+  const runExplainP2pOrder = useCallback(async () => {
+    const id = explainP2pOrderId.trim();
+    if (!id) return;
+    setExplainP2pOrderLoading(true);
+    setExplainP2pOrderError(null);
+    setExplainP2pOrderResult(null);
+    try {
+      const res = await adminFetch<ExplainAdminP2pOrderResponse>(
+        `/api/admin/explain/p2p-order?id=${encodeURIComponent(id)}`,
+        { cache: "no-store" },
+      );
+      setExplainP2pOrderResult({
+        summary: asStr((res as any)?.summary, ""),
+        blockers: Array.isArray((res as any)?.blockers) ? (res as any).blockers.map((x: any) => String(x)) : [],
+        next_steps: Array.isArray((res as any)?.next_steps) ? (res as any).next_steps.map((x: any) => String(x)) : [],
+        status: asStr((res as any)?.status, ""),
+        state: asStr((res as any)?.state, ""),
+      });
+    } catch (e: any) {
+      setExplainP2pOrderError(e?.message ?? "explain_failed");
+    } finally {
+      setExplainP2pOrderLoading(false);
+    }
+  }, [explainP2pOrderId]);
+
   // Rejection modal state (shared by withdrawal + KYC reject)
   const [rejectModal, setRejectModal] = useState<{ open: boolean; kind: "withdrawal" | "kyc"; id: string }>({
     open: false, kind: "withdrawal", id: "",
@@ -550,6 +654,28 @@ export function AdminDashboardClient() {
   const handleReject = (id: string) => {
     setRejectModal({ open: true, kind: "withdrawal", id });
   };
+
+  const loadExplainWithdrawal = useCallback(async (id: string) => {
+    if (Object.prototype.hasOwnProperty.call(explainByWithdrawalId, id)) return;
+    setExplainErrorByWithdrawalId((prev) => ({ ...prev, [id]: null }));
+    try {
+      const res = await adminFetch<ExplainWithdrawalResponse>(
+        `/api/admin/explain/withdrawal?id=${encodeURIComponent(id)}`,
+        { cache: "no-store" },
+      );
+      setExplainByWithdrawalId((prev) => ({
+        ...prev,
+        [id]: {
+          summary: asStr((res as any)?.summary, ""),
+          blockers: Array.isArray((res as any)?.blockers) ? (res as any).blockers.map((x: any) => String(x)) : [],
+          next_steps: Array.isArray((res as any)?.next_steps) ? (res as any).next_steps.map((x: any) => String(x)) : [],
+        },
+      }));
+    } catch (e: any) {
+      setExplainByWithdrawalId((prev) => ({ ...prev, [id]: null }));
+      setExplainErrorByWithdrawalId((prev) => ({ ...prev, [id]: e?.message ?? "explain_failed" }));
+    }
+  }, [explainByWithdrawalId]);
 
   const submitReject = async (reason: string) => {
     const { kind, id } = rejectModal;
@@ -1470,6 +1596,18 @@ export function AdminDashboardClient() {
                     <div className="flex gap-2">
                       <button
                         type="button"
+                        className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                        onClick={() => {
+                          const next = openExplainWithdrawalId === w.id ? null : w.id;
+                          setOpenExplainWithdrawalId(next);
+                          if (next) void loadExplainWithdrawal(w.id);
+                        }}
+                        disabled={actionLoading === w.id}
+                      >
+                        {openExplainWithdrawalId === w.id ? "Hide" : "Explain"}
+                      </button>
+                      <button
+                        type="button"
                         className="rounded-lg bg-emerald-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
                         disabled={actionLoading === w.id}
                         onClick={() => handleApprove(w.id)}
@@ -1491,6 +1629,18 @@ export function AdminDashboardClient() {
                     <div className="flex gap-2">
                       <button
                         type="button"
+                        className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                        onClick={() => {
+                          const next = openExplainWithdrawalId === w.id ? null : w.id;
+                          setOpenExplainWithdrawalId(next);
+                          if (next) void loadExplainWithdrawal(w.id);
+                        }}
+                        disabled={actionLoading === w.id}
+                      >
+                        {openExplainWithdrawalId === w.id ? "Hide" : "Explain"}
+                      </button>
+                      <button
+                        type="button"
                         className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                         disabled={actionLoading === w.id}
                         onClick={() => handleBroadcast(w.id)}
@@ -1500,6 +1650,41 @@ export function AdminDashboardClient() {
                     </div>
                   ) : null}
                 </div>
+
+                {openExplainWithdrawalId === w.id ? (
+                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Status explanation</div>
+                    {explainErrorByWithdrawalId[w.id] ? (
+                      <div className="mt-2 text-xs text-[var(--muted)]">Unable to load explanation: {explainErrorByWithdrawalId[w.id]}</div>
+                    ) : explainByWithdrawalId[w.id] ? (
+                      <div className="mt-2 grid gap-3">
+                        <div className="text-sm font-semibold text-[var(--foreground)]">{explainByWithdrawalId[w.id]!.summary}</div>
+                        {explainByWithdrawalId[w.id]!.blockers.length > 0 ? (
+                          <div>
+                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blockers</div>
+                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                              {explainByWithdrawalId[w.id]!.blockers.map((b, i) => (
+                                <li key={i}>{b}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {explainByWithdrawalId[w.id]!.next_steps.length > 0 ? (
+                          <div>
+                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Next steps</div>
+                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                              {explainByWithdrawalId[w.id]!.next_steps.slice(0, 4).map((s, i) => (
+                                <li key={i}>{s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-[var(--muted)]">Loading…</div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1790,6 +1975,108 @@ export function AdminDashboardClient() {
       {/* ========== Audit Log ========== */}
       {tab === "audit-log" ? (
         <div className="grid gap-4">
+          <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Explain by ID</div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+                <div className="text-xs font-semibold text-[var(--foreground)]">Exchange order</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Order ID (uuid)"
+                    className="w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                    value={explainOrderId}
+                    onChange={(e) => setExplainOrderId(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void runExplainOrder();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
+                    disabled={explainOrderLoading || !explainOrderId.trim()}
+                    onClick={() => void runExplainOrder()}
+                  >
+                    {explainOrderLoading ? "Loading…" : "Explain"}
+                  </button>
+                </div>
+                {explainOrderError ? (
+                  <div className="mt-2 text-xs text-[var(--muted)]">Unable to load: {explainOrderError}</div>
+                ) : explainOrderResult ? (
+                  <div className="mt-3 grid gap-2 text-xs">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                      {explainOrderResult.status} · {explainOrderResult.state}
+                    </div>
+                    <div className="text-sm font-semibold text-[var(--foreground)]">{explainOrderResult.summary}</div>
+                    {explainOrderResult.blockers.length > 0 ? (
+                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                        {explainOrderResult.blockers.map((b, i) => (
+                          <li key={i}>{b}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {explainOrderResult.next_steps.length > 0 ? (
+                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                        {explainOrderResult.next_steps.slice(0, 4).map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+                <div className="text-xs font-semibold text-[var(--foreground)]">P2P order</div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="P2P Order ID (uuid)"
+                    className="w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                    value={explainP2pOrderId}
+                    onChange={(e) => setExplainP2pOrderId(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void runExplainP2pOrder();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
+                    disabled={explainP2pOrderLoading || !explainP2pOrderId.trim()}
+                    onClick={() => void runExplainP2pOrder()}
+                  >
+                    {explainP2pOrderLoading ? "Loading…" : "Explain"}
+                  </button>
+                </div>
+                {explainP2pOrderError ? (
+                  <div className="mt-2 text-xs text-[var(--muted)]">Unable to load: {explainP2pOrderError}</div>
+                ) : explainP2pOrderResult ? (
+                  <div className="mt-3 grid gap-2 text-xs">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                      {explainP2pOrderResult.status} · {explainP2pOrderResult.state}
+                    </div>
+                    <div className="text-sm font-semibold text-[var(--foreground)]">{explainP2pOrderResult.summary}</div>
+                    {explainP2pOrderResult.blockers.length > 0 ? (
+                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                        {explainP2pOrderResult.blockers.map((b, i) => (
+                          <li key={i}>{b}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {explainP2pOrderResult.next_steps.length > 0 ? (
+                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                        {explainP2pOrderResult.next_steps.slice(0, 4).map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <input
               type="text"
