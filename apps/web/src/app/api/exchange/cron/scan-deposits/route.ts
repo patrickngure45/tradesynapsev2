@@ -55,7 +55,9 @@ export async function POST(req: NextRequest) {
   const sql = getSql();
 
   // Distributed lock across replicas (TTL-based).
-  const lockTtlMs = clampInt(Number(process.env.EXCHANGE_SCAN_LOCK_TTL_MS ?? 10 * 60_000), 30_000, 60 * 60_000);
+  // Default to a short TTL so a crash/restart doesn't block deposits for long.
+  // The lock is renewed during long scans.
+  const lockTtlMs = clampInt(Number(process.env.EXCHANGE_SCAN_LOCK_TTL_MS ?? 120_000), 30_000, 60 * 60_000);
   const lockKey = "exchange:scan-deposits:bsc";
   const holderId = `${process.env.RAILWAY_SERVICE_NAME ?? process.env.SERVICE_NAME ?? "web"}:${crypto.randomUUID()}`;
   const lock = await tryAcquireJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs });
