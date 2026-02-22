@@ -14,6 +14,10 @@ type Notification = {
   metadata_json?: any;
 };
 
+function isDigest(n: Notification): boolean {
+  return n.type === "system" && String(n.metadata_json?.kind ?? "") === "digest";
+}
+
 function safeInternalHref(v: unknown): string | null {
   if (typeof v !== "string") return null;
   if (!v.startsWith("/")) return null;
@@ -118,6 +122,21 @@ function colorForType(type: string) {
 
 function labelForType(type: string) {
   return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function iconForNotification(n: Notification) {
+  if (isDigest(n)) return "≋";
+  return iconForType(n.type);
+}
+
+function colorForNotification(n: Notification) {
+  if (isDigest(n)) return "text-[var(--accent-2)]";
+  return colorForType(n.type);
+}
+
+function labelForNotification(n: Notification) {
+  if (isDigest(n)) return "Digest";
+  return labelForType(n.type);
 }
 
 /* ── Page ── */
@@ -234,6 +253,8 @@ export function NotificationsClient() {
 
         <div className="relative mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-xs text-[var(--muted)]">
           You’ll see updates for P2P orders, spot fills, deposits/withdrawals, and security events.
+          <span className="ml-2">Configure quiet hours in</span>{" "}
+          <Link href="/account" className="font-semibold text-[var(--foreground)] underline hover:text-[var(--accent)]">Account</Link>.
         </div>
       </div>
 
@@ -292,8 +313,8 @@ export function NotificationsClient() {
             const content = (
               <>
                 {/* Icon */}
-                <div className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-sm ${colorForType(n.type)}`}>
-                  {iconForType(n.type)}
+                <div className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--bg)] text-sm ${colorForNotification(n)}`}>
+                  {iconForNotification(n)}
                 </div>
 
                 {/* Content */}

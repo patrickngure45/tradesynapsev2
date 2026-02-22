@@ -32,6 +32,9 @@ function getExpectedServices(): ServiceExpectation[] {
   const enableTwap = (process.env.EXCHANGE_ENABLE_TWAP ?? "").trim() === "1";
   if (enableTwap) expected.push({ service: "cron:twap", staleAfterMs: 30 * 60_000 });
 
+  const enableNotifDigest = (process.env.EXCHANGE_ENABLE_NOTIFICATIONS_DIGEST ?? "").trim() === "1";
+  if (enableNotifDigest) expected.push({ service: "cron:notifications-digest", staleAfterMs: 15 * 60_000 });
+
   // Optional scheduled jobs: only treat as required when explicitly enabled.
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
   const expectSweepDeposits = (process.env.EXPECT_SWEEP_DEPOSITS ?? "").trim() === "1";
