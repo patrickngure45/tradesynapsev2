@@ -230,3 +230,45 @@ export function passwordResetEmail(resetUrl: string): { subject: string; text: s
   return { subject, text, html };
 }
 
+// ── Ops Alerts (cron/outbox health) ─────────────────────────────
+export function opsAlertEmail(args: {
+  title: string;
+  summary: string;
+  lines: string[];
+  statusUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `[Ops] ${args.title} — ${BRAND}`;
+  const statusUrl = (args.statusUrl ?? "").trim();
+  const lines = Array.isArray(args.lines) ? args.lines.map((s) => String(s)).filter(Boolean) : [];
+
+  const text = [
+    `${args.summary}`,
+    "",
+    ...(lines.length ? ["Signals:", ...lines.map((l) => `- ${l}`)] : []),
+    ...(statusUrl ? ["", `Status: ${statusUrl}`] : []),
+  ].join("\n");
+
+  const html = wrap({
+    preheader: args.summary,
+    bodyHtml: `
+      <h2 style="margin:0 0 10px;font-size:18px;line-height:1.3;color:#111827;">${escapeHtml(args.title)}</h2>
+      <p style="margin:0 0 12px;color:#374151;">${escapeHtml(args.summary)}</p>
+      ${lines.length ? `
+        <div style="background-color:#fff7ed;border:1px solid #fed7aa;border-left:4px solid #f97316;padding:12px 12px;margin:14px 0;border-radius:8px;">
+          <div style="font-size:12px;color:#7c2d12;font-weight:700;margin-bottom:6px;">Signals</div>
+          <ul style="margin:0;padding-left:18px;color:#7c2d12;font-size:12px;line-height:1.5;">
+            ${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("\n")}
+          </ul>
+        </div>
+      ` : ""}
+      ${statusUrl ? `
+        <p style="margin:10px 0 0;color:#374151;">Open the status page for details:</p>
+        ${button({ url: statusUrl, label: "View status" })}
+        <p style="margin:0;color:#6b7280;font-size:12px;word-break:break-all;">${escapeHtml(statusUrl)}</p>
+      ` : ""}
+    `,
+  });
+
+  return { subject, text, html };
+}
+
