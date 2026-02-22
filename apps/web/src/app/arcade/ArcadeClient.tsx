@@ -172,6 +172,16 @@ type CommunityStatusResponse = {
   claimed: boolean;
 };
 
+type SharedPoolStatusResponse = {
+  ok: true;
+  module: string;
+  week_start: string;
+  participated: boolean;
+  action_id: string | null;
+  action_status: string | null;
+  outcome: any | null;
+};
+
 type RevealResponse = {
   ok: true;
   action_id: string;
@@ -276,6 +286,12 @@ export function ArcadeClient() {
   const [communityError, setCommunityError] = useState<string | null>(null);
   const [communityStatus, setCommunityStatus] = useState<CommunityStatusResponse | null>(null);
   const [communityClaiming, setCommunityClaiming] = useState(false);
+
+  const [sharedPoolProfile, setSharedPoolProfile] = useState<"low" | "medium" | "high">("low");
+  const [sharedPoolLoading, setSharedPoolLoading] = useState(false);
+  const [sharedPoolError, setSharedPoolError] = useState<string | null>(null);
+  const [sharedPoolStatus, setSharedPoolStatus] = useState<SharedPoolStatusResponse | null>(null);
+  const [sharedPoolLast, setSharedPoolLast] = useState<any | null>(null);
 
   const [insightProfile, setInsightProfile] = useState<"low" | "medium" | "high">("low");
   const [insightLoading, setInsightLoading] = useState(false);
@@ -605,6 +621,94 @@ export function ArcadeClient() {
   useEffect(() => {
     void refreshCommunity();
   }, []);
+
+  async function refreshSharedPool() {
+    setSharedPoolError(null);
+    setSharedPoolLoading(true);
+    try {
+      const res = await fetchJsonOrThrow<SharedPoolStatusResponse>("/api/arcade/shared-pool/status", { cache: "no-store" });
+      setSharedPoolStatus(res);
+      setSharedPoolLast(res.outcome ?? null);
+    } catch (e) {
+      if (e instanceof ApiError) setSharedPoolError(e.code);
+      else setSharedPoolError("Network error");
+      setSharedPoolStatus(null);
+    } finally {
+      setSharedPoolLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshSharedPool();
+  }, []);
+
+  async function revealSharedPoolPending(actionId: string) {
+    setSharedPoolError(null);
+    setSharedPoolLoading(true);
+    try {
+      let seed: string | null = null;
+      try {
+        seed = localStorage.getItem(`arcade_seed:${actionId}`);
+      } catch {
+        seed = null;
+      }
+      if (!seed) {
+        setSharedPoolError("missing_client_seed");
+        return;
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/shared-pool/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: actionId, client_seed: seed }),
+      });
+
+      setSharedPoolLast(reveal.result);
+      await Promise.all([refreshSharedPool(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setSharedPoolError(e.code);
+      else setSharedPoolError("Network error");
+    } finally {
+      setSharedPoolLoading(false);
+    }
+  }
+
+  async function joinSharedPool() {
+    setSharedPoolError(null);
+    setSharedPoolLast(null);
+    setSharedPoolLoading(true);
+
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<{ ok: true; action_id: string }>("/api/arcade/shared-pool/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: sharedPoolProfile, client_commit_hash: clientCommit }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<{ ok: true; result: any }>("/api/arcade/shared-pool/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setSharedPoolLast(reveal.result);
+      await Promise.all([refreshSharedPool(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setSharedPoolError(e.code);
+      else setSharedPoolError("Network error");
+    } finally {
+      setSharedPoolLoading(false);
+    }
+  }
 
   async function refreshInventory() {
     setInvError(null);
@@ -1309,6 +1413,100 @@ export function ArcadeClient() {
           {progError ? (
             <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
               Error: <span className="font-semibold">{progError}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 18% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Shared pool</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+            <button className={buttonClassName({ variant: "ghost", size: "xs" })} onClick={refreshSharedPool} disabled={sharedPoolLoading}>
+              {sharedPoolLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly pool claim</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Everyone gets a baseline badge. Some get a boosted cosmetic or a key.</div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                Week start: <span className="font-mono">{sharedPoolStatus?.week_start ?? "…"}</span>
+                <span className="mx-2 text-[var(--border)]">•</span>
+                Cost: <span className="font-mono text-[var(--foreground)]">10</span> shards
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={sharedPoolProfile}
+                  onChange={(e) => setSharedPoolProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Shared pool volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              {sharedPoolStatus?.participated && sharedPoolStatus?.action_status === "committed" && sharedPoolStatus?.action_id ? (
+                <button
+                  className={buttonClassName({ variant: "primary", size: "sm" })}
+                  onClick={() => revealSharedPoolPending(sharedPoolStatus.action_id!)}
+                  disabled={sharedPoolLoading}
+                >
+                  {sharedPoolLoading ? "Revealing…" : "Reveal"}
+                </button>
+              ) : (
+                <button
+                  className={buttonClassName({ variant: "primary", size: "sm" })}
+                  onClick={joinSharedPool}
+                  disabled={sharedPoolLoading || Boolean(sharedPoolStatus?.participated)}
+                >
+                  {sharedPoolStatus?.participated ? "Joined" : sharedPoolLoading ? "Joining…" : "Join"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {sharedPoolError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{sharedPoolError}</span>
+            </div>
+          )}
+
+          {sharedPoolLast?.outcome ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Baseline</div>
+                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{sharedPoolLast.outcome.baseline?.label ?? "—"}</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {sharedPoolLast.outcome.baseline?.rarity ?? "—"}</div>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Boost</div>
+                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+                  {sharedPoolLast.outcome.boost?.label ?? "No boost"}
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {sharedPoolLast.outcome.boost?.rarity ?? "—"}</div>
+              </div>
             </div>
           ) : null}
         </div>

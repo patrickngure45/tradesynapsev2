@@ -13,7 +13,8 @@ export type ArcadeModuleKey =
   | "flash_mission"
   | "streak_protector"
   | "progression"
-  | "seasonal_badges";
+  | "seasonal_badges"
+  | "shared_pool";
 
 export type ArcadeModuleMeta = {
   key: ArcadeModuleKey;
@@ -30,6 +31,7 @@ export const ARCADE_MODULES: ArcadeModuleMeta[] = [
   { key: "mutation", label: "Mutation", volatility: true, fairness: true, description: "Transform a cosmetic into a new one (may upgrade)." },
   { key: "fusion", label: "Fusion", volatility: true, fairness: true, description: "Combine two cosmetics into one (bounded upgrade chance)." },
   { key: "community_event", label: "Community event", volatility: false, fairness: false, description: "Global progress unlocks a weekly claim." },
+  { key: "shared_pool", label: "Shared pool", volatility: true, fairness: true, description: "Weekly pool: everyone gets baseline, some get boosted." },
   { key: "insight_pack", label: "Insight packs", volatility: true, fairness: true, description: "Collectible informational cards (not advice)." },
   { key: "flash_mission", label: "Flash missions", volatility: true, fairness: true, description: "Complete real actions and claim bounded rewards." },
   { key: "streak_protector", label: "Streak protector", volatility: true, fairness: true, description: "Weekly roll that can save a missed day." },

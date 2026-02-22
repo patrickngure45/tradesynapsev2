@@ -257,8 +257,8 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Basic community status + claim flow.
 
 ### 5.2 Shared pools (bounded, non-lottery)
-- [ ] Everyone gets baseline; some get boosted cosmetic/access.
-- [ ] Participation via points (preferred) or clearly disclosed fee.
+- [x] Everyone gets baseline; some get boosted cosmetic/access.
+- [x] Participation via points (preferred) or clearly disclosed fee.
 
 ### 5.3 Rare global events calendar
 - [x] Scheduled “season shifts” with public rules.
