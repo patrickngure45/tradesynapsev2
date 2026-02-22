@@ -733,7 +733,7 @@ function FillsPanel({ marketId }: { marketId: string | null }) {
 
 function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop">("limit");
+  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop" | "twap">("limit");
   const [price, setPrice] = useState<string>("");
   const [triggerPrice, setTriggerPrice] = useState<string>("");
   const [takeProfitPrice, setTakeProfitPrice] = useState<string>("");
@@ -755,6 +755,27 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [balances, setBalances] = useState<BalanceRow[]>([]);
   const [balancesLoading, setBalancesLoading] = useState(false);
 
+  const [twapPlans, setTwapPlans] = useState<
+    Array<{
+      id: string;
+      status: string;
+      side: string;
+      total_quantity: string;
+      remaining_quantity: string;
+      slice_quantity: string;
+      interval_sec: number;
+      next_run_at: string;
+      last_run_status: string | null;
+      last_run_error: string | null;
+    }>
+  >([]);
+  const [twapLoading, setTwapLoading] = useState(false);
+  const [twapTotalQty, setTwapTotalQty] = useState<string>("");
+  const [twapSlices, setTwapSlices] = useState<string>("6");
+  const [twapIntervalSec, setTwapIntervalSec] = useState<string>("30");
+  const [twapFirstRunSec, setTwapFirstRunSec] = useState<string>("3");
+  const [twapTotpCode, setTwapTotpCode] = useState<string>("");
+
   useEffect(() => {
     setErr(null);
     setPrice("");
@@ -764,6 +785,11 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setTimeInForce("GTC");
     setPostOnly(false);
     setQty("");
+
+    setTwapTotalQty("");
+    setTwapSlices("6");
+    setTwapIntervalSec("30");
+    setTwapFirstRunSec("3");
 
     setRiskConfirmed(false);
   }, [market?.id]);
@@ -817,6 +843,26 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     }
   }, []);
 
+  const loadTwapPlans = useCallback(async () => {
+    if (!market?.id) {
+      setTwapPlans([]);
+      return;
+    }
+    setTwapLoading(true);
+    try {
+      const qs = new URLSearchParams({ market_id: market.id, limit: "10" });
+      const data = await fetchJsonOrThrow<{ plans?: any[] }>(
+        `/api/exchange/twap?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setTwapPlans(Array.isArray(data.plans) ? (data.plans as any[]) : []);
+    } catch {
+      setTwapPlans([]);
+    } finally {
+      setTwapLoading(false);
+    }
+  }, [market?.id]);
+
   useEffect(() => {
     void loadImpactDepth();
     const t = setInterval(() => void loadImpactDepth(), 3000);
@@ -828,6 +874,12 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     const t = setInterval(() => void loadBalances(), 12_000);
     return () => clearInterval(t);
   }, [loadBalances, market?.id]);
+
+  useEffect(() => {
+    void loadTwapPlans();
+    const t = setInterval(() => void loadTwapPlans(), 12_000);
+    return () => clearInterval(t);
+  }, [loadTwapPlans]);
 
   const estimatedNotional = useMemo(() => {
     if (!market) return null;
@@ -999,6 +1051,29 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
     setSubmitting(true);
     try {
+      if (type === "twap") {
+        const payload = {
+          market_id: market.id,
+          side,
+          total_quantity: twapTotalQty,
+          slice_count: Number(twapSlices) || 6,
+          interval_sec: Number(twapIntervalSec) || 30,
+          first_run_in_sec: Number(twapFirstRunSec) || 3,
+          totp_code: (twapTotpCode || "").trim() || undefined,
+        };
+        await fetchJsonOrThrow(
+          "/api/exchange/twap",
+          withDevUserHeader({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+        await loadTwapPlans();
+        setTwapTotalQty("");
+        return;
+      }
+
       if (type === "stop_limit") {
         const payload = {
           kind: "stop_limit",
@@ -1088,6 +1163,23 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     }
   };
 
+  const setTwapStatus = async (id: string, status: "active" | "paused" | "canceled") => {
+    setErr(null);
+    try {
+      await fetchJsonOrThrow(
+        "/api/exchange/twap",
+        withDevUserHeader({
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id, status, totp_code: status === "active" ? (twapTotpCode.trim() || undefined) : undefined }),
+        }),
+      );
+      await loadTwapPlans();
+    } catch (e: any) {
+      setErr(e?.message ? String(e.message) : "twap_update_failed");
+    }
+  };
+
   const onHotkey = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
@@ -1129,7 +1221,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-  <div className="grid grid-cols-5 gap-2">
+  <div className="grid grid-cols-6 gap-2">
         <button
           type="button"
           onClick={() => setType("limit")}
@@ -1190,6 +1282,18 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           }
         >
           Trail
+        </button>
+        <button
+          type="button"
+          onClick={() => setType("twap")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "twap"
+              ? "border-[var(--accent-2)] bg-[color-mix(in_srgb,var(--accent-2)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          TWAP
         </button>
       </div>
 
@@ -1263,6 +1367,116 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           }
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
+      ) : null}
+
+      {type === "twap" ? (
+        <>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+            TWAP places market slices on a timer. Use small slices to reduce impact.
+          </div>
+          <input
+            value={twapTotalQty}
+            onChange={(e) => setTwapTotalQty(e.target.value)}
+            onKeyDown={onHotkey}
+            placeholder="Total quantity"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <input
+              value={twapSlices}
+              onChange={(e) => setTwapSlices(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="Slices"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+            <input
+              value={twapIntervalSec}
+              onChange={(e) => setTwapIntervalSec(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="Interval (sec)"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+            <input
+              value={twapFirstRunSec}
+              onChange={(e) => setTwapFirstRunSec(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="Start in (sec)"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+          </div>
+          <input
+            value={twapTotpCode}
+            onChange={(e) => setTwapTotpCode(e.target.value)}
+            onKeyDown={onHotkey}
+            placeholder="2FA code (if enabled)"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+          />
+
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
+            <div className="flex items-center justify-between gap-3 px-3 py-2">
+              <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">TWAP plans</div>
+              <button
+                type="button"
+                onClick={() => void loadTwapPlans()}
+                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+                disabled={twapLoading}
+              >
+                {twapLoading ? "sync" : "refresh"}
+              </button>
+            </div>
+            <div className="border-t border-[var(--border)]">
+              {twapPlans.length === 0 ? (
+                <div className="px-3 py-3 text-xs text-[var(--muted)]">No TWAP plans for this market.</div>
+              ) : (
+                <div className="divide-y divide-[var(--border)]">
+                  {twapPlans.slice(0, 6).map((p) => (
+                    <div key={p.id} className="px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-extrabold text-[var(--foreground)]">
+                            {String(p.side).toUpperCase()} · rem {fmtCompact(String(p.remaining_quantity), 8)} · slice {fmtCompact(String(p.slice_quantity), 8)}
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                            {p.status} · next {p.next_run_at ? new Date(String(p.next_run_at)).toLocaleTimeString() : "—"}
+                            {p.last_run_error ? ` · ${p.last_run_error}` : ""}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {p.status === "active" ? (
+                            <button
+                              type="button"
+                              onClick={() => void setTwapStatus(p.id, "paused")}
+                              className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                            >
+                              Pause
+                            </button>
+                          ) : p.status === "paused" ? (
+                            <button
+                              type="button"
+                              onClick={() => void setTwapStatus(p.id, "active")}
+                              className="rounded-lg bg-[var(--accent-2)] px-2 py-1 text-[11px] font-semibold text-white hover:brightness-110"
+                            >
+                              Resume
+                            </button>
+                          ) : null}
+                          {p.status !== "completed" && p.status !== "canceled" ? (
+                            <button
+                              type="button"
+                              onClick={() => void setTwapStatus(p.id, "canceled")}
+                              className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       ) : null}
 
       <input
@@ -1339,7 +1553,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           (side === "buy" ? "bg-[var(--up)]" : "bg-[var(--down)]")
         }
       >
-        {submitting ? "Submitting…" : side === "buy" ? "Place Buy" : "Place Sell"}
+        {submitting ? "Submitting…" : type === "twap" ? "Start TWAP" : side === "buy" ? "Place Buy" : "Place Sell"}
       </button>
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">

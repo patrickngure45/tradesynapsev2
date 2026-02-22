@@ -29,6 +29,9 @@ function getExpectedServices(): ServiceExpectation[] {
   // DCA typically runs daily/weekly; allow a wide stale window.
   if (enableRecurringBuys) expected.push({ service: "cron:recurring-buys", staleAfterMs: 36 * 60 * 60_000 });
 
+  const enableTwap = (process.env.EXCHANGE_ENABLE_TWAP ?? "").trim() === "1";
+  if (enableTwap) expected.push({ service: "cron:twap", staleAfterMs: 30 * 60_000 });
+
   // Optional scheduled jobs: only treat as required when explicitly enabled.
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
   const expectSweepDeposits = (process.env.EXPECT_SWEEP_DEPOSITS ?? "").trim() === "1";
