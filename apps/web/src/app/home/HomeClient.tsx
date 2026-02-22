@@ -44,8 +44,13 @@ export function HomeClient() {
       id: string;
       base_symbol: string;
       fiat: string;
-      direction: string;
-      threshold: string;
+      template?: string | null;
+      direction?: string | null;
+      threshold?: string | null;
+      window_sec?: number | null;
+      pct_change?: string | null;
+      spread_bps?: string | null;
+      volatility_pct?: string | null;
       status: string;
       cooldown_sec: number;
       last_triggered_at: string | null;
@@ -536,20 +541,6 @@ export function HomeClient() {
                 placeholder="USD"
                 className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
               />
-              <select
-                value={alertDirection}
-                onChange={(e) => setAlertDirection(e.target.value as any)}
-                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)]"
-              >
-                <option value="above">Above</option>
-                <option value="below">Below</option>
-              </select>
-              <input
-                value={alertThreshold}
-                onChange={(e) => setAlertThreshold(e.target.value)}
-                placeholder="Threshold"
-                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
-              />
               <input
                 value={alertCooldown}
                 onChange={(e) => setAlertCooldown(e.target.value)}
@@ -639,6 +630,21 @@ export function HomeClient() {
                   />
                 </>
               ) : null}
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={createAlert}
+                className="rounded-lg bg-[var(--accent-2)] px-3 py-2 text-xs font-semibold text-white hover:brightness-110"
+              >
+                Create
+              </button>
+              <Link href="/notifications" className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
+                View notifications →
+              </Link>
+            </div>
+          </div>
 
           <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)]">
             {alertsLoading && alerts.length === 0 ? (
