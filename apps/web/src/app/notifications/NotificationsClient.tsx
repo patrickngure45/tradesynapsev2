@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { SiteChrome } from "@/components/SiteChrome";
 import { fetchJsonOrThrow } from "@/lib/api/client";
 
 type Notification = {
@@ -26,7 +25,7 @@ function safeInternalHref(v: unknown): string | null {
 
 function withDevUserHeader(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
-  if (typeof window !== "undefined") {
+  if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
     const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
     if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
   }
@@ -187,8 +186,7 @@ export function NotificationsClient() {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <SiteChrome>
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="space-y-6">
       {/* Synapse header */}
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
         <div
@@ -351,6 +349,5 @@ export function NotificationsClient() {
         </div>
       )}
     </div>
-    </SiteChrome>
   );
 }

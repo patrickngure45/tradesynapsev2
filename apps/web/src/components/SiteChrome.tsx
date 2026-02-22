@@ -28,21 +28,7 @@ function initials2(label: string): string {
   return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
 }
 
-const products = [
-  { href: "/home", label: "Home" },
-  { href: "/wallet", label: "Wallet" },
-  { href: "/terminal", label: "Terminal" },
-  { href: "/p2p", label: "P2P" },
-  { href: "/arcade", label: "Arcade" },
-] as const;
-
 const tools: Array<{ href: string; label: string }> = [];
-
-const quickActions = [
-  { href: "/wallet", label: "Deposit" },
-  { href: "/wallet/withdraw", label: "Withdraw" },
-  { href: "/terminal", label: "Trade" },
-] as const;
 
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -95,6 +81,40 @@ export function SiteChrome({ children }: { children: ReactNode }) {
     const email = String(u?.email ?? "").trim();
     return name || email || "Account";
   }, [profile]);
+
+  const isAuthed = Boolean(profile?.user);
+
+  const products = useMemo(() => {
+    if (isAuthed) {
+      return [
+        { href: "/home", label: "Home" },
+        { href: "/wallet", label: "Wallet" },
+        { href: "/terminal", label: "Terminal" },
+        { href: "/p2p", label: "P2P" },
+        { href: "/arcade", label: "Arcade" },
+      ] as const;
+    }
+    return [
+      { href: "/p2p", label: "P2P" },
+      { href: "/support/fees", label: "Fees" },
+      { href: "/support/help", label: "Help" },
+      { href: "/status", label: "Status" },
+    ] as const;
+  }, [isAuthed]);
+
+  const quickActions = useMemo(() => {
+    if (isAuthed) {
+      return [
+        { href: "/wallet", label: "Deposit" },
+        { href: "/wallet/withdraw", label: "Withdraw" },
+        { href: "/terminal", label: "Trade" },
+      ] as const;
+    }
+    return [
+      { href: "/login", label: "Sign in" },
+      { href: "/signup", label: "Create" },
+    ] as const;
+  }, [isAuthed]);
 
   const NLink = ({
     href,
@@ -191,11 +211,11 @@ export function SiteChrome({ children }: { children: ReactNode }) {
               <NLink key={t.href} {...t} />
             ))}
             {tools.length > 0 && <div className="h-4 w-px bg-[var(--border)]" />}
-            <NotificationBell />
             <ThemeToggle />
+            {isAuthed ? <NotificationBell /> : null}
             <div className="relative group">
               <Link
-                href="/account"
+                href={isAuthed ? "/account" : "/login"}
                 aria-label="Account"
                 className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg)] pr-2 pl-1 py-1 text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)] transition-colors"
                 title={userLabel}
@@ -208,7 +228,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
                   className="bg-[var(--bg)]"
                 />
                 <span className="hidden lg:block text-xs font-semibold max-w-[140px] truncate">
-                  {userLabel}
+                  {isAuthed ? userLabel : "Sign in"}
                 </span>
               </Link>
 
@@ -229,7 +249,24 @@ export function SiteChrome({ children }: { children: ReactNode }) {
                           {String(profile.user.display_name ?? "").trim() || "Account"}
                         </div>
                         <div className="mt-0.5 text-[11px] text-[var(--muted)] truncate">
-                          {profile.user.email ?? profile.user.id}
+                        <>
+                          <div className="text-xs font-semibold text-[var(--foreground)]">Welcome</div>
+                          <div className="mt-1 text-[11px] text-[var(--muted)]">Sign in to manage your wallet and alerts.</div>
+                          <div className="mt-3 flex items-center gap-2">
+                            <Link
+                              href="/login"
+                              className="inline-flex items-center justify-center rounded-lg bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white hover:brightness-110"
+                            >
+                              Sign in
+                            </Link>
+                            <Link
+                              href="/signup"
+                              className="inline-flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px] font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                            >
+                              Create
+                            </Link>
+                          </div>
+                        </>
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-[var(--muted)]">
                           <div>
@@ -374,6 +411,7 @@ export function SiteChrome({ children }: { children: ReactNode }) {
                <li><Link href="/support/help" className="hover:text-[var(--accent)]">Help Center</Link></li>
                <li><Link href="/support/api" className="hover:text-[var(--accent)]">API Documentation</Link></li>
                <li><Link href="/support/fees" className="hover:text-[var(--accent)]">Fees</Link></li>
+               <li><Link href="/status" className="hover:text-[var(--accent)]">Status</Link></li>
             </ul>
           </div>
         </div>

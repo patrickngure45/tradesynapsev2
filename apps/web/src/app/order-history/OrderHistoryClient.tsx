@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
+import { fetchJsonOrThrow } from "@/lib/api/client";
 
 type Fill = {
   id: string;
@@ -37,14 +38,11 @@ export function OrderHistoryClient() {
   const fetchOrders = useCallback(async () => {
     setError(null);
     try {
-      const userId = localStorage.getItem("ts_user_id") ?? "";
-      const res = await fetch(
-        `/api/exchange/orders/history?status=${statusFilter}&limit=100`,
-        { credentials: "include", headers: userId ? { "x-user-id": userId } : {} },
+      const data = await fetchJsonOrThrow<{ orders?: Order[] }>(
+        `/api/exchange/orders/history?status=${encodeURIComponent(statusFilter)}&limit=100`,
+        { cache: "no-store" },
       );
-      if (!res.ok) throw new Error("Failed to fetch order history");
-      const data = await res.json();
-      setOrders(data.orders ?? []);
+      setOrders(Array.isArray(data.orders) ? data.orders : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load order history");
     } finally {
@@ -67,12 +65,12 @@ export function OrderHistoryClient() {
 
   const statusBadge = (status: string) => {
     const map: Record<string, string> = {
-      open: "bg-[var(--accent)]/20 text-[var(--accent)]",
-      partially_filled: "bg-yellow-500/20 text-yellow-400",
-      filled: "bg-[var(--up)]/20 text-[var(--up)]",
-      canceled: "bg-gray-500/20 text-gray-400",
+      open: "bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-[var(--accent)] border-[var(--border)]",
+      partially_filled: "bg-[color-mix(in_srgb,var(--warn)_10%,transparent)] text-[var(--warn)] border-[var(--border)]",
+      filled: "bg-[color-mix(in_srgb,var(--up)_10%,transparent)] text-[var(--up)] border-[var(--border)]",
+      canceled: "bg-[var(--bg)] text-[var(--muted)] border-[var(--border)]",
     };
-    return map[status] ?? "bg-gray-500/20 text-gray-400";
+    return map[status] ?? "bg-[var(--bg)] text-[var(--muted)] border-[var(--border)]";
   };
 
   return (

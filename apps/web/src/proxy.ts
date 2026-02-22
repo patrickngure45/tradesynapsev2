@@ -212,6 +212,8 @@ const PROTECTED_PREFIXES = [
   "/portfolio", "/order-history", "/account", "/admin",
   "/arbitrage", "/copy-trading", "/wallet", "/connections",
   "/exchange", "/trades", "/ai", "/notifications",
+  "/home", "/terminal",
+  "/p2p/orders",
 ];
 
 // HTTP methods that need CSRF origin check

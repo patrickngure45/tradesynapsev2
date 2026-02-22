@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { SiteChrome } from "@/components/SiteChrome";
 import { getPaymentMethodName } from "@/lib/p2p/constants";
 import type { PaymentMethodSnapshot } from "@/lib/p2p/paymentSnapshot";
 import { fiatFlag, paymentMethodBadge } from "@/lib/p2p/display";
@@ -54,7 +55,7 @@ function formatNumber(value: string | number, opts?: { minimumFractionDigits?: n
 
 function withDevUserHeader(init?: RequestInit): RequestInit {
     const headers = new Headers(init?.headers);
-    if (typeof window !== "undefined") {
+    if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
         const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
         if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
     }
@@ -533,42 +534,67 @@ export default function OrderPage() {
         }
     };
 
-    if (loading) return <div className="p-10 text-white">Loading...</div>;
+    if (loading) {
+        return (
+            <SiteChrome>
+                <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6">
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-6 py-10 text-center text-sm text-[var(--muted)]">
+                        Loading order…
+                    </div>
+                </main>
+            </SiteChrome>
+        );
+    }
 
     if (loadError) {
         return (
-            <div className="min-h-screen bg-[var(--background)] p-6">
-                <div className="mx-auto max-w-2xl rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
-                    <h1 className="text-lg font-bold text-[var(--foreground)]">Unable to open order</h1>
-                    <p className="mt-2 text-sm text-[var(--muted)]">{loadError.message}</p>
-                    <div className="mt-4 flex items-center gap-3">
-                        <Link
-                            href="/login"
-                            className={buttonClassName({ variant: "primary", size: "md", className: "h-9" })}
-                        >
-                            Go to Login
-                        </Link>
-                        <Link
-                            href="/p2p/orders"
-                            className={buttonClassName({ variant: "secondary", size: "md", className: "h-9" })}
-                        >
-                            My Orders
-                        </Link>
+            <SiteChrome>
+                <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6">
+                    <div className="mx-auto max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-[var(--shadow)]">
+                        <h1 className="text-lg font-bold text-[var(--foreground)]">Unable to open order</h1>
+                        <p className="mt-2 text-sm text-[var(--muted)]">{loadError.message}</p>
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <Link
+                                href="/p2p/orders"
+                                className={buttonClassName({ variant: "secondary", size: "sm" })}
+                            >
+                                My P2P orders
+                            </Link>
+                            <Link
+                                href="/p2p"
+                                className={buttonClassName({ variant: "secondary", size: "sm" })}
+                            >
+                                Marketplace
+                            </Link>
+                            <Link
+                                href="/login"
+                                className={buttonClassName({ variant: "primary", size: "sm" })}
+                            >
+                                Sign in
+                            </Link>
+                        </div>
+                        <div className="mt-4 text-xs text-[var(--muted)]">Error: {loadError.code}</div>
                     </div>
-                    <div className="mt-4 text-xs text-[var(--muted)]">Error: {loadError.code}</div>
-                </div>
-            </div>
+                </main>
+            </SiteChrome>
         );
     }
 
     if (!order) {
         return (
-            <div className="min-h-screen bg-[var(--background)] p-6">
-                <div className="mx-auto max-w-2xl rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
-                    <h1 className="text-lg font-bold text-[var(--foreground)]">Order not available</h1>
-                    <p className="mt-2 text-sm text-[var(--muted)]">This order could not be loaded.</p>
-                </div>
-            </div>
+            <SiteChrome>
+                <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6">
+                    <div className="mx-auto max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-[var(--shadow)]">
+                        <h1 className="text-lg font-bold text-[var(--foreground)]">Order not available</h1>
+                        <p className="mt-2 text-sm text-[var(--muted)]">This order could not be loaded.</p>
+                        <div className="mt-4">
+                            <Link href="/p2p/orders" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                                Back to my orders
+                            </Link>
+                        </div>
+                    </div>
+                </main>
+            </SiteChrome>
         );
     }
 
@@ -692,8 +718,8 @@ export default function OrderPage() {
     };
 
   return (
-        <div className="min-h-screen bg-[var(--background)] p-4 md:p-8">
-            <div className="mx-auto max-w-6xl">
+      <SiteChrome>
+      <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-6">
                 {/* Synapse header */}
                 <div className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
                     <div className="relative p-5 md:p-6">
@@ -1618,9 +1644,9 @@ export default function OrderPage() {
                 </div>
             )}
 
-        </div>
-      </div>
-        </div>
-    </div>
+                </div>
+            </div>
+        </main>
+    </SiteChrome>
   );
 }

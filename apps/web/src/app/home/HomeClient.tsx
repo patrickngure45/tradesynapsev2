@@ -59,6 +59,23 @@ export function HomeClient() {
   const [alertThreshold, setAlertThreshold] = useState<string>("");
   const [alertCooldown, setAlertCooldown] = useState<string>("3600");
 
+  const [notifications, setNotifications] = useState<
+    Array<{
+      id: string;
+      type: string;
+      title: string;
+      body: string;
+      metadata_json: unknown;
+      read: boolean;
+      created_at: string;
+    }>
+  >([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  const [summary, setSummary] = useState<{ open_orders: number; pending_withdrawals: number; active_p2p_orders: number } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -106,6 +123,42 @@ export function HomeClient() {
     }
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    setNotifLoading(true);
+    try {
+      const data = await fetchJsonOrThrow<{ notifications?: any[]; unread_count?: number }>(
+        "/api/notifications?limit=8",
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setNotifications(Array.isArray(data.notifications) ? (data.notifications as any[]) : []);
+      setUnreadCount(Number(data.unread_count ?? 0) || 0);
+    } catch {
+      setNotifications([]);
+      setUnreadCount(0);
+    } finally {
+      setNotifLoading(false);
+    }
+  }, []);
+
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const data = await fetchJsonOrThrow<{ open_orders?: number; pending_withdrawals?: number; active_p2p_orders?: number }>(
+        "/api/home/summary",
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setSummary({
+        open_orders: Number(data.open_orders ?? 0) || 0,
+        pending_withdrawals: Number(data.pending_withdrawals ?? 0) || 0,
+        active_p2p_orders: Number(data.active_p2p_orders ?? 0) || 0,
+      });
+    } catch {
+      setSummary(null);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const t = setInterval(load, 25_000);
@@ -115,12 +168,16 @@ export function HomeClient() {
   useEffect(() => {
     loadWatchlist();
     loadAlerts();
+    loadNotifications();
+    loadSummary();
     const t = setInterval(() => {
       loadWatchlist();
       loadAlerts();
+      loadNotifications();
+      loadSummary();
     }, 45_000);
     return () => clearInterval(t);
-  }, [loadWatchlist, loadAlerts]);
+  }, [loadWatchlist, loadAlerts, loadNotifications, loadSummary]);
 
   const addToWatchlist = async () => {
     const sym = newSymbol.trim().toUpperCase();
@@ -411,6 +468,259 @@ export function HomeClient() {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)] lg:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold tracking-tight">Recent activity</h2>
+              {unreadCount > 0 ? (
+                <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--bg)] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  {unreadCount} unread
+                </span>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadNotifications}
+                className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                disabled={notifLoading}
+              >
+                {notifLoading ? "Refreshing…" : "Refresh"}
+              </button>
+              <Link href="/notifications" className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
+                View all →
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-4 overflow-hidden rounded-xl border border-[var(--border)]">
+            {notifLoading && notifications.length === 0 ? (
+              <div className="bg-[var(--bg)] px-3 py-3 text-xs text-[var(--muted)]">Loading activity…</div>
+            ) : notifications.length === 0 ? (
+              <div className="bg-[var(--bg)] px-3 py-3 text-xs text-[var(--muted)]">No activity yet.</div>
+            ) : (
+              <ul className="divide-y divide-[var(--border)]">
+                {notifications.slice(0, 8).map((n) => (
+                  <li key={n.id} className="bg-[var(--bg)] px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className={(n.read ? "" : "text-[var(--foreground)] ") + "truncate text-xs font-semibold"}>
+                            {n.title}
+                          </div>
+                          {!n.read ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" /> : null}
+                        </div>
+                        {n.body ? (
+                          <div className="mt-0.5 line-clamp-2 text-[11px] text-[var(--muted)]">{n.body}</div>
+                        ) : null}
+                      </div>
+                      <div className="shrink-0 text-[10px] text-[var(--muted)]">
+                        {n.created_at ? new Date(n.created_at).toLocaleString() : "—"}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+          <h2 className="text-sm font-semibold tracking-tight">Next steps</h2>
+          <div className="mt-2 text-xs text-[var(--muted)]">Common actions to keep the daily loop tight.</div>
+
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">Open items</div>
+              <button
+                type="button"
+                onClick={loadSummary}
+                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+                disabled={summaryLoading}
+              >
+                refresh
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+              <Link href="/order-history" className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2">
+                <div className="text-xs font-extrabold text-[var(--foreground)]">{summary ? summary.open_orders : "—"}</div>
+                <div className="mt-0.5 text-[10px] text-[var(--muted)]">open orders</div>
+              </Link>
+              <Link href="/wallet" className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2">
+                <div className="text-xs font-extrabold text-[var(--foreground)]">{summary ? summary.pending_withdrawals : "—"}</div>
+                <div className="mt-0.5 text-[10px] text-[var(--muted)]">withdrawals</div>
+              </Link>
+              <Link href="/p2p/orders" className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2">
+                <div className="text-xs font-extrabold text-[var(--foreground)]">{summary ? summary.active_p2p_orders : "—"}</div>
+                <div className="mt-0.5 text-[10px] text-[var(--muted)]">p2p active</div>
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-2">
+            <Link href="/wallet" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+              Deposit / balances
+            </Link>
+            <Link href="/terminal" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+              Open terminal
+            </Link>
+            <Link href="/p2p" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+              Browse P2P
+            </Link>
+          </div>
+          <div className="mt-4 text-[11px] text-[var(--muted)]">
+            Tip: price alerts trigger notifications via the scheduled `price-alerts` cron.
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)] lg:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold tracking-tight">P2P desk</h2>
+            <Link
+              href={summary && summary.active_p2p_orders > 0 ? "/p2p/orders" : "/p2p"}
+              className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              {summary && summary.active_p2p_orders > 0 ? "View my orders →" : "Browse market →"}
+            </Link>
+          </div>
+
+          <div
+            className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4"
+            style={{
+              background:
+                "radial-gradient(680px 220px at 15% 0%, color-mix(in oklab, var(--up) 10%, transparent) 0%, transparent 60%), radial-gradient(520px 220px at 90% 10%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 55%)",
+            }}
+          >
+            {summary ? (
+              summary.active_p2p_orders > 0 ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-extrabold text-[var(--foreground)]">
+                      {summary.active_p2p_orders} active {summary.active_p2p_orders === 1 ? "trade" : "trades"}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[var(--muted)]">Open “My orders” to pay/verify/release and keep escrow moving.</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link href="/p2p/orders" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      My P2P orders
+                    </Link>
+                    <Link href="/p2p" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                      Marketplace
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-extrabold text-[var(--foreground)]">No active P2P trades</div>
+                    <div className="mt-0.5 text-xs text-[var(--muted)]">Browse the market to buy/sell with escrow and local rails.</div>
+                  </div>
+                  <div>
+                    <Link href="/p2p" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      Browse P2P
+                    </Link>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="text-xs text-[var(--muted)]">Loading P2P status…</div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+          <h2 className="text-sm font-semibold tracking-tight">Spot trading</h2>
+          <div className="mt-2 text-xs text-[var(--muted)]">Fast execution lives in the Terminal. History and fills live in Orders.</div>
+
+          <div
+            className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3"
+            style={{
+              background:
+                "radial-gradient(680px 220px at 15% 0%, color-mix(in oklab, var(--accent-2) 10%, transparent) 0%, transparent 60%), radial-gradient(520px 220px at 90% 10%, color-mix(in oklab, var(--warn) 10%, transparent) 0%, transparent 55%)",
+            }}
+          >
+            {summary ? (
+              summary.open_orders > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <div className="text-sm font-extrabold text-[var(--foreground)]">
+                    {summary.open_orders} open {summary.open_orders === 1 ? "order" : "orders"}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">Review open/partial orders and fill details.</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Link href="/order-history" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      Orders
+                    </Link>
+                    <Link href="/terminal" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                      Open terminal
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="text-sm font-extrabold text-[var(--foreground)]">No open orders</div>
+                  <div className="text-xs text-[var(--muted)]">Open the terminal to place a limit or market order.</div>
+                  <div className="mt-1">
+                    <Link href="/terminal" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      Open terminal
+                    </Link>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="text-xs text-[var(--muted)]">Loading trading status…</div>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">Trust</div>
+            <div className="mt-1 text-xs text-[var(--muted)]">If anything feels off, check status and signals first.</div>
+            <div className="mt-3 grid gap-2">
+              <Link href="/status" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                Status page
+              </Link>
+              <Link href="/notifications" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                Signals
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">Wallet rail</div>
+            {summary ? (
+              summary.pending_withdrawals > 0 ? (
+                <>
+                  <div className="mt-1 text-xs text-[var(--muted)]">
+                    {summary.pending_withdrawals} pending {summary.pending_withdrawals === 1 ? "withdrawal" : "withdrawals"}.
+                  </div>
+                  <div className="mt-3">
+                    <Link href="/wallet" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      Open wallet
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-1 text-xs text-[var(--muted)]">Need to fund your account? Start with your deposit address.</div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Link href="/wallet#deposit" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                      Deposit address
+                    </Link>
+                    <Link href="/wallet" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                      Wallet
+                    </Link>
+                  </div>
+                </>
+              )
+            ) : (
+              <div className="mt-1 text-xs text-[var(--muted)]">Loading wallet status…</div>
             )}
           </div>
         </div>

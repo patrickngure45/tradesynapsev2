@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { SiteChrome } from "@/components/SiteChrome";
 import { P2PMarketplace } from "./P2PMarketplace";
 import { SUPPORTED_P2P_COUNTRIES } from "@/lib/p2p/supportedCountries";
 import { countryNameToIso2 } from "@/lib/p2p/countryIso2";
 import { BRAND_NAME } from "@/lib/seo/brand";
+import { buttonClassName } from "@/components/ui/Button";
 
 export const metadata: Metadata = {
   title: `P2P Trading | ${BRAND_NAME}`,
@@ -47,6 +49,18 @@ export default function P2PPage() {
                   <span className="font-semibold text-[var(--foreground)]">local payment rails</span>. Crypto stays in{" "}
                   <span className="font-semibold text-[var(--foreground)]">secure escrow</span> until payment is confirmed.
                 </p>
+
+                <div className="mt-5 flex flex-wrap items-center gap-2">
+                  <Link href="/p2p/orders" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                    My orders
+                  </Link>
+                  <Link href="/home" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                    Dashboard
+                  </Link>
+                  <Link href="/wallet" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                    Wallet
+                  </Link>
+                </div>
 
                 <div className="mt-5">
                   <div

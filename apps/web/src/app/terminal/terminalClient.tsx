@@ -1425,7 +1425,7 @@ export function TerminalClient() {
     if (!selectedMarketId && clean.length > 0) {
       setSelectedMarketId(clean[0]!.id);
     }
-  }, []);
+  }, [selectedMarketId]);
 
   useEffect(() => {
     void loadMarkets();

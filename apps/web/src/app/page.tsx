@@ -1,7 +1,10 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { SiteChrome } from "@/components/SiteChrome";
 import { HomepageStats } from "./HomepageStats";
+import { getSessionCookieName, verifySessionToken } from "@/lib/auth/session";
 
 function SectionHeader({ tone, title }: { tone: "accent" | "accent2" | "up"; title: string }) {
   const dot =
@@ -33,7 +36,23 @@ function Coin({ symbol }: { symbol: string }) {
   );
 }
 
-export default function Home() {
+export default async function Home() {
+  // If the user has a valid session, the real landing page is /home.
+  // Keep this server-side to avoid flicker.
+  try {
+    const secret = String(process.env.PROOFPACK_SESSION_SECRET ?? "").trim();
+    if (secret) {
+      const cookieStore = await cookies();
+      const token = cookieStore.get(getSessionCookieName())?.value ?? "";
+      if (token) {
+        const verified = verifySessionToken({ token, secret });
+        if (verified.ok) redirect("/home");
+      }
+    }
+  } catch {
+    // If this fails for any reason, fall back to rendering the public landing page.
+  }
+
   return (
     <SiteChrome>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-14 px-6 py-14 sm:py-16">
@@ -70,14 +89,14 @@ export default function Home() {
 
                   <h1 className="mt-6 text-balance text-4xl font-semibold tracking-tight text-[var(--foreground)] sm:text-6xl">
                     <span className="bg-gradient-to-br from-[var(--foreground)] to-[color-mix(in_srgb,var(--accent)_70%,var(--foreground))] bg-clip-text text-transparent">
-                      Execute faster
+                      Coinwaka
                     </span>{" "}
-                    across P2P and wallet rails.
+                    — your daily crypto command center.
                   </h1>
 
                   <p className="mt-3 max-w-2xl text-balance text-base leading-relaxed text-[var(--muted)] sm:text-lg">
-                    A modern command center for escrow settlement and on-chain deposits.
-                    Built to stay clean under pressure: fewer clicks, clearer state, and predictable flows.
+                    Track balances, manage watchlists and alerts, and settle P2P escrow with clear state.
+                    Built to stay clean under pressure: fewer clicks, explainable status, predictable flows.
                   </p>
 
                   <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -88,10 +107,16 @@ export default function Home() {
                       Create account
                     </Link>
                     <Link
-                      href="/wallet"
+                      href="/login"
                       className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg)] px-6 text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--card-2)]"
                     >
-                      Open wallet
+                      Sign in
+                    </Link>
+                    <Link
+                      href="/p2p"
+                      className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--bg)] px-6 text-sm font-semibold text-[var(--muted)] transition hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+                    >
+                      Explore P2P
                     </Link>
                   </div>
 

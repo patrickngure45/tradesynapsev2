@@ -1409,6 +1409,7 @@ export function ExchangeWalletClient({ isAdmin }: { isAdmin?: boolean }) {
 
  {/* ── Deposit Address ─────────────────────────────── */}
  <div
+   id="deposit"
    ref={depositSectionRef}
    className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/55 p-4 shadow-[var(--shadow)]"
  >

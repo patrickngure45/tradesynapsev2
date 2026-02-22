@@ -32,13 +32,49 @@ export default async function WalletPage() {
 
   return (
     <SiteChrome>
-      <main className="mx-auto flex w-full max-w-6xl flex-col px-6 py-10 sm:py-14">
-        <div className="fade-in-up">
-          <div className="mb-4 flex items-center justify-end">
-            <Link href="/wallet/withdraw" className={buttonClassName({ variant: "primary", size: "sm" })}>
-              Withdraw
-            </Link>
+      <main className="mx-auto w-full max-w-6xl px-6 py-10 sm:py-14">
+        <section className="relative mb-6 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+          <div
+            className="pointer-events-none absolute inset-0 opacity-60"
+            aria-hidden
+            style={{
+              background:
+                "radial-gradient(700px 260px at 20% 0%, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 60%), radial-gradient(440px 220px at 90% 10%, color-mix(in oklab, var(--accent-2) 12%, transparent) 0%, transparent 55%)",
+            }}
+          />
+
+          <div className="relative p-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+                    <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
+                    <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+                  </span>
+                  <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Wallet</div>
+                  <div className="h-px flex-1 bg-[var(--border)]" />
+                </div>
+
+                <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">Balances & rails</h1>
+                <p className="mt-2 text-sm text-[var(--muted)]">Deposit, move funds, convert, and review holds — with clear state.</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Link href="/home" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                  Dashboard
+                </Link>
+                <Link href="/wallet/withdraw" className={buttonClassName({ variant: "primary", size: "sm" })}>
+                  Withdraw
+                </Link>
+                <Link href="/status" className={buttonClassName({ variant: "secondary", size: "sm" })}>
+                  Status
+                </Link>
+              </div>
+            </div>
           </div>
+        </section>
+
+        <div className="fade-in-up">
           <ExchangeWalletClient isAdmin={isAdmin} />
         </div>
       </main>

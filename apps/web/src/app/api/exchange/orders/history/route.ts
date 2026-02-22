@@ -1,29 +1,55 @@
-import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+
+import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
+import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
+import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireActiveUser } from "@/lib/auth/activeUser";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
  * GET /api/exchange/orders/history
  *
  * Returns full order history with fill details.
- * Query: ?status=filled|canceled|all  &market_id=uuid  &limit=100
+ * Query: ?status=open|partially_filled|filled|canceled|all  &market_id=uuid  &limit=100
  */
-export async function GET(req: NextRequest) {
-  const userId = req.headers.get("x-user-id");
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+const querySchema = z.object({
+  status: z.enum(["open", "partially_filled", "filled", "canceled", "all"]).optional().default("all"),
+  market_id: z.string().uuid().optional(),
+  limit: z
+    .string()
+    .optional()
+    .transform((v) => Math.max(1, Math.min(500, Number(v) || 100))),
+});
 
-  const url = new URL(req.url);
-  const status = url.searchParams.get("status") ?? "all";
-  const marketId = url.searchParams.get("market_id");
-  const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "100", 10), 500);
-
+export async function GET(req: Request) {
   const sql = getSql();
 
+  const actingUserId = getActingUserId(req);
+  const authErr = requireActingUserIdInProd(actingUserId);
+  if (authErr) return apiError(authErr);
+  if (!actingUserId) return apiError("missing_x_user_id");
+
+  const url = new URL(req.url);
+  let q: z.infer<typeof querySchema>;
   try {
-    const orders = await sql`
+    q = querySchema.parse({
+      status: url.searchParams.get("status") ?? undefined,
+      market_id: url.searchParams.get("market_id") ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
+    });
+  } catch (e) {
+    return apiZodError(e) ?? apiError("invalid_input");
+  }
+
+  try {
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    if (activeErr) return apiError(activeErr);
+
+    const orders = await retryOnceOnTransientDbError(async () => {
+      return await sql`
       SELECT
         o.id,
         o.market_id,
@@ -51,16 +77,19 @@ export async function GET(req: NextRequest) {
         ) AS fills
       FROM ex_order o
       JOIN ex_market m ON m.id = o.market_id
-      WHERE o.user_id = ${userId}::uuid
-        AND (${status} = 'all' OR o.status = ${status})
-        AND (${marketId ?? null}::uuid IS NULL OR o.market_id = ${marketId ?? null}::uuid)
+      WHERE o.user_id = ${actingUserId}::uuid
+        AND (${q.status} = 'all' OR o.status = ${q.status})
+        AND (${q.market_id ?? null}::uuid IS NULL OR o.market_id = ${q.market_id ?? null}::uuid)
       ORDER BY o.created_at DESC
-      LIMIT ${limit}
+      LIMIT ${q.limit}
     `;
+    });
 
-    return NextResponse.json({ orders });
-  } catch (err: unknown) {
-    console.error("[order-history] Error:", err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: "Failed to load order history" }, { status: 500 });
+    return Response.json({ orders });
+  } catch (e: unknown) {
+    const resp = responseForDbError("exchange.orders.history", e);
+    if (resp) return resp;
+    console.error("[order-history] Error:", e instanceof Error ? e.message : String(e));
+    return apiError("internal_error", { status: 500 });
   }
 }

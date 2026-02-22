@@ -36,8 +36,8 @@ function fetchOpts(extra?: RequestInit): RequestInit {
     if (csrf && !headers.has("x-csrf-token")) headers.set("x-csrf-token", csrf);
   }
 
-  if (typeof window !== "undefined") {
-    const uid = localStorage.getItem("ts_user_id");
+  if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+    const uid = localStorage.getItem("ts_user_id") ?? localStorage.getItem("pp_user_id");
     if (uid && !headers.has("x-user-id")) headers.set("x-user-id", uid);
   }
 

@@ -6,6 +6,7 @@ import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransie
 import { getExternalIndexUsdt } from "@/lib/market/indexPrice";
 import { getOrComputeFxReferenceRate } from "@/lib/fx/reference";
 import { createNotification } from "@/lib/notifications";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
 
   const url = new URL(request.url);
   let q: z.infer<typeof querySchema>;
+  const startedAt = Date.now();
   try {
     q = querySchema.parse({ max: url.searchParams.get("max") ?? undefined });
   } catch (e) {
@@ -142,8 +144,29 @@ export async function POST(request: Request) {
       });
     }
 
-    return Response.json({ ok: true, scanned: alerts.length, triggered });
+    const tookMs = Date.now() - startedAt;
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "cron:price-alerts",
+        status: "ok",
+        details: { scanned: alerts.length, triggered, took_ms: tookMs },
+      });
+    } catch {
+      // ignore
+    }
+
+    return Response.json({ ok: true, scanned: alerts.length, triggered, took_ms: tookMs });
   } catch (e) {
+    const tookMs = Date.now() - startedAt;
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "cron:price-alerts",
+        status: "error",
+        details: { took_ms: tookMs },
+      });
+    } catch {
+      // ignore
+    }
     const resp = responseForDbError("cron.price-alerts", e);
     if (resp) return resp;
     throw e;
