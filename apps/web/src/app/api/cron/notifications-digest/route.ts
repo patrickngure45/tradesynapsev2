@@ -8,9 +8,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function cronAuthed(request: Request): boolean {
-  const expected = String(process.env.CRON_SECRET ?? "").trim();
+  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
   if (!expected) return false;
-  const provided = String(request.headers.get("x-cron-secret") ?? "").trim();
+  const url = new URL(request.url);
+  const provided = String(request.headers.get("x-cron-secret") ?? url.searchParams.get("secret") ?? "").trim();
   return !!provided && provided === expected;
 }
 
