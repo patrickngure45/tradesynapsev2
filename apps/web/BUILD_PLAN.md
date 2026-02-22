@@ -42,7 +42,7 @@ This file is the single source of truth for what we’re building next, why, and
 ## Phase 4: Explainability
 
 - [x] “Explain” endpoints for withdrawal/order/p2p states (reason codes → plain English)
-- [ ] Optional AI rephrase layer (rules-first, AI second)
+- [x] Optional AI rephrase layer (rules-first, AI second)
 
 ## Notes
 
