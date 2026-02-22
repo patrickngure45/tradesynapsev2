@@ -61,6 +61,7 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     time_in_force: timeInForceSchema.optional().default("GTC"),
     post_only: z.boolean().optional().default(false),
     stp_mode: stpModeSchema.optional().default("none"),
+    reduce_only: z.boolean().optional().default(false),
     idempotency_key: idempotencyKeySchema.optional(),
   }),
   z.object({
@@ -69,6 +70,7 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     type: z.literal("market"),
     quantity: amount3818PositiveSchema,
     stp_mode: stpModeSchema.optional().default("none"),
+    reduce_only: z.boolean().optional().default(false),
     idempotency_key: idempotencyKeySchema.optional(),
   }),
 ]);
@@ -177,12 +179,16 @@ export async function POST(request: Request) {
             quantity: input.quantity,
             time_in_force: input.time_in_force,
             post_only: input.post_only,
+            stp_mode: (input as any).stp_mode,
+            reduce_only: (input as any).reduce_only,
           }
         : {
             market_id: input.market_id,
             side: input.side,
             type: input.type,
             quantity: input.quantity,
+            stp_mode: (input as any).stp_mode,
+            reduce_only: (input as any).reduce_only,
           };
     const idemHash = idemKey ? hashIdempotencyPayload(idemPayload) : null;
 
