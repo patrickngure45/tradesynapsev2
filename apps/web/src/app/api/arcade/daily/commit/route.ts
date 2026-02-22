@@ -6,9 +6,40 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, randomSeedB64, sha256Hex } from "@/lib/uncertainty/hash";
 import { enforceArcadeSafety } from "@/lib/arcade/safety";
+import { poolKeyForSeasonKey } from "@/lib/arcade/seasonalBadgesMeta";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function nextUtcMondayStart(now: Date): Date {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const day = now.getUTCDay(); // 0=Sun .. 6=Sat
+
+  const startToday = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+  const daysUntilMonday = day === 1 ? 7 : (8 - day) % 7;
+  const next = new Date(startToday.getTime() + daysUntilMonday * 24 * 3600_000);
+  return next;
+}
+
+function currentUtcMondayStart(now: Date): Date {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  const day = now.getUTCDay();
+  const startToday = new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+  const daysSinceMonday = (day + 6) % 7; // Monday -> 0
+  return new Date(startToday.getTime() - daysSinceMonday * 24 * 3600_000);
+}
+
+function currentSeasonKey(): { seasonKey: string; startsAt: string; nextShiftAt: string } {
+  const now = new Date();
+  const seasonStart = currentUtcMondayStart(now);
+  const nextShift = nextUtcMondayStart(now);
+  const seasonKey = `week:${seasonStart.toISOString().slice(0, 10)}`;
+  return { seasonKey, startsAt: seasonStart.toISOString(), nextShiftAt: nextShift.toISOString() };
+}
 
 const postSchema = z.object({
   module: z.string().min(1).max(64).default("daily_drop"),
@@ -36,8 +67,20 @@ export async function POST(request: Request) {
   const moduleKey = String(input.module ?? "daily_drop").trim() || "daily_drop";
   const profile = input.profile;
 
+  const season = currentSeasonKey();
+  const inputJson: Record<string, unknown> =
+    moduleKey === "seasonal_badges"
+      ? {
+          season_key: season.seasonKey,
+          pool_key: poolKeyForSeasonKey(season.seasonKey),
+        }
+      : {};
+
   const serverSeedB64 = randomSeedB64(32);
-  const serverCommit = sha256Hex(`${serverSeedB64}:${clientCommit}:${moduleKey}:${profile}:${actingUserId}`);
+  const serverCommit =
+    moduleKey === "seasonal_badges"
+      ? sha256Hex(`${serverSeedB64}:${clientCommit}:${moduleKey}:${profile}:${actingUserId}:season=${season.seasonKey}`)
+      : sha256Hex(`${serverSeedB64}:${clientCommit}:${moduleKey}:${profile}:${actingUserId}`);
 
   const sql = getSql();
 
@@ -77,7 +120,7 @@ export async function POST(request: Request) {
             ${clientCommit},
             ${serverCommit},
             ${serverSeedB64},
-            ${txSql.json({})}
+            ${txSql.json(inputJson as any)}
           )
           RETURNING id, requested_at
         `;

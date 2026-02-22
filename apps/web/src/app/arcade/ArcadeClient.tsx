@@ -146,6 +146,22 @@ type SeasonResponse = {
   };
 };
 
+type BadgePoolsStatusResponse = {
+  ok: true;
+  season: { key: string; starts_at: string; next_shift_at: string };
+  pool: { key: string; label: string };
+  badges: Array<{ kind: string; code: string; rarity: string; label: string }>;
+  collected_codes: string[];
+  sets: Array<{
+    id: string;
+    label: string;
+    required: number;
+    have: number;
+    unlocked: boolean;
+    unlock_key: { kind: string; code: string; rarity: string; label: string };
+  }>;
+};
+
 type CommunityStatusResponse = {
   ok: true;
   module: string;
@@ -296,6 +312,12 @@ export function ArcadeClient() {
   const [invShards, setInvShards] = useState<number>(0);
 
   const [season, setSeason] = useState<SeasonResponse["season"] | null>(null);
+
+  const [badgePoolsProfile, setBadgePoolsProfile] = useState<"low" | "medium" | "high">("low");
+  const [badgePoolsLoading, setBadgePoolsLoading] = useState(false);
+  const [badgePoolsError, setBadgePoolsError] = useState<string | null>(null);
+  const [badgePoolsStatus, setBadgePoolsStatus] = useState<BadgePoolsStatusResponse | null>(null);
+  const [badgePoolsLast, setBadgePoolsLast] = useState<any | null>(null);
 
   const [salvageKey, setSalvageKey] = useState<string>("");
   const [salvageQty, setSalvageQty] = useState<number>(1);
@@ -608,6 +630,19 @@ export function ArcadeClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function refreshBadgePoolsStatus(seasonKey?: string) {
+    setBadgePoolsError(null);
+    try {
+      const qs = seasonKey ? `?season_key=${encodeURIComponent(seasonKey)}` : "";
+      const res = await fetchJsonOrThrow<BadgePoolsStatusResponse>(`/api/arcade/badge-pools/status${qs}`, { cache: "no-store" });
+      setBadgePoolsStatus(res);
+    } catch (e) {
+      if (e instanceof ApiError) setBadgePoolsError(e.code);
+      else setBadgePoolsError("Network error");
+      setBadgePoolsStatus(null);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -631,6 +666,40 @@ export function ArcadeClient() {
       clearInterval(t);
     };
   }, []);
+
+  useEffect(() => {
+    void refreshBadgePoolsStatus();
+  }, []);
+
+  async function claimBadgePool() {
+    setBadgePoolsError(null);
+    setBadgePoolsLast(null);
+    setBadgePoolsLoading(true);
+    try {
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<CommitResponse>("/api/arcade/daily/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ module: "seasonal_badges", profile: badgePoolsProfile, client_commit_hash: clientCommit }),
+      });
+
+      const reveal = await fetchJsonOrThrow<RevealResponse>("/api/arcade/daily/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed }),
+      });
+
+      setBadgePoolsLast(reveal.result);
+      await Promise.all([refreshBadgePoolsStatus(), refreshInventory()]);
+    } catch (e) {
+      if (e instanceof ApiError) setBadgePoolsError(e.code);
+      else setBadgePoolsError("Network error");
+    } finally {
+      setBadgePoolsLoading(false);
+    }
+  }
 
   async function claimCalendarDaily() {
     setCalError(null);
@@ -1242,6 +1311,124 @@ export function ArcadeClient() {
               Error: <span className="font-semibold">{progError}</span>
             </div>
           ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 14% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Badge pools</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Seasonal badge drops</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">
+                One claim per day · seasonal pool rotates weekly · complete sets to unlock keys
+              </div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                Pool: <span className="font-semibold text-[var(--foreground)]">{badgePoolsStatus?.pool?.label ?? "—"}</span>
+                {badgePoolsStatus?.season?.key ? (
+                  <>
+                    <span className="mx-2 text-[var(--border)]">•</span>
+                    Season: <span className="font-mono text-[var(--foreground)]">{badgePoolsStatus.season.key}</span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={badgePoolsProfile}
+                  onChange={(e) => setBadgePoolsProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <button className={buttonClassName({ variant: "primary", size: "sm" })} onClick={claimBadgePool} disabled={badgePoolsLoading}>
+                {badgePoolsLoading ? "Claiming…" : "Claim"}
+              </button>
+
+              <button
+                onClick={() => refreshBadgePoolsStatus()}
+                className={buttonClassName({ variant: "ghost", size: "xs" })}
+                disabled={badgePoolsLoading}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 text-xs text-[var(--muted)]">{badgePoolsProfile === "high" ? "High variance: rarer seasonal badges are more likely." : badgePoolsProfile === "medium" ? "Medium variance: balanced seasonal drops." : "Low variance: mostly common seasonal badges."}</div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {(badgePoolsStatus?.sets ?? []).map((s) => {
+              const done = (s.have ?? 0) >= (s.required ?? 0) && (s.required ?? 0) > 0;
+              return (
+                <div key={s.id} className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{s.label}</div>
+                    <div
+                      className={
+                        "text-[11px] font-bold uppercase tracking-widest " +
+                        (s.unlocked ? "text-[var(--up)]" : done ? "text-[var(--warn)]" : "text-[var(--muted)]")
+                      }
+                    >
+                      {s.unlocked ? "Unlocked" : done ? "Ready" : "In progress"}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-[var(--muted)]">
+                    Progress: <span className="font-semibold text-[var(--foreground)]">{s.have}</span> / {s.required}
+                  </div>
+                  <div className="mt-2 text-xs text-[var(--muted)]">
+                    Unlock key: <span className="font-mono text-[var(--foreground)]">{s.unlock_key?.code ?? "—"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {badgePoolsError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{badgePoolsError}</span>
+            </div>
+          )}
+
+          {badgePoolsLast && (
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Last drop</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+                {badgePoolsLast?.outcome?.label ?? "—"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {badgePoolsLast?.outcome?.rarity ?? "—"}</div>
+              {Array.isArray(badgePoolsLast?.unlocks?.keys) && badgePoolsLast.unlocks.keys.length ? (
+                <div className="mt-2 text-xs text-[var(--muted)]">
+                  Unlocks: <span className="font-semibold text-[var(--foreground)]">{badgePoolsLast.unlocks.keys.length}</span> key(s)
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </section>
 

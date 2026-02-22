@@ -6,6 +6,8 @@ import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransie
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
 import { resolveDailyDrop } from "@/lib/arcade/dailyDrop";
+import { resolveSeasonalBadgeDrop } from "@/lib/arcade/seasonalBadges";
+import { seasonalBadgePoolMetaFor } from "@/lib/arcade/seasonalBadgesMeta";
 import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
@@ -52,11 +54,12 @@ export async function POST(request: Request) {
             server_seed_b64: string;
             requested_at: string;
             resolved_at: string | null;
+            input_json: any;
             outcome_json: any;
           }[]
         >`
           SELECT id, user_id, module, profile, status, client_commit_hash, server_commit_hash, server_seed_b64,
-                 requested_at, resolved_at, outcome_json
+                 requested_at, resolved_at, input_json, outcome_json
           FROM arcade_action
           WHERE id = ${actionId}::uuid
           LIMIT 1
@@ -90,35 +93,145 @@ export async function POST(request: Request) {
         }
 
         const expectedServerCommit = sha256Hex(
-          `${action.server_seed_b64}:${action.client_commit_hash}:${action.module}:${action.profile}:${actingUserId}`,
+          action.module === "seasonal_badges"
+            ? `${action.server_seed_b64}:${action.client_commit_hash}:${action.module}:${action.profile}:${actingUserId}:season=${String(
+                (action.input_json as any)?.season_key ?? "",
+              ).trim()}`
+            : `${action.server_seed_b64}:${action.client_commit_hash}:${action.module}:${action.profile}:${actingUserId}`,
         );
         if (expectedServerCommit !== String(action.server_commit_hash ?? "").toLowerCase()) {
           return { kind: "err" as const, err: apiError("internal_error", { details: "server_commit_mismatch" }) };
         }
 
-        const resolved = resolveDailyDrop({
-          actionId: action.id,
-          userId: actingUserId,
-          module: action.module,
-          profile: action.profile,
-          serverSeedB64: action.server_seed_b64,
-          clientSeed,
-          clientCommitHash: action.client_commit_hash,
-        });
+        const unlockedKeys: Array<{ kind: string; code: string; rarity: string; label: string; set_id?: string; season_key?: string }> = [];
 
-        const outcomeJson = {
+        let resolved:
+          | { outcome: any; audit: { random_hash: string } & Record<string, any> }
+          | { outcome: any; audit: { random_hash: string } & Record<string, any> };
+
+        if (action.module === "seasonal_badges") {
+          const seasonKey = String((action.input_json as any)?.season_key ?? "").trim();
+          if (!seasonKey) {
+            return { kind: "err" as const, err: apiError("internal_error", { details: "missing_season_key" }) };
+          }
+
+          const meta = seasonalBadgePoolMetaFor(seasonKey);
+
+          const r = resolveSeasonalBadgeDrop({
+            actionId: action.id,
+            userId: actingUserId,
+            module: action.module,
+            profile: action.profile,
+            serverSeedB64: action.server_seed_b64,
+            clientSeed,
+            clientCommitHash: action.client_commit_hash,
+            seasonKey,
+          });
+          resolved = r;
+
+          // Track per-season unique collection + one-time set unlocks.
+          const stateKey = `badge_pools:${seasonKey}`;
+          const stRows = await txSql<{ value_json: any }[]>`
+            SELECT value_json
+            FROM arcade_state
+            WHERE user_id = ${actingUserId}::uuid
+              AND key = ${stateKey}
+            LIMIT 1
+            FOR UPDATE
+          `;
+
+          const current = stRows[0]?.value_json;
+          const collected: Record<string, true> =
+            current && typeof current === "object" && !Array.isArray(current) && current.collected && typeof current.collected === "object" && !Array.isArray(current.collected)
+              ? (current.collected as Record<string, true>)
+              : {};
+          const unlockedSets: Record<string, true> =
+            current && typeof current === "object" && !Array.isArray(current) && current.unlocked_sets && typeof current.unlocked_sets === "object" && !Array.isArray(current.unlocked_sets)
+              ? (current.unlocked_sets as Record<string, true>)
+              : {};
+
+          collected[String(r.outcome.code)] = true;
+
+          const newlyUnlocked: Array<{ setId: string; key: { kind: string; code: string; rarity: string; label: string } }> = [];
+          for (const s of meta.sets) {
+            if (unlockedSets[s.id]) continue;
+            const complete = s.requiredCodes.every((c) => collected[c]);
+            if (!complete) continue;
+            unlockedSets[s.id] = true;
+            newlyUnlocked.push({ setId: s.id, key: s.unlockKey });
+          }
+
+          await txSql`
+            INSERT INTO arcade_state (user_id, key, value_json, created_at, updated_at)
+            VALUES (
+              ${actingUserId}::uuid,
+              ${stateKey},
+              ${txSql.json({ collected, unlocked_sets: unlockedSets })}::jsonb,
+              now(),
+              now()
+            )
+            ON CONFLICT (user_id, key)
+            DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = now()
+          `;
+
+          for (const u of newlyUnlocked) {
+            unlockedKeys.push({ ...u.key, set_id: u.setId, season_key: seasonKey });
+
+            // One-time: do not increment quantity on conflict.
+            await txSql`
+              INSERT INTO arcade_inventory (user_id, kind, code, rarity, quantity, metadata_json, created_at, updated_at)
+              VALUES (
+                ${actingUserId}::uuid,
+                ${u.key.kind},
+                ${u.key.code},
+                ${u.key.rarity},
+                1,
+                ${txSql.json({ label: u.key.label, source: action.module, season_key: seasonKey, set_id: u.setId })}::jsonb,
+                now(),
+                now()
+              )
+              ON CONFLICT (user_id, kind, code, rarity)
+              DO NOTHING
+            `;
+          }
+        } else {
+          const r = resolveDailyDrop({
+            actionId: action.id,
+            userId: actingUserId,
+            module: action.module,
+            profile: action.profile,
+            serverSeedB64: action.server_seed_b64,
+            clientSeed,
+            clientCommitHash: action.client_commit_hash,
+          });
+          resolved = r as any;
+        }
+
+        const outcomeJson: any = {
           module: action.module,
           profile: action.profile,
-          outcome: resolved.outcome,
+          outcome: (resolved as any).outcome,
           audit: {
             client_commit_hash: action.client_commit_hash,
             server_commit_hash: action.server_commit_hash,
             server_seed_b64: action.server_seed_b64,
-            random_hash: resolved.audit.random_hash,
-            roll: resolved.audit.roll,
-            total: resolved.audit.total,
+            ...(action.module === "seasonal_badges"
+              ? {
+                  random_hash: (resolved as any).audit.random_hash,
+                  rarity_roll: (resolved as any).audit.rarity_roll,
+                  rarity_total: (resolved as any).audit.rarity_total,
+                  item_roll: (resolved as any).audit.item_roll,
+                  item_total: (resolved as any).audit.item_total,
+                }
+              : {
+                  random_hash: (resolved as any).audit.random_hash,
+                  roll: (resolved as any).audit.roll,
+                  total: (resolved as any).audit.total,
+                }),
           },
         };
+
+        if (unlockedKeys.length) outcomeJson.unlocks = { keys: unlockedKeys };
 
         // Inventory: upsert stack.
         await txSql`
@@ -140,8 +253,8 @@ export async function POST(request: Request) {
         await addArcadeXp(txSql as any, {
           userId: actingUserId,
           deltaXp: 1,
-          contextRandomHash: resolved.audit.random_hash,
-          source: "daily_drop",
+          contextRandomHash: (resolved as any).audit.random_hash,
+          source: action.module === "seasonal_badges" ? "seasonal_badges" : "daily_drop",
         });
 
         await txSql`

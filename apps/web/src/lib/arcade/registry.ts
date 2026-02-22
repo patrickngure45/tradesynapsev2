@@ -12,7 +12,8 @@ export type ArcadeModuleKey =
   | "rarity_wheel"
   | "flash_mission"
   | "streak_protector"
-  | "progression";
+  | "progression"
+  | "seasonal_badges";
 
 export type ArcadeModuleMeta = {
   key: ArcadeModuleKey;
@@ -33,6 +34,7 @@ export const ARCADE_MODULES: ArcadeModuleMeta[] = [
   { key: "flash_mission", label: "Flash missions", volatility: true, fairness: true, description: "Complete real actions and claim bounded rewards." },
   { key: "streak_protector", label: "Streak protector", volatility: true, fairness: true, description: "Weekly roll that can save a missed day." },
   { key: "daily_drop", label: "Daily drop", volatility: true, fairness: true, description: "One per day badge claim." },
+  { key: "seasonal_badges", label: "Badge pools", volatility: true, fairness: true, description: "Seasonal badge pools and set unlock keys." },
   { key: "rarity_wheel", label: "Rarity wheel", volatility: true, fairness: true, description: "Spend shards to roll cosmetics with pity." },
   { key: "boost_draft", label: "Boost draft", volatility: true, fairness: true, description: "Reveal 3 boosts, pick 1." },
   { key: "time_vault", label: "Time vault", volatility: true, fairness: true, description: "Lock funds then reveal a bounded bonus." },

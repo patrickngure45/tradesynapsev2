@@ -237,8 +237,8 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Voluntary reset for long-term perks + unique cosmetics.
 
 ### 3.3 Badge drops (scarce cosmetics)
-- [ ] Seasonal badge pools.
-- [ ] Collection sets unlock access keys.
+- [x] Seasonal badge pools.
+- [x] Collection sets unlock access keys.
 
 ## 4) Creation & mutation modules (crafting)
 ### 4.1 Blind creation (mint → reveal)

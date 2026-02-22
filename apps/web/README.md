@@ -197,6 +197,18 @@ If you’re using price alerts (`app_price_alert`) and want notifications to tri
 - Run every **1–5 minutes**:
 	- `GET /api/cron/price-alerts?secret=...&max=200`
 
+### Optional (notifications digest / quiet hours)
+
+If users enable quiet hours + digest in Account settings, notifications created during quiet hours are deferred and then flushed into a single “Digest” notification per user.
+
+- Enable admin health expectation with `EXCHANGE_ENABLE_NOTIFICATIONS_DIGEST=1`
+- Run every **5–10 minutes**:
+	- `GET /api/cron/notifications-digest?secret=...`
+
+Notes:
+- The cron only flushes users who are currently **outside** their quiet hours.
+- The admin dashboard also includes a manual “Run digest now” button and deferred-queue inspector for verification/support.
+
 ### Security note
 
 The `secret=...` value is a bearer credential. Rotate it before any real funds / mainnet usage.
