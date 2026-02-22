@@ -106,6 +106,32 @@ The web service only runs migrations + serves HTTP/WebSocket traffic. For produc
 Sweeps should run as a scheduled job (or a separate service invoked on a timer):
 - `npm run sweep:deposits`
 
+## Exchange rollout checklist (production)
+
+If you’re enabling the pro trading / conditional orders stack in production, do this in order:
+
+1) Apply DB migrations (includes trailing stop + order idempotency support)
+	- Run `npm run db:migrate` against your production `DATABASE_URL`.
+	- Ensure migrations `061_exchange_conditional_orders_trailing_stop.sql` and `062_app_idempotency_keys.sql` are applied.
+
+2) Set / rotate secrets
+	- Set `EXCHANGE_CRON_SECRET` (or `CRON_SECRET`) and rotate it before mainnet / real funds.
+
+3) Enable conditional orders + schedule cron
+	- Set `EXCHANGE_ENABLE_CONDITIONAL_ORDERS=1`.
+	- Schedule: `POST /api/exchange/cron/conditional-orders?secret=...&limit=50`.
+	- Recommended cadence: every **2–5s** for a fast terminal, or **10–15s** to reduce load.
+
+4) (Optional) Turn on safety limits (start conservative)
+	- `EXCHANGE_MAX_OPEN_ORDERS_PER_USER=50`
+	- `EXCHANGE_MAX_ORDER_NOTIONAL=10000`
+	- `EXCHANGE_PRICE_BAND_BPS=250`
+	- `EXCHANGE_CANCEL_MAX_PER_MIN=30`
+
+5) Verify in admin
+	- Open the admin dashboard and confirm a recent heartbeat for `exchange:conditional-orders`.
+	- If the heartbeat is stale, confirm the scheduler is running and the `secret` matches.
+
 ## Cron jobs (cron-job.org / Railway)
 
 This app exposes several production cron endpoints that are safe to run from a scheduler.
