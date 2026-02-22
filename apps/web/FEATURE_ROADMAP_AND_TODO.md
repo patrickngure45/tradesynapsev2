@@ -265,8 +265,8 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 
 ## 6) AI / knowledge dopamine modules (differentiator)
 ### 6.1 Probabilistic AI responses
-- [ ] Same prompt can produce tiered outputs.
-- [ ] “Rare” generations are collectible templates (not financial promises).
+- [x] Same prompt can produce tiered outputs.
+- [x] “Rare” generations are collectible templates (not financial promises).
 
 ### 6.2 Blind insight packs
 - [ ] Packs reveal analytics templates, education cards, or checklists.

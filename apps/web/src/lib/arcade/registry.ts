@@ -4,6 +4,7 @@ export type ArcadeModuleKey =
   | "mutation"
   | "fusion"
   | "community_event"
+  | "ai_oracle"
   | "insight_pack"
   | "boost_draft"
   | "daily_drop"
@@ -32,6 +33,7 @@ export const ARCADE_MODULES: ArcadeModuleMeta[] = [
   { key: "fusion", label: "Fusion", volatility: true, fairness: true, description: "Combine two cosmetics into one (bounded upgrade chance)." },
   { key: "community_event", label: "Community event", volatility: false, fairness: false, description: "Global progress unlocks a weekly claim." },
   { key: "shared_pool", label: "Shared pool", volatility: true, fairness: true, description: "Weekly pool: everyone gets baseline, some get boosted." },
+  { key: "ai_oracle", label: "AI Oracle", volatility: true, fairness: true, description: "Tiered AI responses; rare outputs become collectible templates." },
   { key: "insight_pack", label: "Insight packs", volatility: true, fairness: true, description: "Collectible informational cards (not advice)." },
   { key: "flash_mission", label: "Flash missions", volatility: true, fairness: true, description: "Complete real actions and claim bounded rewards." },
   { key: "streak_protector", label: "Streak protector", volatility: true, fairness: true, description: "Weekly roll that can save a missed day." },

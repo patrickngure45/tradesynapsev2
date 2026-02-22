@@ -93,6 +93,21 @@ type WheelRevealResponse = {
   result: any;
 };
 
+type OracleCommitResponse = {
+  ok: true;
+  action_id: string;
+  module: string;
+  profile: "low" | "medium" | "high";
+  server_commit_hash: string;
+};
+
+type OracleRevealResponse = {
+  ok: true;
+  action_id: string;
+  already_resolved: boolean;
+  result: any;
+};
+
 type StreakCommitResponse = {
   ok: true;
   action_id: string;
@@ -302,6 +317,12 @@ export function ArcadeClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState<string | null>(null);
   const [streakLast, setStreakLast] = useState<any | null>(null);
+
+  const [oracleProfile, setOracleProfile] = useState<"low" | "medium" | "high">("low");
+  const [oraclePrompt, setOraclePrompt] = useState<string>("");
+  const [oracleLoading, setOracleLoading] = useState(false);
+  const [oracleError, setOracleError] = useState<string | null>(null);
+  const [oracleLast, setOracleLast] = useState<any | null>(null);
 
   const [missionsProfile, setMissionsProfile] = useState<"low" | "medium" | "high">("low");
   const [missionsLoading, setMissionsLoading] = useState(false);
@@ -1116,6 +1137,49 @@ export function ArcadeClient() {
     }
   }
 
+  async function askOracle() {
+    setOracleError(null);
+    setOracleLast(null);
+    setOracleLoading(true);
+
+    try {
+      const prompt = String(oraclePrompt ?? "").trim();
+      if (prompt.length < 10) {
+        setOracleError("invalid_input");
+        return;
+      }
+
+      const clientSeed = randomClientSeed();
+      const clientCommit = await sha256HexBrowser(clientSeed);
+
+      const commit = await fetchJsonOrThrow<OracleCommitResponse>("/api/arcade/ai/commit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ profile: oracleProfile, client_commit_hash: clientCommit, prompt }),
+      });
+
+      try {
+        localStorage.setItem(`arcade_seed:${commit.action_id}`, clientSeed);
+      } catch {
+        // ignore
+      }
+
+      const reveal = await fetchJsonOrThrow<OracleRevealResponse>("/api/arcade/ai/reveal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action_id: commit.action_id, client_seed: clientSeed, prompt }),
+      });
+
+      setOracleLast(reveal.result);
+      await refreshInventory();
+    } catch (e) {
+      if (e instanceof ApiError) setOracleError(e.code);
+      else setOracleError("Network error");
+    } finally {
+      setOracleLoading(false);
+    }
+  }
+
   async function createBlindCreation() {
     setCreateError(null);
     setCreateLastReveal(null);
@@ -1413,6 +1477,128 @@ export function ArcadeClient() {
           {progError ? (
             <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
               Error: <span className="font-semibold">{progError}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-60"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 16% 26%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--ring) 0, transparent 55%)",
+          }}
+        />
+
+        <div className="relative p-5 md:p-6">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+            </span>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">AI Oracle</div>
+            <div className="h-px flex-1 bg-[var(--border)]" />
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Tiered answers</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Same prompt → different tiers · rare tiers become collectible templates</div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                Cost: <span className="font-mono text-[var(--foreground)]">5</span> shards · Not financial advice
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+                <select
+                  value={oracleProfile}
+                  onChange={(e) => setOracleProfile(e.target.value as any)}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  aria-label="Oracle volatility profile"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              </div>
+
+              <button
+                className={buttonClassName({ variant: "primary", size: "sm" })}
+                onClick={askOracle}
+                disabled={oracleLoading || invLoading || invShards < 5 || String(oraclePrompt ?? "").trim().length < 10}
+              >
+                {oracleLoading ? "Asking…" : "Ask"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Prompt</div>
+            <textarea
+              value={oraclePrompt}
+              onChange={(e) => setOraclePrompt(e.target.value)}
+              rows={4}
+              placeholder="Ask a question (e.g. 'How do I verify a token contract and avoid scams?')"
+              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--ring)]"
+            />
+            <div className="mt-2 text-xs text-[var(--muted)]">Tip: be specific; avoid sharing private keys or sensitive data.</div>
+          </div>
+
+          {oracleError && (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              Error: <span className="font-semibold">{oracleError}</span>
+            </div>
+          )}
+
+          {oracleLast?.response_text ? (
+            <div className="mt-4 grid gap-3">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Oracle response</div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{String(oracleLast?.tier ?? "common")}</div>
+                </div>
+                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--foreground)]">{String(oracleLast.response_text)}</pre>
+
+                {oracleLast?.collectible?.code ? (
+                  <div className="mt-3 text-xs text-[var(--muted)]">
+                    Collected template: <span className="font-mono text-[var(--foreground)]">{oracleLast.collectible.code}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              {oracleLast?.audit ? (
+                <details className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Fairness proof
+                  </summary>
+                  <div className="mt-3 grid gap-2 text-xs text-[var(--muted)]">
+                    <div>
+                      client_commit_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.client_commit_hash}</span>
+                    </div>
+                    <div>
+                      server_commit_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.server_commit_hash}</span>
+                    </div>
+                    <div>
+                      server_seed_b64: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.server_seed_b64}</span>
+                    </div>
+                    <div>
+                      random_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.random_hash}</span>
+                    </div>
+                    <div>
+                      roll: <span className="font-semibold text-[var(--foreground)]">{oracleLast.audit.roll}</span> / {oracleLast.audit.total}
+                    </div>
+                  </div>
+                </details>
+              ) : null}
             </div>
           ) : null}
         </div>
