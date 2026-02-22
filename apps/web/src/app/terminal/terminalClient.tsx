@@ -45,13 +45,17 @@ type OpenOrderRow = {
 
 type ConditionalOrderRow = {
   id: string;
-  kind: "stop_limit" | "oco";
+  kind: "stop_limit" | "oco" | "trailing_stop";
   side: "buy" | "sell";
   market_id: string;
   market_symbol: string;
   trigger_price: string;
   limit_price: string;
   take_profit_price: string | null;
+  trail_bps: number | null;
+  trailing_ref_price: string | null;
+  trailing_stop_price: string | null;
+  activated_at: string | null;
   triggered_leg: string | null;
   quantity: string;
   status: "active" | "triggering" | "triggered" | "canceled" | "failed";
@@ -578,10 +582,13 @@ function FillsPanel({ marketId }: { marketId: string | null }) {
 
 function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco">("limit");
+  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop">("limit");
   const [price, setPrice] = useState<string>("");
   const [triggerPrice, setTriggerPrice] = useState<string>("");
   const [takeProfitPrice, setTakeProfitPrice] = useState<string>("");
+  const [trailBps, setTrailBps] = useState<string>("");
+  const [timeInForce, setTimeInForce] = useState<"GTC" | "IOC" | "FOK">("GTC");
+  const [postOnly, setPostOnly] = useState(false);
   const [qty, setQty] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -594,6 +601,9 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setPrice("");
     setTriggerPrice("");
     setTakeProfitPrice("");
+    setTrailBps("");
+    setTimeInForce("GTC");
+    setPostOnly(false);
     setQty("");
   }, [market?.id]);
 
@@ -671,11 +681,38 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           }),
         );
         await loadStops();
+      } else if (type === "trailing_stop") {
+        const payload = {
+          kind: "trailing_stop",
+          market_id: market.id,
+          side,
+          activation_price: triggerPrice,
+          trail_bps: trailBps,
+          limit_price: price,
+          quantity: qty,
+        };
+        await fetchJsonOrThrow(
+          "/api/exchange/conditional-orders",
+          withDevUserHeader({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+        await loadStops();
       } else {
         const payload =
           type === "market"
             ? { market_id: market.id, side, type: "market", quantity: qty }
-            : { market_id: market.id, side, type: "limit", price, quantity: qty };
+            : {
+                market_id: market.id,
+                side,
+                type: "limit",
+                price,
+                quantity: qty,
+                time_in_force: timeInForce,
+                post_only: postOnly,
+              };
 
         await fetchJsonOrThrow(
           "/api/exchange/orders",
@@ -729,7 +766,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+  <div className="grid grid-cols-5 gap-2">
         <button
           type="button"
           onClick={() => setType("limit")}
@@ -778,7 +815,44 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         >
           OCO
         </button>
+
+        <button
+          type="button"
+          onClick={() => setType("trailing_stop")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "trailing_stop"
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Trail
+        </button>
       </div>
+
+      {type === "limit" ? (
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={timeInForce}
+            onChange={(e) => setTimeInForce((e.target.value as any) || "GTC")}
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)]"
+          >
+            <option value="GTC">GTC</option>
+            <option value="IOC">IOC</option>
+            <option value="FOK">FOK</option>
+          </select>
+
+          <label className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)]">
+            <span className="text-[var(--muted)]">Post‑only</span>
+            <input
+              type="checkbox"
+              checked={postOnly}
+              onChange={(e) => setPostOnly(e.target.checked)}
+              className="h-4 w-4 accent-[var(--accent)]"
+            />
+          </label>
+        </div>
+      ) : null}
 
       {type === "oco" ? (
         <input
@@ -789,20 +863,37 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         />
       ) : null}
 
-      {type === "stop_limit" || type === "oco" ? (
+      {type === "stop_limit" || type === "oco" || type === "trailing_stop" ? (
         <input
           value={triggerPrice}
           onChange={(e) => setTriggerPrice(e.target.value)}
-          placeholder={type === "oco" ? "Stop Trigger Price" : "Trigger Price"}
+          placeholder={type === "oco" ? "Stop Trigger Price" : type === "trailing_stop" ? "Activation Price" : "Trigger Price"}
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
       ) : null}
 
-      {type === "limit" || type === "stop_limit" || type === "oco" ? (
+      {type === "trailing_stop" ? (
+        <input
+          value={trailBps}
+          onChange={(e) => setTrailBps(e.target.value)}
+          placeholder="Trail (bps)"
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+        />
+      ) : null}
+
+      {type === "limit" || type === "stop_limit" || type === "oco" || type === "trailing_stop" ? (
         <input
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          placeholder={type === "oco" ? "Stop Limit Price" : type === "stop_limit" ? "Limit Price" : "Price"}
+          placeholder={
+            type === "oco"
+              ? "Stop Limit Price"
+              : type === "stop_limit"
+                ? "Limit Price"
+                : type === "trailing_stop"
+                  ? "Limit Price"
+                  : "Price"
+          }
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
       ) : null}
@@ -881,10 +972,18 @@ function StopRow({ o, onChanged }: { o: ConditionalOrderRow; onChanged: () => vo
 
   return (
     <tr className="border-b border-[var(--border)] last:border-b-0">
-      <td className="px-3 py-1 text-left text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)]">{o.kind === "oco" ? "O" : "S"}</td>
+      <td className="px-3 py-1 text-left text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)]">
+        {o.kind === "oco" ? "O" : o.kind === "trailing_stop" ? "T" : "S"}
+      </td>
       <td className={"px-3 py-1 font-extrabold " + (o.side === "buy" ? "text-[var(--up)]" : "text-[var(--down)]")}>{o.side.toUpperCase()}</td>
-      <td className="px-3 py-1 text-right text-[var(--foreground)]">{o.take_profit_price ? fmtCompact(o.take_profit_price, 8) : "—"}</td>
-      <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(o.trigger_price, 8)}</td>
+      <td className="px-3 py-1 text-right text-[var(--foreground)]">
+        {o.kind === "trailing_stop" ? (o.trail_bps != null ? `${o.trail_bps}bps` : "—") : o.take_profit_price ? fmtCompact(o.take_profit_price, 8) : "—"}
+      </td>
+      <td className="px-3 py-1 text-right text-[var(--foreground)]">
+        {o.kind === "trailing_stop"
+          ? (o.trailing_stop_price ? fmtCompact(o.trailing_stop_price, 8) : fmtCompact(o.trigger_price, 8))
+          : fmtCompact(o.trigger_price, 8)}
+      </td>
       <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(o.limit_price, 8)}</td>
       <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(o.quantity, 8)}</td>
       <td className="px-3 py-1 text-right text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)]">{String(o.status).slice(0, 1).toUpperCase()}</td>

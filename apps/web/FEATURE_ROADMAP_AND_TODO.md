@@ -299,3 +299,60 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 4) Progression + collections (identity)
 5) Collective events + AI packs (novelty)
 
+---
+
+# Exchange + Pro Trading TODO (creative backlog)
+
+## A) Pro order types + execution controls
+- [ ] Trailing stop (trail by %/abs, activate at price, optionally place as stop-limit).
+- [ ] Post-only flag (reject if would cross; show user-facing reason).
+- [ ] Time-in-force: IOC and FOK.
+- [ ] Reduce-only flag (for future margin/positions; safe no-op for spot-only if not supported).
+- [ ] Iceberg orders (display quantity + hidden remainder).
+- [ ] TWAP scheduler (split a large order into N slices over time).
+- [ ] Take-profit ladder (split TP into multiple limit sells/buys).
+- [ ] One-click “close position” equivalent for spot (sell 100% base / buy with 100% quote).
+
+## B) Risk limits + market safety
+- [ ] Per-user limits: max order notional, max open orders, max cancels/sec, max daily volume.
+- [ ] Market-level kill switch (halt new orders; allow cancels).
+- [ ] Price-band protection (reject orders too far from index/mark within a configurable band).
+- [ ] Self-trade prevention (STP modes: cancel newest/oldest/both).
+- [ ] Circuit breakers for extreme volatility (temporary halt + banner).
+- [ ] “Confirm high-risk action” UX for unusually large trades.
+
+## C) Market quality + terminal depth
+- [ ] Order book depth heatmap + imbalance indicator.
+- [ ] Trades tape with filters (my trades, large trades) and copyable tx/order ids.
+- [ ] Spread/impact estimator for market orders (pre-trade).
+- [ ] Saved terminal workspaces (layout presets) and restore on reload.
+- [ ] Keyboard shortcuts (submit/cancel, focus price/size, toggle panels).
+
+## D) Automation + reliability (cron/worker hardening)
+- [ ] Move conditional-order evaluation to a real worker/queue (idempotent jobs + retries).
+- [ ] Cron heartbeat endpoint + admin dashboard health widget (last run, last success, lag).
+- [ ] Dead-letter UI actions: re-drive job, mark resolved, export.
+- [ ] Idempotency keys for order placement API (dedupe on retries).
+
+## E) Wallet + withdrawals (security + UX)
+- [ ] Withdrawal address book + labeling.
+- [ ] Withdrawal allowlist (approve addresses; cooldown before first use).
+- [ ] Per-user withdrawal limits + optional 2FA re-prompt for large amounts.
+- [ ] Multi-RPC fallback lists per chain + health scoring.
+- [ ] Auto-sweep thresholds and configurable sweep cadence.
+
+## F) Notifications + retention
+- [ ] Order lifecycle notifications: placed, partial fill, filled, canceled, rejected.
+- [ ] Alert templates: crossing, % change, volatility spike, spread widening.
+- [ ] Digest mode + quiet hours + per-channel preferences.
+
+## G) Observability + support ops
+- [ ] Structured logging redaction for secrets/keys.
+- [ ] Trace/request id surfaced in UI and returned by API for support.
+- [ ] Admin “account timeline export” (deposits/withdrawals/orders/ledger entries).
+- [ ] Read-only admin impersonation (view-as) mode.
+
+## H) Security & hygiene (do before production marketing)
+- [ ] Rotate any secrets that have been exposed in local files, screenshots, logs, or chat history.
+- [ ] Add a preflight check that refuses to start in production with placeholder secrets.
+

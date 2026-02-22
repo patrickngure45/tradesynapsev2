@@ -39,6 +39,8 @@ type OrderRow = {
 
 const sideSchema = z.enum(["buy", "sell"]);
 
+const timeInForceSchema = z.enum(["GTC", "IOC", "FOK"]);
+
 const placeOrderSchema = z.discriminatedUnion("type", [
   z.object({
     market_id: z.string().uuid(),
@@ -46,6 +48,8 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     type: z.literal("limit"),
     price: amount3818PositiveSchema,
     quantity: amount3818PositiveSchema,
+    time_in_force: timeInForceSchema.optional().default("GTC"),
+    post_only: z.boolean().optional().default(false),
   }),
   z.object({
     market_id: z.string().uuid(),
@@ -213,10 +217,12 @@ export async function POST(request: Request) {
       if (market.status !== "enabled") return { status: 409 as const, body: { error: "market_disabled" } };
 
       const isMarket = input.type === "market";
-      const inputPrice = isMarket ? "0" : (input as any).price as string;
+      const timeInForce = input.type === "limit" ? input.time_in_force : "IOC";
+      const postOnly = input.type === "limit" ? input.post_only : false;
+      const inputPrice = input.type === "limit" ? input.price : "0";
 
       // Tick-size validation (limit only — market orders have no price)
-      if (!isMarket && !isMultipleOfStep3818((input as any).price, market.tick_size)) {
+      if (input.type === "limit" && !isMultipleOfStep3818(input.price, market.tick_size)) {
         return { status: 400 as const, body: { error: "price_not_multiple_of_tick", details: { tick_size: market.tick_size } } };
       }
 
@@ -226,6 +232,58 @@ export async function POST(request: Request) {
 
       const reserveAssetId = input.side === "buy" ? market.quote_asset_id : market.base_asset_id;
       const maxFeeBps = Math.max(market.maker_fee_bps ?? 0, market.taker_fee_bps ?? 0);
+
+      // --- Post-only and FOK checks (limit orders only) ---
+      if (!isMarket && (postOnly || timeInForce === "FOK")) {
+        const makerSide = input.side === "buy" ? "sell" : "buy";
+
+        const makers = await txSql<{ id: string; price: string; remaining_quantity: string; created_at: string }[]>`
+          SELECT id::text AS id, price::text AS price, remaining_quantity::text AS remaining_quantity, created_at::text AS created_at
+          FROM ex_order
+          WHERE market_id = ${market.id}::uuid
+            AND side = ${makerSide}
+            AND status IN ('open','partially_filled')
+            AND remaining_quantity > 0
+            AND user_id <> ${actingUserId}::uuid
+            AND (
+              (${input.side} = 'buy' AND price <= (${inputPrice}::numeric))
+              OR (${input.side} = 'sell' AND price >= (${inputPrice}::numeric))
+            )
+          ORDER BY
+            CASE WHEN ${input.side} = 'buy' THEN price END ASC,
+            CASE WHEN ${input.side} = 'sell' THEN price END DESC,
+            created_at ASC
+          LIMIT 200
+        `;
+
+        if (postOnly && makers.length > 0) {
+          return { status: 409 as const, body: { error: "post_only_would_take" } };
+        }
+
+        if (timeInForce === "FOK") {
+          const planned = planLimitMatches({
+            taker: {
+              id: "00000000-0000-0000-0000-000000000000",
+              side: input.side,
+              price: inputPrice,
+              remaining_quantity: input.quantity,
+              created_at: new Date().toISOString(),
+            },
+            makers: makers.map((m) => ({
+              id: m.id,
+              side: makerSide as any,
+              price: m.price,
+              remaining_quantity: m.remaining_quantity,
+              created_at: m.created_at,
+            })),
+            maxFills: 200,
+          });
+
+          if (!isZeroOrLess3818(planned.taker_remaining_quantity)) {
+            return { status: 409 as const, body: { error: "fok_insufficient_liquidity" } };
+          }
+        }
+      }
 
       // --- Reserve amount calculation ---
       let reserveAmount: string;
@@ -698,6 +756,28 @@ export async function POST(request: Request) {
         taker = canceledRows[0]!;
       }
 
+      // --- IOC cancellation for limit orders ---
+      if (!isMarket && timeInForce === "IOC" && !isZeroOrLess3818(taker.remaining_quantity) && taker.status !== "filled") {
+        await txSql`
+          UPDATE ex_order
+          SET status = 'canceled', updated_at = now()
+          WHERE id = ${taker.id}::uuid
+            AND status IN ('open', 'partially_filled')
+        `;
+
+        await finalizeHoldIfTerminal(taker.id, taker.hold_id);
+
+        const canceledRows = await txSql<OrderRow[]>`
+          SELECT
+            id, market_id, user_id, side, type,
+            price::text AS price, quantity::text AS quantity,
+            remaining_quantity::text AS remaining_quantity,
+            status, hold_id, created_at, updated_at
+          FROM ex_order WHERE id = ${taker.id}::uuid LIMIT 1
+        `;
+        taker = canceledRows[0]!;
+      }
+
       // --- Notifications for makers ---
       for (const mf of makerFillNotifs) {
         await createNotification(txSql, {
@@ -721,7 +801,7 @@ export async function POST(request: Request) {
           taker.status === "filled"
             ? "Order Filled"
             : taker.status === "canceled"
-              ? "Market Order Canceled (IOC)"
+              ? (isMarket ? "Market Order Canceled (IOC)" : "Limit Order Canceled (IOC)")
               : "Order Partially Filled";
         await createNotification(txSql, {
           userId: taker.user_id,

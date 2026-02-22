@@ -28,7 +28,17 @@ const ocoSchema = z.object({
   quantity: z.string().min(1),
 });
 
-const createSchema = z.union([stopLimitSchema, ocoSchema]);
+const trailingStopSchema = z.object({
+  kind: z.literal("trailing_stop"),
+  market_id: z.string().uuid(),
+  side: z.enum(["buy", "sell"]),
+  activation_price: z.string().min(1),
+  trail_bps: z.coerce.number().int().min(1).max(10000),
+  limit_price: z.string().min(1),
+  quantity: z.string().min(1),
+});
+
+const createSchema = z.union([stopLimitSchema, ocoSchema, trailingStopSchema]);
 
 const querySchema = z.object({
   market_id: z.string().uuid().optional(),
@@ -71,6 +81,10 @@ export async function GET(request: Request) {
           limit_price: string;
             take_profit_price: string | null;
             triggered_leg: string | null;
+          trail_bps: number | null;
+          trailing_ref_price: string | null;
+          trailing_stop_price: string | null;
+          activated_at: string | null;
           quantity: string;
           status: string;
           attempt_count: number;
@@ -91,6 +105,10 @@ export async function GET(request: Request) {
           c.limit_price::text,
           c.take_profit_price::text,
           c.triggered_leg,
+          c.trail_bps,
+          c.trailing_ref_price::text,
+          c.trailing_stop_price::text,
+          c.activated_at,
           c.quantity::text,
           c.status,
           c.attempt_count,
@@ -137,9 +155,16 @@ export async function POST(request: Request) {
     }
 
     const row = await retryOnceOnTransientDbError(async () => {
-      const stopTrigger = input.kind === "oco" ? input.stop_trigger_price : input.trigger_price;
+      const stopTrigger =
+        input.kind === "oco"
+          ? input.stop_trigger_price
+          : input.kind === "trailing_stop"
+            ? input.activation_price
+            : input.trigger_price;
+
       const stopLimit = input.kind === "oco" ? input.stop_limit_price : input.limit_price;
       const takeProfit = input.kind === "oco" ? input.take_profit_price : null;
+      const trailBps = input.kind === "trailing_stop" ? input.trail_bps : null;
 
       const rows = await sql<{ id: string }[]>`
         INSERT INTO ex_conditional_order (
@@ -150,6 +175,7 @@ export async function POST(request: Request) {
           trigger_price,
           limit_price,
           take_profit_price,
+          trail_bps,
           quantity,
           status
         )
@@ -161,6 +187,7 @@ export async function POST(request: Request) {
           ${stopTrigger}::numeric,
           ${stopLimit}::numeric,
           ${takeProfit}::numeric,
+          ${trailBps}::int,
           ${input.quantity}::numeric,
           'active'
         )
