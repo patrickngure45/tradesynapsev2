@@ -3,9 +3,11 @@ import type { Sql } from "postgres";
 export type NotificationSeverity = "info" | "success" | "warning" | "danger";
 
 export type NotificationType =
+  | "order_placed"
   | "order_filled"
   | "order_partially_filled"
   | "order_canceled"
+  | "order_rejected"
   | "deposit_credited"
   | "withdrawal_approved"
   | "withdrawal_rejected"
@@ -40,6 +42,8 @@ function getString(meta: Record<string, unknown>, ...keys: string[]): string | n
 
 function getSeverityForType(type: NotificationType): NotificationSeverity {
   switch (type) {
+    case "order_placed":
+      return "info";
     case "deposit_credited":
     case "withdrawal_completed":
     case "order_filled":
@@ -53,6 +57,7 @@ function getSeverityForType(type: NotificationType): NotificationSeverity {
       return "warning";
     case "withdrawal_rejected":
     case "order_canceled":
+    case "order_rejected":
     case "p2p_order_cancelled":
     case "p2p_dispute_opened":
       return "danger";
@@ -92,6 +97,8 @@ function deriveHref(type: NotificationType, meta: Record<string, unknown>): stri
     case "order_filled":
     case "order_partially_filled":
     case "order_canceled":
+    case "order_placed":
+    case "order_rejected":
       return "/order-history";
     default:
       return null;
@@ -129,6 +136,19 @@ export async function createNotification(
     metadata?: Record<string, unknown>;
   },
 ): Promise<string> {
+  try {
+    const prefRows = await sql<{ enabled: boolean }[]>`
+      SELECT enabled
+      FROM app_notification_preference
+      WHERE user_id = ${params.userId}::uuid
+        AND type = ${params.type}
+      LIMIT 1
+    `;
+    if (prefRows.length > 0 && prefRows[0]!.enabled === false) return "";
+  } catch {
+    // Preference checks must never break core flows.
+  }
+
   const title = String(params.title ?? "").trim() || "Notification";
   const body = String(params.body ?? "");
   const metadata = applyNotificationPolicy(params.type, params.metadata);

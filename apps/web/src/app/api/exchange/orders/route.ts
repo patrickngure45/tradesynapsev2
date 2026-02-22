@@ -1125,6 +1125,17 @@ export async function POST(request: Request) {
         });
       }
 
+      // --- Notification for an accepted open order (no immediate fills) ---
+      if (executions.length === 0 && (taker.status === "open" || taker.status === "partially_filled")) {
+        await createNotification(txSql, {
+          userId: taker.user_id,
+          type: "order_placed" as any,
+          title: "Order Placed",
+          body: `Your ${taker.side} ${taker.type} order was placed on ${market.symbol}.`,
+          metadata: { orderId: taker.id, market: market.symbol },
+        });
+      }
+
       await enqueueOutbox(txSql, {
         topic: "ex.order.placed",
         aggregate_type: "order",

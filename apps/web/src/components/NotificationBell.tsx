@@ -46,11 +46,14 @@ function timeAgo(iso: string): string {
 
 function iconForType(type: string) {
   switch (type) {
+    case "order_placed":
+      return "+";
     case "order_filled":
     case "order_partially_filled":
     case "p2p_order_completed":
       return "●";
     case "order_canceled":
+    case "order_rejected":
     case "p2p_order_cancelled":
       return "✕";
     case "deposit_credited":
@@ -79,6 +82,8 @@ function iconForType(type: string) {
 
 function colorForType(type: string) {
   switch (type) {
+    case "order_placed":
+      return "text-[var(--accent)]";
     case "order_filled":
     case "deposit_credited":
     case "withdrawal_completed":
@@ -97,6 +102,7 @@ function colorForType(type: string) {
     case "price_alert":
       return "text-[var(--warn)]";
     case "order_canceled":
+    case "order_rejected":
     case "withdrawal_rejected":
     case "p2p_order_cancelled":
       return "text-[var(--down)]";

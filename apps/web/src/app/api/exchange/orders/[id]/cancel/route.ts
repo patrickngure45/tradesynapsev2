@@ -10,6 +10,7 @@ import { logRouteResponse } from "@/lib/routeLog";
 import { canCancelOrder } from "@/lib/state/order";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createPgRateLimiter } from "@/lib/rateLimitPg";
+import { createNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,6 +102,14 @@ export async function POST(
         hold_id: o.hold_id,
         status: "canceled",
       },
+    });
+
+    await createNotification(txSql, {
+      userId: o.user_id,
+      type: "order_canceled",
+      title: "Order Canceled",
+      body: "Your order was canceled.",
+      metadata: { orderId: o.id, marketId: o.market_id },
     });
 
       return { status: 200 as const, body: { ok: true, order_id: id } };

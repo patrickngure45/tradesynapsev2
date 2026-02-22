@@ -20,6 +20,11 @@ type UserProfile = {
   created_at: string;
 };
 
+type NotificationPrefsResponse = {
+  prefs?: Record<string, boolean>;
+  known_types?: string[];
+};
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -112,6 +117,29 @@ export function AccountClient() {
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [passkeyMsg, setPasskeyMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  /* Notification preferences */
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>(() => ({
+    order_placed: true,
+    order_partially_filled: true,
+    order_filled: true,
+    order_canceled: true,
+    order_rejected: true,
+    price_alert: true,
+    p2p_order_created: true,
+    p2p_order_expiring: true,
+    p2p_payment_confirmed: true,
+    p2p_order_completed: true,
+    p2p_order_cancelled: true,
+    p2p_dispute_opened: true,
+    p2p_dispute_resolved: true,
+    p2p_feedback_received: true,
+    arcade_ready: true,
+    arcade_hint_ready: true,
+    system: true,
+  }));
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
+  const [notifPrefsMsg, setNotifPrefsMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   const load = useCallback(async () => {
     try {
       setLoadMsg(null);
@@ -141,6 +169,19 @@ export function AccountClient() {
         // silent
       }
 
+      // Load notification preferences (best-effort)
+      try {
+        const npRes = await fetch("/api/account/notification-preferences", fetchOpts({ cache: "no-store" }));
+        if (npRes.ok) {
+          const np = (await npRes.json().catch(() => ({}))) as NotificationPrefsResponse;
+          if (np && typeof np === "object" && np.prefs && typeof np.prefs === "object") {
+            setNotifPrefs(np.prefs as Record<string, boolean>);
+          }
+        }
+      } catch {
+        // silent
+      }
+
       // Check for pending KYC submission
       if (normalizedKycLevel(data.user?.kyc_level) === "basic") {
         try {
@@ -158,6 +199,39 @@ export function AccountClient() {
       setLoading(false);
     }
   }, [router]);
+
+  const setNotifCategory = async (types: string[], enabled: boolean) => {
+    if (!types.length) return;
+    setNotifPrefsMsg(null);
+    setNotifPrefsLoading(true);
+    setNotifPrefs((prev) => {
+      const next = { ...(prev ?? {}) };
+      for (const t of types) next[t] = enabled;
+      return next;
+    });
+
+    try {
+      const nextPrefs: Record<string, boolean> = { ...notifPrefs };
+      for (const t of types) nextPrefs[t] = enabled;
+
+      const res = await fetch("/api/account/notification-preferences", fetchOpts({
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prefs: nextPrefs }),
+      }));
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setNotifPrefsMsg({ text: msgFrom(data, "Failed to save preferences"), ok: false });
+        return;
+      }
+      setNotifPrefs((prev) => ({ ...prev, ...nextPrefs }));
+      setNotifPrefsMsg({ text: "Saved.", ok: true });
+    } catch {
+      setNotifPrefsMsg({ text: "Network error while saving preferences", ok: false });
+    } finally {
+      setNotifPrefsLoading(false);
+    }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -669,6 +743,83 @@ export function AccountClient() {
         )}
       </section>
 
+      {/* ────── Notifications ────── */}
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+        <h2 className="mb-2 text-sm font-semibold tracking-tight">Notifications</h2>
+        <p className="mb-4 text-xs text-[var(--muted)]">
+          Choose which in-app notifications you want to receive.
+        </p>
+
+        {notifPrefsMsg && (
+          <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${notifPrefsMsg.ok ? "border-emerald-500/30 text-emerald-500" : "border-rose-500/30 text-rose-500"}`}>
+            {notifPrefsMsg.text}
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrefToggle
+            label="Order updates"
+            hint="Placed, fills, cancels"
+            enabled={!!notifPrefs.order_filled && !!notifPrefs.order_partially_filled && !!notifPrefs.order_canceled && !!notifPrefs.order_placed}
+            loading={notifPrefsLoading}
+            onChange={(v) =>
+              setNotifCategory([
+                "order_placed",
+                "order_partially_filled",
+                "order_filled",
+                "order_canceled",
+                "order_rejected",
+              ], v)
+            }
+          />
+          <PrefToggle
+            label="Price alerts"
+            hint="Threshold triggers"
+            enabled={!!notifPrefs.price_alert}
+            loading={notifPrefsLoading}
+            onChange={(v) => setNotifCategory(["price_alert"], v)}
+          />
+          <PrefToggle
+            label="P2P updates"
+            hint="Orders, disputes, feedback"
+            enabled={
+              !!notifPrefs.p2p_order_created &&
+              !!notifPrefs.p2p_payment_confirmed &&
+              !!notifPrefs.p2p_order_completed &&
+              !!notifPrefs.p2p_order_cancelled &&
+              !!notifPrefs.p2p_dispute_opened
+            }
+            loading={notifPrefsLoading}
+            onChange={(v) =>
+              setNotifCategory(
+                [
+                  "p2p_order_created",
+                  "p2p_order_expiring",
+                  "p2p_payment_confirmed",
+                  "p2p_order_completed",
+                  "p2p_order_cancelled",
+                  "p2p_dispute_opened",
+                  "p2p_dispute_resolved",
+                  "p2p_feedback_received",
+                ],
+                v,
+              )
+            }
+          />
+          <PrefToggle
+            label="Arcade updates"
+            hint="Reveals and hints"
+            enabled={!!notifPrefs.arcade_ready && !!notifPrefs.arcade_hint_ready}
+            loading={notifPrefsLoading}
+            onChange={(v) => setNotifCategory(["arcade_ready", "arcade_hint_ready"], v)}
+          />
+        </div>
+
+        <p className="mt-3 text-[11px] text-[var(--muted)]">
+          Tip: disabling a category prevents new notifications from being created.
+        </p>
+      </section>
+
       {/* ────── Email Verification ────── */}
       {!profile.email_verified && (
         <section className="rounded-xl border border-amber-500/30 bg-[color-mix(in_srgb,var(--card)_95%,#f59e0b_5%)] p-6">
@@ -1079,6 +1230,41 @@ function TierRow({ tier, label, limit, req, current }: { tier: string; label: st
       <td className="px-4 py-2 font-mono">{limit}</td>
       <td className="px-4 py-2 text-[var(--muted)]">{req}</td>
     </tr>
+  );
+}
+
+function PrefToggle({
+  label,
+  hint,
+  enabled,
+  loading,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  enabled: boolean;
+  loading: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_90%,transparent)] px-4 py-3">
+      <div>
+        <p className="text-xs font-medium">{label}</p>
+        <p className="mt-0.5 text-[11px] text-[var(--muted)]">{hint}</p>
+      </div>
+      <button
+        type="button"
+        disabled={loading}
+        onClick={() => onChange(!enabled)}
+        className={`rounded-full border px-3 py-1 text-[11px] font-semibold transition disabled:opacity-60 ${
+          enabled
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+            : "border-[var(--border)] bg-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+        }`}
+      >
+        {enabled ? "On" : "Off"}
+      </button>
+    </div>
   );
 }
 

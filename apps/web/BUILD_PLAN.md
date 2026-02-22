@@ -13,7 +13,7 @@ This file is the single source of truth for what we’re building next, why, and
 
 ### 1. Home / Portfolio Hub
 
-- [ ] New `/home` page (logged-in friendly) with:
+- [x] New `/home` page (logged-in friendly) with:
   - balances snapshot
   - quick actions (Wallet / Withdraw / P2P / Order history)
   - activity preview
@@ -21,19 +21,19 @@ This file is the single source of truth for what we’re building next, why, and
 
 ### 2. Watchlist
 
-- [ ] Persistent watchlist stored server-side (per user)
-- [ ] UI: add/remove assets
+- [x] Persistent watchlist stored server-side (per user)
+- [x] UI: add/remove assets
 
 ### 3. Price alerts
 
-- [ ] Create threshold alerts (above/below) per asset + fiat
-- [ ] Cron endpoint to evaluate alerts and emit notifications
-- [ ] Notifications type: `price_alert`
+- [x] Create threshold alerts (above/below) per asset + fiat
+- [x] Cron endpoint to evaluate alerts and emit notifications
+- [x] Notifications type: `price_alert`
 
 ## Phase 2: Trust surfaces
 
-- [ ] In-app status page (deposits/withdrawals/outbox/db)
-- [ ] Proof-of-operations snapshot (non-marketing, factual)
+- [x] In-app status page (deposits/withdrawals/outbox/db)
+- [x] Proof-of-operations snapshot (non-marketing, factual)
 
 ## Phase 3: Automation
 
@@ -41,7 +41,7 @@ This file is the single source of truth for what we’re building next, why, and
 
 ## Phase 4: Explainability
 
-- [ ] “Explain” endpoints for withdrawal/order/p2p states (reason codes → plain English)
+- [x] “Explain” endpoints for withdrawal/order/p2p states (reason codes → plain English)
 - [ ] Optional AI rephrase layer (rules-first, AI second)
 
 ## Notes

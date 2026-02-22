@@ -9,13 +9,16 @@ export class ApiError extends Error {
   code: string;
   details?: unknown;
   status?: number;
+  requestId?: string;
 
-  constructor(code: string, opts?: { details?: unknown; status?: number }) {
-    super(code);
+  constructor(code: string, opts?: { details?: unknown; status?: number; requestId?: string }) {
+    const msg = opts?.requestId ? `${code} (req ${opts.requestId})` : code;
+    super(msg);
     this.name = "ApiError";
     this.code = code;
     this.details = opts?.details;
     this.status = opts?.status;
+    this.requestId = opts?.requestId;
   }
 }
 
@@ -74,6 +77,7 @@ export async function fetchJsonOrThrow<T>(
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
       const res = await fetch(input, mergedInit);
+      const requestId = res.headers.get("x-request-id") ?? undefined;
       const text = await res.text().catch(() => "");
       const contentType = res.headers.get("content-type") ?? "";
       const isHtml = contentType.includes("text/html") || looksLikeHtml(text);
@@ -97,17 +101,17 @@ export async function fetchJsonOrThrow<T>(
                 : isHtml
                   ? { message: `Upstream error (HTTP ${res.status}). Please retry.` }
                   : undefined;
-          throw new ApiError(code, { details, status: res.status });
+          throw new ApiError(code, { details, status: res.status, requestId });
         }
 
         if (json && typeof json === "object" && "message" in (json as ApiErrorPayload)) {
           const payload = json as ApiErrorPayload;
           const details = typeof payload.message === "string" ? payload.message : json;
-          throw new ApiError(`http_${res.status}`, { details, status: res.status });
+          throw new ApiError(`http_${res.status}`, { details, status: res.status, requestId });
         }
 
         const details = isHtml ? { message: `Upstream error (HTTP ${res.status}). Please retry.` } : json;
-        throw new ApiError(`http_${res.status}`, { details, status: res.status });
+        throw new ApiError(`http_${res.status}`, { details, status: res.status, requestId });
       }
 
       return json as T;
