@@ -1,14 +1,19 @@
 import type { Sql } from "postgres";
 
 export type OutboxTopic =
+  | "arcade.action.hint_ready"
+  | "arcade.action.ready"
   | "ex.order.placed"
   | "ex.order.canceled"
+  | "ex.conditional.evaluate"
   | "ex.withdrawal.requested"
   | "ex.withdrawal.approved"
   | "ex.withdrawal.rejected"
   | "ex.withdrawal.broadcasted"
   | "ex.withdrawal.confirmed"
-  | "ex.withdrawal.failed";
+  | "ex.withdrawal.failed"
+  | "trading.bot.execute"
+  | "trading.bot.unwind";
 
 export type OutboxEnqueue = {
   topic: OutboxTopic;

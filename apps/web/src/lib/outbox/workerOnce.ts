@@ -19,6 +19,7 @@ import { handleWithdrawalBroadcast } from "@/lib/outbox/handlers/exchangeWithdra
 import { handleWithdrawalRequestedRiskSignal } from "@/lib/outbox/handlers/exchangeWithdrawalRisk";
 import { handleArcadeActionReady } from "@/lib/outbox/handlers/arcadeActionReady";
 import { handleArcadeActionHintReady } from "@/lib/outbox/handlers/arcadeActionHintReady";
+import { handleExchangeConditionalEvaluate } from "@/lib/outbox/handlers/exchangeConditionalEvaluate";
 
 function getPayload(ev: OutboxRow): Record<string, unknown> {
   if (ev.payload_json && typeof ev.payload_json === "object" && !Array.isArray(ev.payload_json)) {
@@ -86,6 +87,13 @@ async function dispatch(sql: Sql, ev: OutboxRow): Promise<void> {
       const executionId = String(payload.execution_id ?? "");
       if (!executionId) return;
       await handleTradingBotUnwind(sql as any, { executionId });
+      return;
+    }
+
+    case "ex.conditional.evaluate": {
+      const limitRaw = payload.limit;
+      const limit = typeof limitRaw === "number" ? limitRaw : typeof limitRaw === "string" ? Number(limitRaw) : NaN;
+      await handleExchangeConditionalEvaluate(sql as any, { limit: Number.isFinite(limit) ? limit : 50 });
       return;
     }
 

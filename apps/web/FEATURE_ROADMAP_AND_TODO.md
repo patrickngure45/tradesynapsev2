@@ -329,7 +329,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Keyboard shortcuts (submit/cancel, toggle panels).
 
 ## D) Automation + reliability (cron/worker hardening)
-- [ ] Move conditional-order evaluation to a real worker/queue (idempotent jobs + retries).
+- [x] Move conditional-order evaluation to a real worker/queue (idempotent jobs + retries).
 - [x] Cron heartbeat endpoint + admin dashboard health widget (last run, last success, lag).
 - [x] Dead-letter UI actions: re-drive job, mark resolved, export.
 - [x] Idempotency keys for order placement API (dedupe on retries).
