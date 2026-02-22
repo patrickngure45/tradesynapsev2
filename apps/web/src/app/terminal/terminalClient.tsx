@@ -1539,13 +1539,18 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
       ) : null}
 
       {type === "iceberg" ? (
-        <input
-          value={icebergDisplayQty}
-          onChange={(e) => setIcebergDisplayQty(e.target.value)}
-          onKeyDown={onHotkey}
-          placeholder="Display quantity"
-          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
-        />
+        <>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+            Iceberg is GTC-only. Display qty must be &lt; total qty. Each refresh loses time priority.
+          </div>
+          <input
+            value={icebergDisplayQty}
+            onChange={(e) => setIcebergDisplayQty(e.target.value)}
+            onKeyDown={onHotkey}
+            placeholder="Display quantity"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+          />
+        </>
       ) : null}
 
       {type === "twap" ? (
