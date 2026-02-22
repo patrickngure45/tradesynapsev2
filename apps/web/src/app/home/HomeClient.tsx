@@ -55,8 +55,15 @@ export function HomeClient() {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertSymbol, setAlertSymbol] = useState<string>("");
   const [alertFiat, setAlertFiat] = useState<string>("USD");
+  const [alertTemplate, setAlertTemplate] = useState<"threshold" | "pct_change" | "volatility_spike" | "spread_widening">(
+    "threshold",
+  );
   const [alertDirection, setAlertDirection] = useState<"above" | "below">("above");
   const [alertThreshold, setAlertThreshold] = useState<string>("");
+  const [alertWindowSec, setAlertWindowSec] = useState<string>("300");
+  const [alertPctChange, setAlertPctChange] = useState<string>("2");
+  const [alertVolatilityPct, setAlertVolatilityPct] = useState<string>("3");
+  const [alertSpreadBps, setAlertSpreadBps] = useState<string>("50");
   const [alertCooldown, setAlertCooldown] = useState<string>("3600");
 
   const [notifications, setNotifications] = useState<
@@ -317,15 +324,35 @@ export function HomeClient() {
   };
 
   const createAlert = async () => {
-    const payload = {
-      base_symbol: alertSymbol.trim().toUpperCase(),
-      fiat: alertFiat.trim().toUpperCase(),
-      direction: alertDirection,
-      threshold: alertThreshold,
+    const base_symbol = alertSymbol.trim().toUpperCase();
+    const fiat = alertFiat.trim().toUpperCase();
+    if (!base_symbol) return;
+
+    const payload: any = {
+      template: alertTemplate,
+      base_symbol,
+      fiat,
       cooldown_sec: alertCooldown,
     };
 
-    if (!payload.base_symbol || !payload.threshold) return;
+    if (alertTemplate === "threshold") {
+      if (!alertThreshold) return;
+      payload.direction = alertDirection;
+      payload.threshold = alertThreshold;
+    } else if (alertTemplate === "pct_change") {
+      if (!alertPctChange || !alertWindowSec) return;
+      payload.direction = alertDirection; // above=up, below=down
+      payload.pct_change = alertPctChange;
+      payload.window_sec = alertWindowSec;
+    } else if (alertTemplate === "volatility_spike") {
+      if (!alertVolatilityPct || !alertWindowSec) return;
+      payload.volatility_pct = alertVolatilityPct;
+      payload.window_sec = alertWindowSec;
+    } else if (alertTemplate === "spread_widening") {
+      if (!alertSpreadBps) return;
+      payload.spread_bps = alertSpreadBps;
+    }
+
     try {
       await fetchJsonOrThrow(
         "/api/alerts",
@@ -529,20 +556,89 @@ export function HomeClient() {
                 placeholder="Cooldown sec"
                 className="col-span-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
               />
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={createAlert}
-                className="rounded-lg bg-[var(--accent-2)] px-3 py-2 text-xs font-semibold text-white hover:brightness-110"
+
+              <select
+                value={alertTemplate}
+                onChange={(e) => setAlertTemplate(e.target.value as any)}
+                className="col-span-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)]"
               >
-                Create
-              </button>
-              <Link href="/notifications" className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
-                View notifications →
-              </Link>
-            </div>
-          </div>
+                <option value="threshold">Threshold (above/below)</option>
+                <option value="pct_change">% change (window)</option>
+                <option value="volatility_spike">Volatility spike</option>
+                <option value="spread_widening">Spread widening</option>
+              </select>
+
+              {alertTemplate === "threshold" ? (
+                <>
+                  <select
+                    value={alertDirection}
+                    onChange={(e) => setAlertDirection(e.target.value as any)}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)]"
+                  >
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                  </select>
+                  <input
+                    value={alertThreshold}
+                    onChange={(e) => setAlertThreshold(e.target.value)}
+                    placeholder="Threshold"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                </>
+              ) : null}
+
+              {alertTemplate === "pct_change" ? (
+                <>
+                  <select
+                    value={alertDirection}
+                    onChange={(e) => setAlertDirection(e.target.value as any)}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)]"
+                  >
+                    <option value="above">Up</option>
+                    <option value="below">Down</option>
+                  </select>
+                  <input
+                    value={alertPctChange}
+                    onChange={(e) => setAlertPctChange(e.target.value)}
+                    placeholder="% change"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                  <input
+                    value={alertWindowSec}
+                    onChange={(e) => setAlertWindowSec(e.target.value)}
+                    placeholder="Window sec (e.g. 300)"
+                    className="col-span-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                </>
+              ) : null}
+
+              {alertTemplate === "volatility_spike" ? (
+                <>
+                  <input
+                    value={alertVolatilityPct}
+                    onChange={(e) => setAlertVolatilityPct(e.target.value)}
+                    placeholder="Spike %"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                  <input
+                    value={alertWindowSec}
+                    onChange={(e) => setAlertWindowSec(e.target.value)}
+                    placeholder="Window sec (e.g. 300)"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                </>
+              ) : null}
+
+              {alertTemplate === "spread_widening" ? (
+                <>
+                  <input
+                    value={alertSpreadBps}
+                    onChange={(e) => setAlertSpreadBps(e.target.value)}
+                    placeholder="Spread bps (e.g. 50)"
+                    className="col-span-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+                  />
+                </>
+              ) : null}
 
           <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)]">
             {alertsLoading && alerts.length === 0 ? (
@@ -555,7 +651,13 @@ export function HomeClient() {
                   <li key={a.id} className="flex items-center justify-between gap-3 bg-[var(--bg)] px-3 py-2">
                     <div className="min-w-0">
                       <div className="truncate text-xs font-semibold text-[var(--foreground)]">
-                        {a.base_symbol} {a.direction} {a.threshold} {a.fiat}
+                        {String(a.template ?? "threshold") === "threshold"
+                          ? `${a.base_symbol} ${a.direction} ${a.threshold} ${a.fiat}`
+                          : String(a.template) === "pct_change"
+                            ? `${a.base_symbol} % ${a.direction === "above" ? "up" : "down"} ≥ ${a.pct_change}% / ${a.window_sec}s`
+                            : String(a.template) === "volatility_spike"
+                              ? `${a.base_symbol} spike ≥ ${a.volatility_pct}% / ${a.window_sec}s`
+                              : `${a.base_symbol} spread ≥ ${a.spread_bps} bps`}
                       </div>
                       <div className="mt-0.5 text-[10px] text-[var(--muted)]">
                         Cooldown: {a.cooldown_sec}s{a.last_triggered_at ? ` · last ${new Date(a.last_triggered_at).toLocaleString()}` : ""}

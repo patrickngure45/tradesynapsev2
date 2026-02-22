@@ -11,6 +11,29 @@ import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function median(values: number[]): number | null {
+  const v = values.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
+}
+
+function spreadBpsFromSources(quote: Awaited<ReturnType<typeof getExternalIndexUsdt>>): number | null {
+  if (!quote) return null;
+  const spreads: number[] = [];
+  for (const s of quote.sources ?? []) {
+    const bid = s.bid;
+    const ask = s.ask;
+    const mid = s.mid ?? (typeof bid === "number" && typeof ask === "number" ? (bid + ask) / 2 : null);
+    if (typeof bid !== "number" || typeof ask !== "number") continue;
+    if (!Number.isFinite(bid) || !Number.isFinite(ask)) continue;
+    if (!Number.isFinite(mid as any) || (mid as number) <= 0) continue;
+    const bps = ((ask - bid) / (mid as number)) * 10_000;
+    if (Number.isFinite(bps) && bps >= 0) spreads.push(bps);
+  }
+  return median(spreads);
+}
+
 const querySchema = z.object({
   max: z
     .string()
@@ -60,10 +83,17 @@ export async function POST(request: Request) {
           user_id: string;
           base_symbol: string;
           fiat: string;
+          template: string;
           direction: "above" | "below";
           threshold: string;
+          window_sec: number | null;
+          pct_change: string | null;
+          spread_bps: string | null;
+          volatility_pct: string | null;
           cooldown_sec: number;
           last_triggered_at: string | null;
+          last_value: string | null;
+          last_value_at: string | null;
         }[]
       >`
         SELECT
@@ -71,10 +101,17 @@ export async function POST(request: Request) {
           user_id::text,
           base_symbol,
           fiat,
+          template,
           direction,
           threshold::text,
+          window_sec,
+          pct_change::text,
+          spread_bps::text,
+          volatility_pct::text,
           cooldown_sec,
           last_triggered_at
+          ,last_value::text,
+          last_value_at::text
         FROM app_price_alert
         WHERE status = 'active'
         ORDER BY created_at ASC
@@ -113,12 +150,105 @@ export async function POST(request: Request) {
       if (!Number.isFinite(usdtFiat) || usdtFiat <= 0) continue;
 
       const priceFiat = usdt * usdtFiat;
+
+      const template = String(a.template ?? "threshold").trim().toLowerCase();
       const threshold = Number(a.threshold);
-      if (!Number.isFinite(threshold) || threshold <= 0) continue;
+      const windowSec = a.window_sec != null ? Number(a.window_sec) : null;
+      const pctChange = a.pct_change != null ? Number(a.pct_change) : null;
+      const spreadBpsThresh = a.spread_bps != null ? Number(a.spread_bps) : null;
+      const volPct = a.volatility_pct != null ? Number(a.volatility_pct) : null;
 
-      const hit = a.direction === "above" ? priceFiat >= threshold : priceFiat <= threshold;
+      const lastValue = a.last_value != null ? Number(a.last_value) : null;
+      const lastValueAtMs = a.last_value_at ? new Date(a.last_value_at).getTime() : 0;
+
+      let hit = false;
+      let title = `${base} alert`;
+      let body = "";
+      const meta: Record<string, unknown> = { base_symbol: base, fiat, template };
+
+      if (template === "threshold") {
+        if (!Number.isFinite(threshold) || threshold <= 0) continue;
+        hit = a.direction === "above" ? priceFiat >= threshold : priceFiat <= threshold;
+        title = `${base} alert`;
+        body = `${base} is ${a.direction} ${threshold.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${fiat}`;
+        meta.direction = a.direction;
+        meta.threshold = String(threshold);
+        meta.price = String(priceFiat);
+      } else if (template === "pct_change") {
+        if (!windowSec || !pctChange || !Number.isFinite(pctChange) || pctChange <= 0) continue;
+        if (!lastValue || !lastValueAtMs) {
+          await sql`
+            UPDATE app_price_alert
+            SET last_value = (${String(priceFiat)}::numeric), last_value_at = now()
+            WHERE id = ${a.id}::uuid
+          `;
+          continue;
+        }
+        if (now - lastValueAtMs < windowSec * 1000) continue;
+
+        const pct = ((priceFiat - lastValue) / lastValue) * 100;
+        const dirHit = a.direction === "above" ? pct >= pctChange : pct <= -pctChange;
+        hit = Number.isFinite(pct) && dirHit;
+        title = `${base} % change`;
+        body = `${base} moved ${pct.toFixed(2)}% in ~${Math.round(windowSec / 60)}m (${fiat})`;
+        meta.direction = a.direction;
+        meta.window_sec = windowSec;
+        meta.pct_change = String(pctChange);
+        meta.pct_observed = String(pct);
+        meta.price = String(priceFiat);
+      } else if (template === "volatility_spike") {
+        if (!windowSec || !volPct || !Number.isFinite(volPct) || volPct <= 0) continue;
+        if (!lastValue || !lastValueAtMs) {
+          await sql`
+            UPDATE app_price_alert
+            SET last_value = (${String(priceFiat)}::numeric), last_value_at = now()
+            WHERE id = ${a.id}::uuid
+          `;
+          continue;
+        }
+        if (now - lastValueAtMs < windowSec * 1000) continue;
+
+        const pct = ((priceFiat - lastValue) / lastValue) * 100;
+        hit = Number.isFinite(pct) && Math.abs(pct) >= volPct;
+        title = `${base} volatility spike`;
+        body = `${base} moved ${pct.toFixed(2)}% in ~${Math.round(windowSec / 60)}m (${fiat})`;
+        meta.window_sec = windowSec;
+        meta.volatility_pct = String(volPct);
+        meta.pct_observed = String(pct);
+        meta.price = String(priceFiat);
+      } else if (template === "spread_widening") {
+        if (!spreadBpsThresh || !Number.isFinite(spreadBpsThresh) || spreadBpsThresh <= 0) continue;
+        const spreadBps = spreadBpsFromSources(quote);
+        if (spreadBps == null || !Number.isFinite(spreadBps)) continue;
+        hit = spreadBps >= spreadBpsThresh && (lastValue == null || lastValue < spreadBpsThresh);
+        title = `${base} spread widened`;
+        body = `${base} spread is ~${spreadBps.toFixed(0)} bps (threshold ${spreadBpsThresh.toFixed(0)} bps)`;
+        meta.spread_bps = String(spreadBpsThresh);
+        meta.spread_observed_bps = String(spreadBps);
+      } else {
+        continue;
+      }
+
+      // Always update last_value snapshot for templates that rely on it.
+      if (template === "pct_change" || template === "volatility_spike") {
+        await sql`
+          UPDATE app_price_alert
+          SET last_value = (${String(priceFiat)}::numeric), last_value_at = now()
+          WHERE id = ${a.id}::uuid
+        `;
+      }
+      if (template === "spread_widening") {
+        const spreadBps = spreadBpsFromSources(quote);
+        if (spreadBps != null && Number.isFinite(spreadBps)) {
+          await sql`
+            UPDATE app_price_alert
+            SET last_value = (${String(spreadBps)}::numeric), last_value_at = now()
+            WHERE id = ${a.id}::uuid
+          `;
+        }
+      }
+
       if (!hit) continue;
-
       triggered++;
 
       await retryOnceOnTransientDbError(async () => {
@@ -131,15 +261,9 @@ export async function POST(request: Request) {
         await createNotification(sql, {
           userId: a.user_id,
           type: "price_alert",
-          title: `${base} alert` ,
-          body: `${base} is ${a.direction} ${threshold.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${fiat}`,
-          metadata: {
-            base_symbol: base,
-            fiat,
-            direction: a.direction,
-            threshold: String(threshold),
-            price: String(priceFiat),
-          },
+          title,
+          body,
+          metadata: meta,
         });
       });
     }

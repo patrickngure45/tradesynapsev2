@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 
@@ -21,13 +22,39 @@ const fiatSchema = z
   .refine((v) => /^[A-Z]{2,5}$/.test(v), "invalid_fiat");
 
 const createSchema = z.object({
+  template: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "threshold").trim().toLowerCase())
+    .refine((v) => ["threshold", "pct_change", "volatility_spike", "spread_widening"].includes(v), "invalid_template"),
   base_symbol: symbolSchema,
   fiat: fiatSchema,
-  direction: z.enum(["above", "below"]),
+  direction: z.enum(["above", "below"]).optional().default("above"),
   threshold: z
     .union([z.number(), z.string()])
-    .transform((v) => Number(v))
-    .refine((v) => Number.isFinite(v) && v > 0, "invalid_threshold"),
+    .optional()
+    .transform((v) => (v == null ? null : Number(v)))
+    .refine((v) => v == null || (Number.isFinite(v) && v > 0), "invalid_threshold"),
+  window_sec: z
+    .union([z.number().int(), z.string()])
+    .optional()
+    .transform((v) => (v == null ? null : Math.trunc(Number(v))))
+    .refine((v) => v == null || (Number.isFinite(v) && v >= 60 && v <= 24 * 3600), "invalid_window_sec"),
+  pct_change: z
+    .union([z.number(), z.string()])
+    .optional()
+    .transform((v) => (v == null ? null : Number(v)))
+    .refine((v) => v == null || (Number.isFinite(v) && v > 0 && v <= 100), "invalid_pct_change"),
+  spread_bps: z
+    .union([z.number(), z.string()])
+    .optional()
+    .transform((v) => (v == null ? null : Number(v)))
+    .refine((v) => v == null || (Number.isFinite(v) && v > 0 && v <= 50_000), "invalid_spread_bps"),
+  volatility_pct: z
+    .union([z.number(), z.string()])
+    .optional()
+    .transform((v) => (v == null ? null : Number(v)))
+    .refine((v) => v == null || (Number.isFinite(v) && v > 0 && v <= 100), "invalid_volatility_pct"),
   cooldown_sec: z
     .union([z.number().int(), z.string()])
     .optional()
@@ -46,8 +73,12 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
+    const activeErr = await requireActiveUser(sql, userId);
     if (activeErr) return apiError(activeErr);
 
     const rows = await retryOnceOnTransientDbError(async () => {
@@ -68,14 +99,19 @@ export async function GET(request: Request) {
           id::text,
           base_symbol,
           fiat,
+          template,
           direction,
           threshold::text,
+          window_sec,
+          pct_change::text AS pct_change,
+          spread_bps::text AS spread_bps,
+          volatility_pct::text AS volatility_pct,
           status,
           cooldown_sec,
           last_triggered_at,
           created_at
         FROM app_price_alert
-        WHERE user_id = ${actingUserId}::uuid
+        WHERE user_id = ${userId}::uuid
           AND status <> 'deleted'
         ORDER BY created_at DESC
         LIMIT 200
@@ -110,14 +146,33 @@ export async function POST(request: Request) {
     const parsed = createSchema.safeParse(body);
     if (!parsed.success) return apiError("invalid_input");
 
+    const template = parsed.data.template as "threshold" | "pct_change" | "volatility_spike" | "spread_widening";
+    if (template === "threshold") {
+      if (!parsed.data.threshold || !parsed.data.direction) return apiError("invalid_input");
+    }
+    if (template === "pct_change") {
+      if (!parsed.data.window_sec || !parsed.data.pct_change) return apiError("invalid_input");
+    }
+    if (template === "volatility_spike") {
+      if (!parsed.data.window_sec || !parsed.data.volatility_pct) return apiError("invalid_input");
+    }
+    if (template === "spread_widening") {
+      if (!parsed.data.spread_bps) return apiError("invalid_input");
+    }
+
     const created = await retryOnceOnTransientDbError(async () => {
       const rows = await sql<{ id: string }[]>`
         INSERT INTO app_price_alert (
           user_id,
           base_symbol,
           fiat,
+          template,
           direction,
           threshold,
+          window_sec,
+          pct_change,
+          spread_bps,
+          volatility_pct,
           cooldown_sec,
           status
         )
@@ -125,8 +180,13 @@ export async function POST(request: Request) {
           ${actingUserId}::uuid,
           ${parsed.data.base_symbol},
           ${parsed.data.fiat},
+          ${template},
           ${parsed.data.direction},
-          ${String(parsed.data.threshold)},
+          ${parsed.data.threshold == null ? null : String(parsed.data.threshold)},
+          ${parsed.data.window_sec},
+          ${parsed.data.pct_change == null ? null : String(parsed.data.pct_change)},
+          ${parsed.data.spread_bps == null ? null : String(parsed.data.spread_bps)},
+          ${parsed.data.volatility_pct == null ? null : String(parsed.data.volatility_pct)},
           ${Math.floor(parsed.data.cooldown_sec)},
           'active'
         )
