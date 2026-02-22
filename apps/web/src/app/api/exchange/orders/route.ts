@@ -784,100 +784,105 @@ export async function POST(request: Request) {
       }> = [];
 
       const makerSide = taker.side === "buy" ? "sell" : "buy";
-      const makers = await txSql<
-        {
-          id: string;
-          user_id: string;
-          side: "buy" | "sell";
-          price: string;
-          remaining_quantity: string;
-          iceberg_display_quantity: string | null;
-          iceberg_hidden_remaining: string;
-          hold_id: string | null;
-          created_at: string;
-        }[]
-      >`
-        SELECT
-          id,
-          user_id,
-          side,
-          price::text AS price,
-          remaining_quantity::text AS remaining_quantity,
-          iceberg_display_quantity::text AS iceberg_display_quantity,
-          iceberg_hidden_remaining::text AS iceberg_hidden_remaining,
-          hold_id,
-          created_at
-        FROM ex_order
-        WHERE market_id = ${market.id}::uuid
-          AND side = ${makerSide}
-          AND status IN ('open','partially_filled')
-          AND remaining_quantity > 0
-          AND id <> ${taker.id}::uuid
-          AND user_id <> ${taker.user_id}::uuid
-          AND (
-            ${isMarket}::boolean = true
-            OR (${taker.side} = 'buy' AND price <= (${taker.price}::numeric))
-            OR (${taker.side} = 'sell' AND price >= (${taker.price}::numeric))
-          )
-        ORDER BY
-          CASE WHEN ${taker.side} = 'buy' THEN price END ASC,
-          CASE WHEN ${taker.side} = 'sell' THEN price END DESC,
-          created_at ASC
-        LIMIT 200
-        FOR UPDATE
-      `;
-
-      const makersById = new Map(makers.map((m) => [m.id, m] as const));
-
-      const planned = isMarket
-        ? planMarketMatches({
-            taker: {
-              id: taker.id,
-              side: taker.side,
-              remaining_quantity: taker.remaining_quantity,
-              created_at: taker.created_at,
-            },
-            makers: makers.map((m) => ({
-              id: m.id,
-              side: m.side,
-              price: m.price,
-              remaining_quantity: m.remaining_quantity,
-              created_at: m.created_at,
-            })),
-            maxFills: 200,
-          })
-        : planLimitMatches({
-            taker: {
-              id: taker.id,
-              side: taker.side,
-              price: taker.price,
-              remaining_quantity: taker.remaining_quantity,
-              created_at: taker.created_at,
-            },
-            makers: makers.map((m) => ({
-              id: m.id,
-              side: m.side,
-              price: m.price,
-              remaining_quantity: m.remaining_quantity,
-              created_at: m.created_at,
-            })),
-            maxFills: 200,
-          });
-
       const makerFillNotifs: Array<{ userId: string; orderId: string; side: string; fillQty: string; price: string; isFilled: boolean }> = [];
 
-      for (const fill of planned.fills) {
-        const remaining = await txSql<{ remaining: string }[]>`
-          SELECT remaining_quantity::text AS remaining
+      let fillCount = 0;
+      while (fillCount < 200) {
+        const remaining = await txSql<{ remaining: string; status: string }[]>`
+          SELECT remaining_quantity::text AS remaining, status
           FROM ex_order
           WHERE id = ${taker.id}::uuid
           LIMIT 1
         `;
         const takerRemaining = remaining[0]?.remaining ?? "0";
-        if (isZeroOrLess3818(takerRemaining)) break;
+        const takerStatus = remaining[0]?.status ?? taker.status;
+        if (takerStatus === "filled" || isZeroOrLess3818(takerRemaining)) break;
+
+        const makers = await txSql<
+          {
+            id: string;
+            user_id: string;
+            side: "buy" | "sell";
+            price: string;
+            remaining_quantity: string;
+            iceberg_display_quantity: string | null;
+            iceberg_hidden_remaining: string;
+            hold_id: string | null;
+            created_at: string;
+          }[]
+        >`
+          SELECT
+            id,
+            user_id,
+            side,
+            price::text AS price,
+            remaining_quantity::text AS remaining_quantity,
+            iceberg_display_quantity::text AS iceberg_display_quantity,
+            iceberg_hidden_remaining::text AS iceberg_hidden_remaining,
+            hold_id,
+            created_at
+          FROM ex_order
+          WHERE market_id = ${market.id}::uuid
+            AND side = ${makerSide}
+            AND status IN ('open','partially_filled')
+            AND remaining_quantity > 0
+            AND id <> ${taker.id}::uuid
+            AND user_id <> ${taker.user_id}::uuid
+            AND (
+              ${isMarket}::boolean = true
+              OR (${taker.side} = 'buy' AND price <= (${taker.price}::numeric))
+              OR (${taker.side} = 'sell' AND price >= (${taker.price}::numeric))
+            )
+          ORDER BY
+            CASE WHEN ${taker.side} = 'buy' THEN price END ASC,
+            CASE WHEN ${taker.side} = 'sell' THEN price END DESC,
+            created_at ASC
+          LIMIT 200
+          FOR UPDATE
+        `;
+
+        const makersById = new Map(makers.map((m) => [m.id, m] as const));
+
+        const planned = isMarket
+          ? planMarketMatches({
+              taker: {
+                id: taker.id,
+                side: taker.side,
+                remaining_quantity: takerRemaining,
+                created_at: taker.created_at,
+              },
+              makers: makers.map((m) => ({
+                id: m.id,
+                side: m.side,
+                price: m.price,
+                remaining_quantity: m.remaining_quantity,
+                created_at: m.created_at,
+              })),
+              maxFills: 1,
+            })
+          : planLimitMatches({
+              taker: {
+                id: taker.id,
+                side: taker.side,
+                price: taker.price,
+                remaining_quantity: takerRemaining,
+                created_at: taker.created_at,
+              },
+              makers: makers.map((m) => ({
+                id: m.id,
+                side: m.side,
+                price: m.price,
+                remaining_quantity: m.remaining_quantity,
+                created_at: m.created_at,
+              })),
+              maxFills: 1,
+            });
+
+        const fill = planned.fills[0] ?? null;
+        if (!fill) break;
 
         const maker = makersById.get(fill.maker_order_id);
-        if (!maker) continue;
+        if (!maker) break;
 
         const fillQty = fill.quantity;
         if (isZeroOrLess3818(fillQty)) continue;
@@ -1029,6 +1034,13 @@ export async function POST(request: Request) {
               THEN GREATEST(iceberg_hidden_remaining - LEAST(iceberg_display_quantity, iceberg_hidden_remaining), 0)
               ELSE iceberg_hidden_remaining
             END,
+            created_at = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN now()
+              ELSE created_at
+            END,
             status = CASE
               WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
                 AND iceberg_hidden_remaining > 0
@@ -1042,9 +1054,15 @@ export async function POST(request: Request) {
         `;
 
         // Track maker fill for notification
-        const makerVisibleAfter = fromBigInt3818(toBigInt3818(maker.remaining_quantity) - toBigInt3818(fillQty));
-        const makerHasHidden = !isZeroOrLess3818(maker.iceberg_hidden_remaining);
-        const makerIsFilled = isZeroOrLess3818(makerVisibleAfter) && !makerHasHidden;
+        const makerAfterRows = await txSql<{ remaining: string; hidden: string; status: string }[]>`
+          SELECT remaining_quantity::text AS remaining, iceberg_hidden_remaining::text AS hidden, status
+          FROM ex_order
+          WHERE id = ${maker.id}::uuid
+          LIMIT 1
+        `;
+        const makerAfter = makerAfterRows[0];
+        const makerIsFilled = makerAfter?.status === "filled" ||
+          (makerAfter ? (isZeroOrLess3818(makerAfter.remaining) && isZeroOrLess3818(makerAfter.hidden)) : false);
         makerFillNotifs.push({
           userId: maker.user_id,
           orderId: maker.id,
@@ -1070,6 +1088,13 @@ export async function POST(request: Request) {
                 AND iceberg_display_quantity IS NOT NULL
               THEN GREATEST(iceberg_hidden_remaining - LEAST(iceberg_display_quantity, iceberg_hidden_remaining), 0)
               ELSE iceberg_hidden_remaining
+            END,
+            created_at = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN now()
+              ELSE created_at
             END,
             status = CASE
               WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
@@ -1136,6 +1161,8 @@ export async function POST(request: Request) {
           LIMIT 1
         `;
         taker = takerRows[0]!;
+
+        fillCount += 1;
       }
 
       await finalizeHoldIfTerminal(taker.id, taker.hold_id);
