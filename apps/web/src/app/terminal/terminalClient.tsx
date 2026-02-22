@@ -733,7 +733,7 @@ function FillsPanel({ marketId }: { marketId: string | null }) {
 
 function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop" | "twap">("limit");
+  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop" | "twap" | "tp_ladder">("limit");
   const [price, setPrice] = useState<string>("");
   const [triggerPrice, setTriggerPrice] = useState<string>("");
   const [takeProfitPrice, setTakeProfitPrice] = useState<string>("");
@@ -776,6 +776,12 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [twapFirstRunSec, setTwapFirstRunSec] = useState<string>("3");
   const [twapTotpCode, setTwapTotpCode] = useState<string>("");
 
+  const [tpLadderTotalQty, setTpLadderTotalQty] = useState<string>("");
+  const [tpLadderLevels, setTpLadderLevels] = useState<string>("5");
+  const [tpLadderStartPrice, setTpLadderStartPrice] = useState<string>("");
+  const [tpLadderEndPrice, setTpLadderEndPrice] = useState<string>("");
+  const [tpLadderBatchKey, setTpLadderBatchKey] = useState<string>("");
+
   useEffect(() => {
     setErr(null);
     setPrice("");
@@ -791,8 +797,25 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setTwapIntervalSec("30");
     setTwapFirstRunSec("3");
 
+    setTpLadderTotalQty("");
+    setTpLadderLevels("5");
+    setTpLadderStartPrice("");
+    setTpLadderEndPrice("");
+    setTpLadderBatchKey("");
+
     setRiskConfirmed(false);
   }, [market?.id]);
+
+  useEffect(() => {
+    // Keep a stable idempotency batch key for retries unless the user changes ladder inputs.
+    setTpLadderBatchKey("");
+  }, [tpLadderTotalQty, tpLadderLevels, tpLadderStartPrice, tpLadderEndPrice, side, market?.id]);
+
+  const newIdempotencyKey = () => {
+    const uuid = (globalThis as any)?.crypto?.randomUUID?.();
+    if (uuid) return `tpl:${uuid}`;
+    return `tpl:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+  };
 
   const quoteSymbol = useMemo(() => {
     const sym = String(market?.symbol ?? "");
@@ -883,7 +906,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
   const estimatedNotional = useMemo(() => {
     if (!market) return null;
-    const q = Number(String(qty ?? "").trim());
+    const q = Number(String((type === "tp_ladder" ? tpLadderTotalQty : qty) ?? "").trim());
     if (!Number.isFinite(q) || q <= 0) return null;
 
     let px: number | null = null;
@@ -893,6 +916,10 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
       if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) px = (bid + ask) / 2;
       else if (Number.isFinite(ask) && ask > 0) px = ask;
       else if (Number.isFinite(bid) && bid > 0) px = bid;
+    } else if (type === "tp_ladder") {
+      const a = Number(String(tpLadderStartPrice ?? "").trim());
+      const b = Number(String(tpLadderEndPrice ?? "").trim());
+      if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0) px = (a + b) / 2;
     } else {
       const p = Number(String(price ?? "").trim());
       if (Number.isFinite(p) && p > 0) px = p;
@@ -900,7 +927,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
     if (px == null || !Number.isFinite(px) || px <= 0) return null;
     return px * q;
-  }, [market, price, qty, type]);
+  }, [market, price, qty, type, tpLadderTotalQty, tpLadderStartPrice, tpLadderEndPrice]);
 
   const highRiskThreshold = 5000;
   const requiresRiskConfirm = estimatedNotional != null && estimatedNotional >= highRiskThreshold;
@@ -1051,6 +1078,92 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
     setSubmitting(true);
     try {
+      if (type === "tp_ladder") {
+        const levels = Math.trunc(Number(String(tpLadderLevels ?? "").trim()));
+        if (!Number.isFinite(levels) || levels < 2 || levels > 25) {
+          setErr("invalid_levels");
+          return;
+        }
+
+        const lot = String(market.lot_size ?? "0.00000001");
+        const tick = String(market.tick_size ?? "0.00000001");
+
+        const totalQty = String(tpLadderTotalQty ?? "").trim();
+        const startPx = String(tpLadderStartPrice ?? "").trim();
+        const endPx = String(tpLadderEndPrice ?? "").trim();
+        if (!totalQty || !startPx || !endPx) {
+          setErr("missing_inputs");
+          return;
+        }
+
+        const totalQtyBI = toBigInt3818(totalQty);
+        if (totalQtyBI <= 0n) {
+          setErr("invalid_quantity");
+          return;
+        }
+
+        const startPxBI = toBigInt3818(startPx);
+        const endPxBI = toBigInt3818(endPx);
+        if (startPxBI <= 0n || endPxBI <= 0n) {
+          setErr("invalid_price");
+          return;
+        }
+
+        const baseQtyRaw = fromBigInt3818(totalQtyBI / BigInt(levels));
+        const baseQtyStr = quantizeDownToStep3818(baseQtyRaw, lot);
+        const baseQtyBI = toBigInt3818(baseQtyStr);
+        if (baseQtyBI <= 0n) {
+          setErr("quantity_too_small_for_levels");
+          return;
+        }
+
+        const deltaPxBI = levels === 1 ? 0n : (endPxBI - startPxBI) / BigInt(levels - 1);
+
+        const batchKey = tpLadderBatchKey || newIdempotencyKey();
+        if (!tpLadderBatchKey) setTpLadderBatchKey(batchKey);
+
+        for (let i = 0; i < levels; i++) {
+          const pxBI = startPxBI + deltaPxBI * BigInt(i);
+          const pxStr = quantizeDownToStep3818(fromBigInt3818(pxBI), tick);
+          if (toBigInt3818(pxStr) <= 0n) {
+            setErr("invalid_price");
+            return;
+          }
+
+          const remainingBI = totalQtyBI - baseQtyBI * BigInt(levels - 1);
+          const desiredQtyBI = i === levels - 1 ? remainingBI : baseQtyBI;
+          const qtyStr = quantizeDownToStep3818(fromBigInt3818(desiredQtyBI), lot);
+          if (toBigInt3818(qtyStr) <= 0n) {
+            setErr("quantity_too_small_for_levels");
+            return;
+          }
+
+          const payload = {
+            market_id: market.id,
+            side,
+            type: "limit" as const,
+            price: pxStr,
+            quantity: qtyStr,
+            time_in_force: timeInForce,
+            post_only: postOnly,
+            idempotency_key: `${batchKey}:${i}`,
+          };
+
+          await fetchJsonOrThrow(
+            "/api/exchange/orders",
+            withDevUserHeader({
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload),
+            }),
+          );
+        }
+
+        setTpLadderTotalQty("");
+        setTpLadderBatchKey("");
+        return;
+      }
+
       if (type === "twap") {
         const payload = {
           market_id: market.id,
@@ -1221,7 +1334,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-  <div className="grid grid-cols-6 gap-2">
+  <div className="grid grid-cols-7 gap-2">
         <button
           type="button"
           onClick={() => setType("limit")}
@@ -1295,9 +1408,22 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         >
           TWAP
         </button>
+
+        <button
+          type="button"
+          onClick={() => setType("tp_ladder")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "tp_ladder"
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          TP Ladder
+        </button>
       </div>
 
-      {type === "limit" ? (
+      {type === "limit" || type === "tp_ladder" ? (
         <div className="grid grid-cols-2 gap-2">
           <select
             value={timeInForce}
@@ -1479,13 +1605,53 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </>
       ) : null}
 
-      <input
-        value={qty}
-        onChange={(e) => setQty(e.target.value)}
-        onKeyDown={onHotkey}
-        placeholder="Quantity"
-        className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
-      />
+      {type === "tp_ladder" ? (
+        <>
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+            Splits a total quantity into multiple limit orders across a price range.
+          </div>
+          <input
+            value={tpLadderTotalQty}
+            onChange={(e) => setTpLadderTotalQty(e.target.value)}
+            onKeyDown={onHotkey}
+            placeholder="Total quantity"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <input
+              value={tpLadderLevels}
+              onChange={(e) => setTpLadderLevels(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="Levels"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+            <input
+              value={tpLadderStartPrice}
+              onChange={(e) => setTpLadderStartPrice(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="Start price"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+            <input
+              value={tpLadderEndPrice}
+              onChange={(e) => setTpLadderEndPrice(e.target.value)}
+              onKeyDown={onHotkey}
+              placeholder="End price"
+              className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+            />
+          </div>
+        </>
+      ) : null}
+
+      {type !== "twap" && type !== "tp_ladder" ? (
+        <input
+          value={qty}
+          onChange={(e) => setQty(e.target.value)}
+          onKeyDown={onHotkey}
+          placeholder="Quantity"
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+        />
+      ) : null}
 
       <button
         type="button"
