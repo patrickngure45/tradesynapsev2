@@ -154,6 +154,14 @@ These are the common operational jobs:
 - Outbox worker (every **1 minute**)
 	- `GET /api/exchange/cron/outbox-worker?secret=...&max_ms=8000&batch=25&max_batches=2`
 
+- Email outbox sender (every **1–2 minutes**)
+	- Sends notification emails queued in `ex_email_outbox`.
+	- `GET /api/cron/email-notifications?secret=...&max=30&max_ms=20000`
+
+	Notes:
+	- Requires email transport config (`RESEND_API_KEY` or SMTP vars) and verified user emails.
+	- Writes heartbeat `cron:email-notifications` (visible on `/status` + admin status).
+
 - Deposit scan (native + allowlisted token logs) (every **2–3 minutes**)
 	- Recommended (BSC):
 		- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=1&tokens=1&symbols=USDT%2CUSDC&max_ms=8000&max_blocks=40&blocks_per_batch=20`
@@ -212,6 +220,28 @@ Notes:
 ### Security note
 
 The `secret=...` value is a bearer credential. Rotate it before any real funds / mainnet usage.
+
+## Ops alerts (production)
+
+This app can send **operational alert emails** when health signals go degraded (stale expected services, outbox backlog/dead letters, email-outbox backlog).
+
+1) Set env vars in production (Railway):
+	- `OPS_ALERT_EMAIL_TO=ops@coinwaka.com` (comma-separated list supported)
+	- `NEXT_PUBLIC_BASE_URL=https://coinwaka.com` (so alert emails link to your live `/status`)
+
+Optional tuning:
+	- `OPS_ALERT_MIN_INTERVAL_MINUTES=30`
+	- `OPS_OUTBOX_DEAD_THRESHOLD=1`
+	- `OPS_OUTBOX_OPEN_THRESHOLD=5000`
+	- `OPS_EMAIL_OUTBOX_PENDING_THRESHOLD=200`
+	- `OPS_EMAIL_OUTBOX_AGE_MINUTES=20`
+
+2) Add a cron-job.org entry (every **2–5 minutes**):
+	- `GET /api/cron/ops-alerts?secret=...`
+
+Notes:
+	- Uses DB dedupe to avoid spamming the same alert repeatedly.
+	- If your scheduler supports headers, prefer `x-cron-secret` over putting the secret in the URL.
 
 ## Smoke testing (Arcade)
 
