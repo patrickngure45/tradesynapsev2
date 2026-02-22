@@ -1900,14 +1900,14 @@ export function ArcadeClient() {
               <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
               <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Insight packs</div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blind insight packs</div>
             <div className="h-px flex-1 bg-[var(--border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Open an informational card</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Costs 20 shards · commit→reveal fairness proof · not financial advice</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Open a blind pack</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">Reveals a checklist, playbook, or reusable template · not financial advice</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1954,7 +1954,22 @@ export function ArcadeClient() {
                 <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{insightLast.outcome.label}</div>
                 <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{insightLast.outcome.rarity}</div>
               </div>
-              <div className="mt-2 text-xs text-[var(--muted)]">{insightLast.outcome.metadata?.text ?? ""}</div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                {insightLast.outcome.metadata?.kind ? (
+                  <>
+                    Type: <span className="font-semibold text-[var(--foreground)]">{String(insightLast.outcome.metadata.kind)}</span>
+                    <span className="mx-2 text-[var(--border)]">•</span>
+                  </>
+                ) : null}
+                {insightLast.outcome.metadata?.text ?? ""}
+              </div>
+
+              {String(insightLast.outcome.metadata?.content_md ?? "").trim() ? (
+                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--foreground)]">
+                  {String(insightLast.outcome.metadata.content_md)}
+                </pre>
+              ) : null}
+
               <div className="mt-3 text-[11px] text-[var(--muted)]">{insightLast.outcome.metadata?.disclaimer ?? ""}</div>
             </div>
           ) : null}

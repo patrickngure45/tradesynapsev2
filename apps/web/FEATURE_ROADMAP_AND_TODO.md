@@ -269,7 +269,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] “Rare” generations are collectible templates (not financial promises).
 
 ### 6.2 Blind insight packs
-- [ ] Packs reveal analytics templates, education cards, or checklists.
+- [x] Packs reveal analytics templates, education cards, or checklists.
 
 ## 7) Cross-module synergies
 - [x] “Keys & Gates”: rare keys unlock entry into premium modules.
