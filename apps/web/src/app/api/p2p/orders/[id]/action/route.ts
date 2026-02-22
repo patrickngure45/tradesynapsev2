@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api/errors";
 import { requireActiveUser } from "@/lib/auth/activeUser";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { getSql } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
@@ -32,12 +32,12 @@ export async function POST(
 ): Promise<Response> {
   try {
     const params = await props.params;
-    const userId = getActingUserId(req);
-    const authErr = requireActingUserIdInProd(userId);
-    if (authErr) return apiError(authErr);
-    if (!userId) return apiError("unauthorized", { status: 401 });
-
     const sql = getSql();
+
+    const authed = await requireSessionUserId(sql as any, req);
+    if (!authed.ok) return authed.response;
+    const userId = authed.userId;
+
     const activeErr = await requireActiveUser(sql, userId);
     if (activeErr) return apiError(activeErr);
 

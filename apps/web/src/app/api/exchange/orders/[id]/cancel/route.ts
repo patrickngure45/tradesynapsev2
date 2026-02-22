@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { getSql } from "@/lib/db";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { enqueueOutbox } from "@/lib/outbox";
@@ -31,10 +31,9 @@ export async function POST(
     return apiZodError(e) ?? apiError("invalid_input");
   }
 
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
+  const authed = await requireSessionUserId(sql as any, request);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

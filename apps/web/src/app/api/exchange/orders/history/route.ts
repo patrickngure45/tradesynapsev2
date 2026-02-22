@@ -3,7 +3,7 @@ import { z } from "zod";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 
@@ -28,10 +28,9 @@ const querySchema = z.object({
 export async function GET(req: Request) {
   const sql = getSql();
 
-  const actingUserId = getActingUserId(req);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
+  const authed = await requireSessionUserId(sql as any, req);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, req, actingUserId));
   if (!scopeRes.ok) return apiError(scopeRes.error);

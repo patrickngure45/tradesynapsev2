@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { requireActiveUser } from "@/lib/auth/activeUser";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
@@ -103,10 +103,9 @@ export async function GET(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
+  const authed = await requireSessionUserId(sql as any, request);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
   if (!scopeRes.ok) return apiError(scopeRes.error);
@@ -163,10 +162,9 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("missing_x_user_id");
+  const authed = await requireSessionUserId(sql as any, request);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
