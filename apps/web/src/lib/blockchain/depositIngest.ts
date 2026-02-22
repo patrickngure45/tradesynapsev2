@@ -1109,8 +1109,10 @@ export async function scanAndCreditBscDeposits(
   let stoppedEarly = false;
   let stopReason: "time_budget" | undefined;
 
+  const timeExceeded = (): boolean => maxMs > 0 && Date.now() - startedAtMs > maxMs;
+
   for (let start = fromBlock; start <= toBlock; start += blocksPerBatch) {
-    if (maxMs > 0 && Date.now() - startedAtMs > maxMs) {
+    if (timeExceeded()) {
       stoppedEarly = true;
       stopReason = "time_budget";
       break;
@@ -1121,11 +1123,22 @@ export async function scanAndCreditBscDeposits(
 
     if (nativeBnb) {
       for (let blockNo = start; blockNo <= end; blockNo += 1) {
+        if (timeExceeded()) {
+          stoppedEarly = true;
+          stopReason = "time_budget";
+          break;
+        }
+
         const block = await provider.getBlock(blockNo, true);
         if (!block) continue;
 
         const txs = Array.isArray((block as any).transactions) ? ((block as any).transactions as ethers.TransactionResponse[]) : [];
         for (const tx of txs) {
+          if (timeExceeded()) {
+            stoppedEarly = true;
+            stopReason = "time_budget";
+            break;
+          }
           const to = tx.to ? normalizeAddress(tx.to) : "";
           if (!to) continue;
           const userId = addressToUser.get(to);
@@ -1155,8 +1168,12 @@ export async function scanAndCreditBscDeposits(
           if (outcome === "credited") credited += 1;
           else duplicates += 1;
         }
+
+        if (stoppedEarly) break;
       }
     }
+
+    if (stoppedEarly) break;
 
     if (!scanTokens) {
       await updateCursor(sql, chain, end);
@@ -1175,8 +1192,20 @@ export async function scanAndCreditBscDeposits(
     for (const contracts of contractChunks) {
       if (!contracts.length) continue;
 
+      if (timeExceeded()) {
+        stoppedEarly = true;
+        stopReason = "time_budget";
+        break;
+      }
+
       for (const toTopics of toTopicChunksAll) {
         if (!toTopics.length) continue;
+
+        if (timeExceeded()) {
+          stoppedEarly = true;
+          stopReason = "time_budget";
+          break;
+        }
 
         const logs = await getLogsBatchedOrSplit(provider, {
           addresses: contracts,
@@ -1190,6 +1219,11 @@ export async function scanAndCreditBscDeposits(
         checkedLogs += logs.length;
 
         for (const log of logs) {
+          if (timeExceeded()) {
+            stoppedEarly = true;
+            stopReason = "time_budget";
+            break;
+          }
           const asset = contractToAsset.get(normalizeAddress(String((log as any)?.address ?? "")));
           if (!asset) continue;
 
@@ -1223,10 +1257,15 @@ export async function scanAndCreditBscDeposits(
           if (outcome === "credited") credited += 1;
           else duplicates += 1;
         }
+
+        if (stoppedEarly) break;
       }
+
+      if (stoppedEarly) break;
     }
 
     // Cursor advances only after all assets for the batch are processed.
+    if (stoppedEarly) break;
     await updateCursor(sql, chain, end);
   }
 

@@ -118,6 +118,13 @@ export async function POST(req: NextRequest) {
   const blocksPerBatch = blocksPerBatchRaw ? clampInt(Number(blocksPerBatchRaw), 10, 3_000) : undefined;
   const maxMs = maxMsRaw ? clampInt(Number(maxMsRaw), 1_000, 120_000) : undefined;
 
+  // Cron providers commonly enforce ~30s HTTP timeouts. In production, default to a
+  // conservative time budget and small block range unless the caller explicitly overrides.
+  const isProd = process.env.NODE_ENV === "production";
+  const effectiveMaxMs = Number.isFinite(maxMs as any) ? (maxMs as number) : isProd ? 25_000 : undefined;
+  const effectiveMaxBlocks = Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : isProd ? 80 : undefined;
+  const effectiveBlocksPerBatch = Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : isProd ? 40 : undefined;
+
   const scanTokensRaw = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
   const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
 
@@ -163,10 +170,10 @@ export async function POST(req: NextRequest) {
 
     const result = await scanAndCreditBscDeposits(sql as any, {
       fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
-      maxBlocks: Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : undefined,
+      maxBlocks: effectiveMaxBlocks,
       confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
-      blocksPerBatch: Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : undefined,
-      maxMs: Number.isFinite(maxMs as any) ? (maxMs as number) : undefined,
+      blocksPerBatch: effectiveBlocksPerBatch,
+      maxMs: effectiveMaxMs,
       scanTokens,
       scanNative,
       tokenSymbols: tokenSymbols.length ? tokenSymbols : undefined,
