@@ -243,7 +243,11 @@ export async function sweepBscDeposits(
   const ALLOW_GAS_TOPUPS = envBool("SWEEP_ALLOW_GAS_TOPUPS") && requestedGasTopups;
   const ACCOUNT_GAS_IN_LEDGER = envBool("SWEEP_ACCOUNT_GAS_LEDGER");
   const MIN_BNB = (process.env.SWEEP_MIN_BNB || "0.0001").trim();
+  const MIN_NATIVE_SWEEP_BNB = (process.env.SWEEP_MIN_NATIVE_SWEEP_BNB || MIN_BNB).trim();
   const DEFAULT_MIN_SWEEP = envNum("SWEEP_MIN_TOKEN", 0.001);
+
+  const TOKEN_CANDIDATES_ONLY = envBool("SWEEP_TOKEN_CANDIDATES_ONLY");
+  const TOKEN_LOOKBACK_HOURS = clampInt(envNum("SWEEP_TOKEN_LOOKBACK_HOURS", 24 * 30), 1, 24 * 365);
 
   const provider = getBscProvider();
   const hotWallet = getHotWalletAddress();
@@ -275,6 +279,7 @@ export async function sweepBscDeposits(
   const tokenGasCost = gasPrice * TOKEN_TRANSFER_GAS;
   const nativeGasCost = gasPrice * NATIVE_TRANSFER_GAS;
   const minBnbWei = ethers.parseEther(MIN_BNB);
+  const minNativeSweepWei = ethers.parseEther(MIN_NATIVE_SWEEP_BNB);
 
   const tokenSymbols = (opts?.tokenSymbols ?? []).map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
   const tokensAll = await buildTokenList(sql, DEFAULT_MIN_SWEEP, { tokenSymbols: opts?.tokenSymbols ?? tokenSymbols });
@@ -310,6 +315,26 @@ export async function sweepBscDeposits(
     LIMIT ${maxDeposits}
   `;
 
+  // Optional: only scan token balances for addresses that have had token deposits recently.
+  // This prevents O(addresses × tokens) eth_call storms on each sweep run.
+  let tokenCandidateAddrs = new Set<string>();
+  if (TOKEN_CANDIDATES_ONLY && tokens.length > 0) {
+    try {
+      const rows = await sql<Array<{ address: string }>>`
+        SELECT DISTINCT lower(e.to_address) AS address
+        FROM ex_chain_deposit_event e
+        JOIN ex_asset a ON a.id = e.asset_id
+        WHERE lower(e.chain) = 'bsc'
+          AND a.contract_address IS NOT NULL
+          AND e.created_at > now() - make_interval(hours => ${TOKEN_LOOKBACK_HOURS})
+        LIMIT ${maxDeposits}
+      `;
+      tokenCandidateAddrs = new Set(rows.map((r) => String(r.address || "").toLowerCase()).filter(Boolean));
+    } catch {
+      tokenCandidateAddrs = new Set<string>();
+    }
+  }
+
   if (deposits.length === 0) {
     await beat({ event: "noop", deposits: 0 });
     const finishedAt = new Date().toISOString();
@@ -335,6 +360,10 @@ export async function sweepBscDeposits(
 
     let bnbBal = await provider.getBalance(address);
 
+    const shouldCheckTokens =
+      tokens.length > 0 &&
+      (!TOKEN_CANDIDATES_ONLY || bnbBal >= minBnbWei || tokenCandidateAddrs.has(address));
+
     let hasAnyToken = false;
     const tokenResults: Array<{
       token: SweepToken;
@@ -343,17 +372,19 @@ export async function sweepBscDeposits(
       balNum: number;
     }> = [];
 
-    const tokenChecks = await Promise.allSettled(
-      tokens.map(async (t) => {
-        const { balance, decimals } = await getTokenBalance(t.contract, address);
-        return { token: t, balance, decimals, balNum: Number(balance) };
-      }),
-    );
+    if (shouldCheckTokens) {
+      const tokenChecks = await Promise.allSettled(
+        tokens.map(async (t) => {
+          const { balance, decimals } = await getTokenBalance(t.contract, address);
+          return { token: t, balance, decimals, balNum: Number(balance) };
+        }),
+      );
 
-    for (const result of tokenChecks) {
-      if (result.status === "fulfilled") {
-        if (result.value.balNum > 0) hasAnyToken = true;
-        tokenResults.push(result.value);
+      for (const result of tokenChecks) {
+        if (result.status === "fulfilled") {
+          if (result.value.balNum > 0) hasAnyToken = true;
+          tokenResults.push(result.value);
+        }
       }
     }
 
@@ -445,7 +476,12 @@ export async function sweepBscDeposits(
     const remainingBnb = await provider.getBalance(address);
     if (remainingBnb > nativeGasCost) {
       const sweepable = remainingBnb - nativeGasCost;
-      console.log(`  PLAN: sweep ${ethers.formatEther(sweepable)} BNB -> ${hotWallet}`);
+      if (sweepable < minNativeSweepWei) {
+        console.log(
+          `  Skip native sweep: ${ethers.formatEther(sweepable)} BNB (< min ${MIN_NATIVE_SWEEP_BNB})`,
+        );
+      } else {
+        console.log(`  PLAN: sweep ${ethers.formatEther(sweepable)} BNB -> ${hotWallet}`);
       if (EXECUTE) {
         try {
           const wallet = new ethers.Wallet(privKey, provider);
@@ -471,6 +507,7 @@ export async function sweepBscDeposits(
         } catch (e: any) {
           console.log(`  ❌ BNB sweep failed: ${e?.message ?? String(e)}`);
         }
+      }
       }
     } else if (remainingBnb > 0n) {
       console.log(`  Dust: ${ethers.formatEther(remainingBnb)} BNB (< gas cost, leaving)`);

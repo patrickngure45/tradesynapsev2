@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
 import { sweepBscDeposits } from "@/lib/blockchain/sweepDeposits";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
 
   const sql = getSql();
   const url = new URL(req.url);
+  const force = (url.searchParams.get("force") ?? "").trim() === "1";
   const execute = (url.searchParams.get("execute") ?? "").trim() === "1";
   const gasTopups = (url.searchParams.get("gas_topups") ?? "").trim() === "1";
   const tokensParam = (url.searchParams.get("tokens") ?? "").trim();
@@ -65,6 +67,41 @@ export async function POST(req: NextRequest) {
     : tokenSymbolsRaw
       ? tokenSymbolsRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
       : defaultSymbols;
+
+  // Cadence gating (optional but recommended): avoid sweeping too frequently.
+  const cadenceRaw = String(process.env.SWEEP_CADENCE_MS ?? "").trim();
+  const cadenceMs = cadenceRaw ? Math.max(0, Math.min(7 * 24 * 60 * 60_000, Number(cadenceRaw) || 0)) : 0;
+  if (!force && cadenceMs > 0) {
+    try {
+      const rows = await sql<Array<{ last_seen_at: string }>>`
+        SELECT last_seen_at::text AS last_seen_at
+        FROM app_service_heartbeat
+        WHERE service = 'sweep-deposits:bsc'
+        LIMIT 1
+      `;
+      const lastSeen = rows[0]?.last_seen_at ? Date.parse(rows[0]!.last_seen_at) : NaN;
+      if (Number.isFinite(lastSeen)) {
+        const ageMs = Date.now() - lastSeen;
+        if (ageMs >= 0 && ageMs < cadenceMs) {
+          await upsertServiceHeartbeat(sql as any, {
+            service: "sweep-deposits:bsc",
+            status: "ok",
+            details: { event: "skipped_cadence", cadence_ms: cadenceMs, age_ms: ageMs },
+          }).catch(() => void 0);
+          return NextResponse.json({
+            ok: true,
+            skipped: true,
+            reason: "cadence",
+            cadence_ms: cadenceMs,
+            age_ms: ageMs,
+            next_allowed_in_ms: Math.max(0, cadenceMs - ageMs),
+          });
+        }
+      }
+    } catch {
+      // If cadence gating fails, do not block sweeping.
+    }
+  }
 
   try {
     const result = await sweepBscDeposits(sql as any, {
