@@ -126,6 +126,59 @@ function applyNotificationPolicy(type: NotificationType, metadata: Record<string
   return meta;
 }
 
+type NotificationSchedule = {
+  quiet_enabled: boolean;
+  quiet_start_min: number;
+  quiet_end_min: number;
+  tz_offset_min: number;
+  digest_enabled: boolean;
+} | null;
+
+function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
+  const n = typeof v === "number" ? v : Number(String(v ?? ""));
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.trunc(n);
+  return Math.max(lo, Math.min(hi, i));
+}
+
+function isInQuietHours(schedule: NotificationSchedule, nowUtc = new Date()): boolean {
+  if (!schedule?.quiet_enabled) return false;
+
+  const offsetMin = clampInt(schedule.tz_offset_min, -840, 840, 0);
+  const localMs = nowUtc.getTime() + offsetMin * 60_000;
+  const local = new Date(localMs);
+  const localMin = local.getUTCHours() * 60 + local.getUTCMinutes();
+
+  const start = clampInt(schedule.quiet_start_min, 0, 1439, 1320);
+  const end = clampInt(schedule.quiet_end_min, 0, 1439, 480);
+
+  if (start === end) return true; // interpret as "always quiet"
+  if (start < end) return localMin >= start && localMin < end;
+  return localMin >= start || localMin < end; // wraps midnight
+}
+
+async function getSchedule(sql: Sql, userId: string): Promise<NotificationSchedule> {
+  try {
+    const rows = await sql<
+      Array<{
+        quiet_enabled: boolean;
+        quiet_start_min: number;
+        quiet_end_min: number;
+        tz_offset_min: number;
+        digest_enabled: boolean;
+      }>
+    >`
+      SELECT quiet_enabled, quiet_start_min, quiet_end_min, tz_offset_min, digest_enabled
+      FROM app_notification_schedule
+      WHERE user_id = ${userId}::uuid
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createNotification(
   sql: Sql,
   params: {
@@ -152,6 +205,24 @@ export async function createNotification(
   const title = String(params.title ?? "").trim() || "Notification";
   const body = String(params.body ?? "");
   const metadata = applyNotificationPolicy(params.type, params.metadata);
+
+  // Quiet hours (best-effort): defer non-system notifications into a queue.
+  // Digest flushing is handled by a cron endpoint.
+  if (params.type !== "system") {
+    const schedule = await getSchedule(sql, params.userId);
+    if (schedule?.digest_enabled && isInQuietHours(schedule)) {
+      try {
+        const rows = await sql<{ id: string }[]>`
+          INSERT INTO ex_notification_deferred (user_id, type, title, body, metadata_json)
+          VALUES (${params.userId}::uuid, ${params.type}, ${title}, ${body}, ${metadata as any}::jsonb)
+          RETURNING id::text AS id
+        `;
+        return rows[0]?.id ?? "";
+      } catch {
+        // If deferral fails, fall through to immediate notification.
+      }
+    }
+  }
 
   const rows = await sql<{ id: string; created_at: string }[]>`
     INSERT INTO ex_notification (user_id, type, title, body, metadata_json)

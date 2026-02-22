@@ -25,6 +25,15 @@ type NotificationPrefsResponse = {
   known_types?: string[];
 };
 
+type NotificationSchedule = {
+  quiet_enabled: boolean;
+  quiet_start_min: number;
+  quiet_end_min: number;
+  tz_offset_min: number;
+  digest_enabled: boolean;
+  updated_at: string | null;
+};
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -140,6 +149,37 @@ export function AccountClient() {
   const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
   const [notifPrefsMsg, setNotifPrefsMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  /* Notification schedule (quiet hours + digest) */
+  const [notifSchedule, setNotifSchedule] = useState<NotificationSchedule>(() => ({
+    quiet_enabled: false,
+    quiet_start_min: 22 * 60,
+    quiet_end_min: 8 * 60,
+    tz_offset_min: 0,
+    digest_enabled: true,
+    updated_at: null,
+  }));
+  const [notifScheduleLoading, setNotifScheduleLoading] = useState(false);
+  const [notifScheduleMsg, setNotifScheduleMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const minToTime = (m: number) => {
+    const mm = Math.max(0, Math.min(1439, Math.trunc(m || 0)));
+    const hh = Math.floor(mm / 60);
+    const mi = mm % 60;
+    return `${String(hh).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+  };
+
+  const timeToMin = (t: string) => {
+    const s = String(t || "").trim();
+    const match = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const hh = Number(match[1]);
+    const mi = Number(match[2]);
+    if (!Number.isFinite(hh) || !Number.isFinite(mi)) return null;
+    if (hh < 0 || hh > 23) return null;
+    if (mi < 0 || mi > 59) return null;
+    return hh * 60 + mi;
+  };
+
   const load = useCallback(async () => {
     try {
       setLoadMsg(null);
@@ -176,6 +216,27 @@ export function AccountClient() {
           const np = (await npRes.json().catch(() => ({}))) as NotificationPrefsResponse;
           if (np && typeof np === "object" && np.prefs && typeof np.prefs === "object") {
             setNotifPrefs(np.prefs as Record<string, boolean>);
+          }
+        }
+      } catch {
+        // silent
+      }
+
+      // Load notification schedule (best-effort)
+      try {
+        const nsRes = await fetch("/api/account/notification-schedule", fetchOpts({ cache: "no-store" }));
+        if (nsRes.ok) {
+          const ns = (await nsRes.json().catch(() => ({}))) as any;
+          const s = ns?.schedule;
+          if (s && typeof s === "object") {
+            setNotifSchedule({
+              quiet_enabled: !!s.quiet_enabled,
+              quiet_start_min: Number(s.quiet_start_min ?? 22 * 60) || 22 * 60,
+              quiet_end_min: Number(s.quiet_end_min ?? 8 * 60) || 8 * 60,
+              tz_offset_min: Number(s.tz_offset_min ?? 0) || 0,
+              digest_enabled: s.digest_enabled !== false,
+              updated_at: typeof s.updated_at === "string" ? s.updated_at : null,
+            });
           }
         }
       } catch {
@@ -230,6 +291,38 @@ export function AccountClient() {
       setNotifPrefsMsg({ text: "Network error while saving preferences", ok: false });
     } finally {
       setNotifPrefsLoading(false);
+    }
+  };
+
+  const saveNotifSchedule = async (next: NotificationSchedule) => {
+    setNotifScheduleMsg(null);
+    setNotifScheduleLoading(true);
+    try {
+      const tzOffsetMin = typeof window !== "undefined" ? -new Date().getTimezoneOffset() : next.tz_offset_min;
+      const payload = {
+        quiet_enabled: !!next.quiet_enabled,
+        quiet_start_min: Math.max(0, Math.min(1439, Math.trunc(next.quiet_start_min))),
+        quiet_end_min: Math.max(0, Math.min(1439, Math.trunc(next.quiet_end_min))),
+        tz_offset_min: Math.max(-840, Math.min(840, Math.trunc(tzOffsetMin))),
+        digest_enabled: !!next.digest_enabled,
+      };
+
+      const res = await fetch("/api/account/notification-schedule", fetchOpts({
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }));
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setNotifScheduleMsg({ text: msgFrom(data, "Failed to save schedule"), ok: false });
+        return;
+      }
+      setNotifSchedule((prev) => ({ ...prev, ...payload }));
+      setNotifScheduleMsg({ text: "Saved.", ok: true });
+    } catch {
+      setNotifScheduleMsg({ text: "Network error while saving schedule", ok: false });
+    } finally {
+      setNotifScheduleLoading(false);
     }
   };
 
@@ -818,6 +911,90 @@ export function AccountClient() {
         <p className="mt-3 text-[11px] text-[var(--muted)]">
           Tip: disabling a category prevents new notifications from being created.
         </p>
+
+        <div className="mt-5 rounded-xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_90%,transparent)] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-[var(--foreground)]">Quiet hours + digest</div>
+              <div className="mt-1 text-[11px] text-[var(--muted)]">During quiet hours, notifications are bundled into a digest.</div>
+            </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-[var(--foreground)]">
+              <span className="text-[var(--muted)]">Enable</span>
+              <input
+                type="checkbox"
+                checked={!!notifSchedule.quiet_enabled}
+                onChange={(e) => {
+                  const next = { ...notifSchedule, quiet_enabled: e.target.checked };
+                  setNotifSchedule(next);
+                  void saveNotifSchedule(next);
+                }}
+                disabled={notifScheduleLoading}
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+            </label>
+          </div>
+
+          {notifScheduleMsg ? (
+            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${notifScheduleMsg.ok ? "border-emerald-500/30 text-emerald-500" : "border-rose-500/30 text-rose-500"}`}>
+              {notifScheduleMsg.text}
+            </div>
+          ) : null}
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <label className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs">
+              <span className="text-[var(--muted)]">Start</span>
+              <input
+                type="time"
+                value={minToTime(notifSchedule.quiet_start_min)}
+                onChange={(e) => {
+                  const v = timeToMin(e.target.value);
+                  if (v == null) return;
+                  const next = { ...notifSchedule, quiet_start_min: v };
+                  setNotifSchedule(next);
+                  void saveNotifSchedule(next);
+                }}
+                disabled={!notifSchedule.quiet_enabled || notifScheduleLoading}
+                className="rounded bg-transparent text-xs font-semibold text-[var(--foreground)]"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs">
+              <span className="text-[var(--muted)]">End</span>
+              <input
+                type="time"
+                value={minToTime(notifSchedule.quiet_end_min)}
+                onChange={(e) => {
+                  const v = timeToMin(e.target.value);
+                  if (v == null) return;
+                  const next = { ...notifSchedule, quiet_end_min: v };
+                  setNotifSchedule(next);
+                  void saveNotifSchedule(next);
+                }}
+                disabled={!notifSchedule.quiet_enabled || notifScheduleLoading}
+                className="rounded bg-transparent text-xs font-semibold text-[var(--foreground)]"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs">
+              <span className="text-[var(--muted)]">Digest</span>
+              <input
+                type="checkbox"
+                checked={!!notifSchedule.digest_enabled}
+                onChange={(e) => {
+                  const next = { ...notifSchedule, digest_enabled: e.target.checked };
+                  setNotifSchedule(next);
+                  void saveNotifSchedule(next);
+                }}
+                disabled={!notifSchedule.quiet_enabled || notifScheduleLoading}
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+            </label>
+          </div>
+
+          <div className="mt-2 text-[11px] text-[var(--muted)]">
+            Uses your device timezone automatically.
+          </div>
+        </div>
       </section>
 
       {/* ────── Email Verification ────── */}
