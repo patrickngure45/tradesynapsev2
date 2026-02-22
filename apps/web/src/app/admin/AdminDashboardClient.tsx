@@ -303,6 +303,8 @@ export function AdminDashboardClient() {
 
   const [sysStatus, setSysStatus] = useState<AdminSystemStatus | null>(null);
   const [sysStatusError, setSysStatusError] = useState<string | null>(null);
+  const [digestRunning, setDigestRunning] = useState(false);
+  const [digestMsg, setDigestMsg] = useState<string | null>(null);
 
   const fetchSystemStatus = useCallback(async () => {
     try {
@@ -314,6 +316,20 @@ export function AdminDashboardClient() {
       setSysStatusError(e instanceof Error ? e.message : "status_failed");
     }
   }, []);
+
+  const runNotificationsDigest = useCallback(async () => {
+    setDigestRunning(true);
+    setDigestMsg(null);
+    try {
+      await adminFetch("/api/admin/run-notifications-digest", { method: "POST" });
+      setDigestMsg("Digest ran.");
+      await fetchSystemStatus();
+    } catch (e) {
+      setDigestMsg(e instanceof Error ? e.message : "digest_failed");
+    } finally {
+      setDigestRunning(false);
+    }
+  }, [fetchSystemStatus]);
 
   useEffect(() => {
     fetchSystemStatus();
@@ -875,6 +891,15 @@ export function AdminDashboardClient() {
             {sysBadge}
             <button
               type="button"
+              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[10px] font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+              onClick={runNotificationsDigest}
+              disabled={digestRunning}
+              title="Flush deferred notifications into a digest (admin-only)"
+            >
+              {digestRunning ? "running…" : "run digest"}
+            </button>
+            <button
+              type="button"
               className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
               onClick={fetchSystemStatus}
             >
@@ -882,6 +907,8 @@ export function AdminDashboardClient() {
             </button>
           </div>
         </div>
+
+        {digestMsg ? <div className="text-[10px] text-[var(--muted)]">Digest: {digestMsg}</div> : null}
 
         {sysStatus ? (
           <>
