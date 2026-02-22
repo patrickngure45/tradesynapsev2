@@ -189,18 +189,28 @@ export async function createNotification(
     metadata?: Record<string, unknown>;
   },
 ): Promise<string> {
+  let wantInApp = true;
+  let wantEmail = false;
+
   try {
-    const prefRows = await sql<{ in_app_enabled: boolean }[]>`
-      SELECT coalesce(in_app_enabled, enabled) AS in_app_enabled
+    const prefRows = await sql<{ in_app_enabled: boolean; email_enabled: boolean }[]>`
+      SELECT
+        coalesce(in_app_enabled, enabled) AS in_app_enabled,
+        coalesce(email_enabled, false) AS email_enabled
       FROM app_notification_preference
       WHERE user_id = ${params.userId}::uuid
         AND type = ${params.type}
       LIMIT 1
     `;
-    if (prefRows.length > 0 && prefRows[0]!.in_app_enabled === false) return "";
+    if (prefRows.length > 0) {
+      wantInApp = prefRows[0]!.in_app_enabled !== false;
+      wantEmail = prefRows[0]!.email_enabled === true;
+    }
   } catch {
     // Preference checks must never break core flows.
   }
+
+  if (!wantInApp && !wantEmail) return "";
 
   const title = String(params.title ?? "").trim() || "Notification";
   const body = String(params.body ?? "");
@@ -224,38 +234,91 @@ export async function createNotification(
     }
   }
 
-  const rows = await sql<{ id: string; created_at: string }[]>`
-    INSERT INTO ex_notification (user_id, type, title, body, metadata_json)
-    VALUES (
-      ${params.userId}::uuid,
-      ${params.type},
-      ${title},
-      ${body},
-      ${metadata as any}::jsonb
-    )
-    RETURNING id::text AS id, created_at::text AS created_at
-  `;
+  let notifId = "";
 
-  const row = rows[0]!;
+  if (wantInApp) {
+    const rows = await sql<{ id: string; created_at: string }[]>`
+      INSERT INTO ex_notification (user_id, type, title, body, metadata_json)
+      VALUES (
+        ${params.userId}::uuid,
+        ${params.type},
+        ${title},
+        ${body},
+        ${metadata as any}::jsonb
+      )
+      RETURNING id::text AS id, created_at::text AS created_at
+    `;
 
-  // Realtime push (SSE/WebSocket listeners): fires on COMMIT if inside a transaction.
-  // Keep payload small (Postgres NOTIFY is ~8KB).
-  try {
-    const payload = JSON.stringify({
-      id: row.id,
-      user_id: params.userId,
-      type: params.type,
-      title,
-      body,
-      metadata_json: metadata,
-      created_at: row.created_at,
-    });
-    await sql`SELECT pg_notify('ex_notification', ${payload})`;
-  } catch {
-    // ignore realtime failures
+    const row = rows[0]!;
+    notifId = row.id;
+
+    // Realtime push (SSE/WebSocket listeners): fires on COMMIT if inside a transaction.
+    // Keep payload small (Postgres NOTIFY is ~8KB).
+    try {
+      const payload = JSON.stringify({
+        id: row.id,
+        user_id: params.userId,
+        type: params.type,
+        title,
+        body,
+        metadata_json: metadata,
+        created_at: row.created_at,
+      });
+      await sql`SELECT pg_notify('ex_notification', ${payload})`;
+    } catch {
+      // ignore realtime failures
+    }
   }
 
-  return row.id;
+  if (wantEmail) {
+    try {
+      const users = await sql<Array<{ email: string | null; email_verified: boolean | null }>>`
+        SELECT email, email_verified
+        FROM app_user
+        WHERE id = ${params.userId}::uuid
+        LIMIT 1
+      `;
+
+      const u = users[0];
+      const to = u?.email ? String(u.email).trim().toLowerCase() : "";
+      const verified = u?.email_verified === true;
+
+      if (to && to.includes("@") && verified) {
+        const subject = `[Coinwaka] ${title}`;
+        const textBody = body ? `${title}\n\n${body}` : title;
+        const htmlBody = body
+          ? `<p><strong>${escapeHtml(title)}</strong></p><p>${escapeHtml(body)}</p>`
+          : `<p><strong>${escapeHtml(title)}</strong></p>`;
+
+        await sql`
+          INSERT INTO ex_email_outbox (user_id, to_email, kind, type, subject, text_body, html_body, metadata_json)
+          VALUES (
+            ${params.userId}::uuid,
+            ${to},
+            'notification',
+            ${params.type},
+            ${subject},
+            ${textBody},
+            ${htmlBody},
+            ${metadata as any}::jsonb
+          )
+        `;
+      }
+    } catch {
+      // Email queueing must never break core flows.
+    }
+  }
+
+  return notifId;
+}
+
+function escapeHtml(text: string): string {
+  return String(text ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 export async function listNotifications(
