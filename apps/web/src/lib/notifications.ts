@@ -190,14 +190,14 @@ export async function createNotification(
   },
 ): Promise<string> {
   try {
-    const prefRows = await sql<{ enabled: boolean }[]>`
-      SELECT enabled
+    const prefRows = await sql<{ in_app_enabled: boolean }[]>`
+      SELECT coalesce(in_app_enabled, enabled) AS in_app_enabled
       FROM app_notification_preference
       WHERE user_id = ${params.userId}::uuid
         AND type = ${params.type}
       LIMIT 1
     `;
-    if (prefRows.length > 0 && prefRows[0]!.enabled === false) return "";
+    if (prefRows.length > 0 && prefRows[0]!.in_app_enabled === false) return "";
   } catch {
     // Preference checks must never break core flows.
   }

@@ -35,8 +35,14 @@ const KNOWN_TYPES = [
   "system",
 ] as const;
 
+const channelPrefsSchema = z.object({
+  in_app: z.boolean(),
+  email: z.boolean(),
+});
+
 const putSchema = z.object({
-  prefs: z.record(z.enum(KNOWN_TYPES), z.boolean()),
+  // Backward compatible: old clients send boolean; new clients send { in_app, email }.
+  prefs: z.record(z.enum(KNOWN_TYPES), z.union([z.boolean(), channelPrefsSchema])),
 });
 
 /**
@@ -55,16 +61,24 @@ export async function GET(request: Request) {
     if (activeErr) return apiError(activeErr);
 
     const rows = await retryOnceOnTransientDbError(async () => {
-      return await (sql as any)<{ type: string; enabled: boolean; updated_at: string }[]>`
-        SELECT type, enabled, updated_at
+      return await (sql as any)<{ type: string; in_app_enabled: boolean; email_enabled: boolean; updated_at: string }[]>`
+        SELECT
+          type,
+          coalesce(in_app_enabled, enabled) AS in_app_enabled,
+          coalesce(email_enabled, false) AS email_enabled,
+          updated_at
         FROM app_notification_preference
         WHERE user_id = ${actingUserId}::uuid
       `;
     });
 
-    const prefs: Record<string, boolean> = Object.fromEntries(KNOWN_TYPES.map((t) => [t, true]));
+    const prefs: Record<string, { in_app: boolean; email: boolean }> = Object.fromEntries(
+      KNOWN_TYPES.map((t) => [t, { in_app: true, email: false }]),
+    );
     for (const r of rows) {
-      if (typeof r.type === "string" && r.type in prefs) prefs[r.type] = !!r.enabled;
+      if (typeof r.type === "string" && r.type in prefs) {
+        prefs[r.type] = { in_app: !!r.in_app_enabled, email: !!r.email_enabled };
+      }
     }
 
     return Response.json({ prefs, known_types: KNOWN_TYPES });
@@ -103,11 +117,18 @@ export async function PUT(request: Request) {
     await sql.begin(async (tx) => {
       const txSql = tx as any;
       for (const [type, enabled] of Object.entries(input.prefs)) {
+        const next = typeof enabled === "boolean"
+          ? { in_app: enabled, email: false }
+          : { in_app: !!(enabled as any).in_app, email: !!(enabled as any).email };
         await txSql`
-          INSERT INTO app_notification_preference (user_id, type, enabled, updated_at)
-          VALUES (${actingUserId}::uuid, ${type}, ${enabled}, now())
+          INSERT INTO app_notification_preference (user_id, type, enabled, in_app_enabled, email_enabled, updated_at)
+          VALUES (${actingUserId}::uuid, ${type}, ${next.in_app}, ${next.in_app}, ${next.email}, now())
           ON CONFLICT (user_id, type)
-          DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()
+          DO UPDATE SET
+            enabled = EXCLUDED.enabled,
+            in_app_enabled = EXCLUDED.in_app_enabled,
+            email_enabled = EXCLUDED.email_enabled,
+            updated_at = now()
         `;
       }
     });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
+import { LastRequestIdCard } from "@/components/LastRequestIdCard";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -21,7 +22,7 @@ type UserProfile = {
 };
 
 type NotificationPrefsResponse = {
-  prefs?: Record<string, boolean>;
+  prefs?: Record<string, boolean | { in_app: boolean; email: boolean }>;
   known_types?: string[];
 };
 
@@ -127,24 +128,26 @@ export function AccountClient() {
   const [passkeyMsg, setPasskeyMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   /* Notification preferences */
-  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>(() => ({
-    order_placed: true,
-    order_partially_filled: true,
-    order_filled: true,
-    order_canceled: true,
-    order_rejected: true,
-    price_alert: true,
-    p2p_order_created: true,
-    p2p_order_expiring: true,
-    p2p_payment_confirmed: true,
-    p2p_order_completed: true,
-    p2p_order_cancelled: true,
-    p2p_dispute_opened: true,
-    p2p_dispute_resolved: true,
-    p2p_feedback_received: true,
-    arcade_ready: true,
-    arcade_hint_ready: true,
-    system: true,
+  type ChannelPrefs = { in_app: boolean; email: boolean };
+  const [notifChannel, setNotifChannel] = useState<"in_app" | "email">("in_app");
+  const [notifPrefs, setNotifPrefs] = useState<Record<string, ChannelPrefs>>(() => ({
+    order_placed: { in_app: true, email: false },
+    order_partially_filled: { in_app: true, email: false },
+    order_filled: { in_app: true, email: false },
+    order_canceled: { in_app: true, email: false },
+    order_rejected: { in_app: true, email: false },
+    price_alert: { in_app: true, email: false },
+    p2p_order_created: { in_app: true, email: false },
+    p2p_order_expiring: { in_app: true, email: false },
+    p2p_payment_confirmed: { in_app: true, email: false },
+    p2p_order_completed: { in_app: true, email: false },
+    p2p_order_cancelled: { in_app: true, email: false },
+    p2p_dispute_opened: { in_app: true, email: false },
+    p2p_dispute_resolved: { in_app: true, email: false },
+    p2p_feedback_received: { in_app: true, email: false },
+    arcade_ready: { in_app: true, email: false },
+    arcade_hint_ready: { in_app: true, email: false },
+    system: { in_app: true, email: false },
   }));
   const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
   const [notifPrefsMsg, setNotifPrefsMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -215,7 +218,15 @@ export function AccountClient() {
         if (npRes.ok) {
           const np = (await npRes.json().catch(() => ({}))) as NotificationPrefsResponse;
           if (np && typeof np === "object" && np.prefs && typeof np.prefs === "object") {
-            setNotifPrefs(np.prefs as Record<string, boolean>);
+            const next: Record<string, ChannelPrefs> = { ...notifPrefs };
+            for (const [k, v] of Object.entries(np.prefs)) {
+              if (typeof v === "boolean") {
+                next[k] = { in_app: v, email: false };
+              } else if (v && typeof v === "object") {
+                next[k] = { in_app: !!(v as any).in_app, email: !!(v as any).email };
+              }
+            }
+            setNotifPrefs(next);
           }
         }
       } catch {
@@ -267,13 +278,23 @@ export function AccountClient() {
     setNotifPrefsLoading(true);
     setNotifPrefs((prev) => {
       const next = { ...(prev ?? {}) };
-      for (const t of types) next[t] = enabled;
+      for (const t of types) {
+        const cur = next[t] ?? { in_app: true, email: false };
+        next[t] = notifChannel === "email"
+          ? { ...cur, email: enabled }
+          : { ...cur, in_app: enabled };
+      }
       return next;
     });
 
     try {
-      const nextPrefs: Record<string, boolean> = { ...notifPrefs };
-      for (const t of types) nextPrefs[t] = enabled;
+      const nextPrefs: Record<string, ChannelPrefs> = { ...(notifPrefs ?? {}) };
+      for (const t of types) {
+        const cur = nextPrefs[t] ?? { in_app: true, email: false };
+        nextPrefs[t] = notifChannel === "email"
+          ? { ...cur, email: enabled }
+          : { ...cur, in_app: enabled };
+      }
 
       const res = await fetch("/api/account/notification-preferences", fetchOpts({
         method: "PUT",
@@ -840,8 +861,36 @@ export function AccountClient() {
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
         <h2 className="mb-2 text-sm font-semibold tracking-tight">Notifications</h2>
         <p className="mb-4 text-xs text-[var(--muted)]">
-          Choose which in-app notifications you want to receive.
+          Choose which notifications you want to receive in-app or via email.
         </p>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setNotifChannel("in_app")}
+            className={
+              (notifChannel === "in_app"
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)] hover:bg-[var(--card-2)]") +
+              " rounded-lg px-3 py-2 text-xs font-semibold"
+            }
+          >
+            In-app
+          </button>
+          <button
+            type="button"
+            onClick={() => setNotifChannel("email")}
+            className={
+              (notifChannel === "email"
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                : "border border-[var(--border)] bg-[var(--bg)] text-[var(--foreground)] hover:bg-[var(--card-2)]") +
+              " rounded-lg px-3 py-2 text-xs font-semibold"
+            }
+          >
+            Email
+          </button>
+          <span className="text-[11px] text-[var(--muted)]">Email delivery is preference-only for now.</span>
+        </div>
 
         {notifPrefsMsg && (
           <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${notifPrefsMsg.ok ? "border-emerald-500/30 text-emerald-500" : "border-rose-500/30 text-rose-500"}`}>
@@ -853,7 +902,12 @@ export function AccountClient() {
           <PrefToggle
             label="Order updates"
             hint="Placed, fills, cancels"
-            enabled={!!notifPrefs.order_filled && !!notifPrefs.order_partially_filled && !!notifPrefs.order_canceled && !!notifPrefs.order_placed}
+            enabled={
+              !!notifPrefs.order_filled?.[notifChannel] &&
+              !!notifPrefs.order_partially_filled?.[notifChannel] &&
+              !!notifPrefs.order_canceled?.[notifChannel] &&
+              !!notifPrefs.order_placed?.[notifChannel]
+            }
             loading={notifPrefsLoading}
             onChange={(v) =>
               setNotifCategory([
@@ -868,7 +922,7 @@ export function AccountClient() {
           <PrefToggle
             label="Price alerts"
             hint="Threshold triggers"
-            enabled={!!notifPrefs.price_alert}
+            enabled={!!notifPrefs.price_alert?.[notifChannel]}
             loading={notifPrefsLoading}
             onChange={(v) => setNotifCategory(["price_alert"], v)}
           />
@@ -876,11 +930,11 @@ export function AccountClient() {
             label="P2P updates"
             hint="Orders, disputes, feedback"
             enabled={
-              !!notifPrefs.p2p_order_created &&
-              !!notifPrefs.p2p_payment_confirmed &&
-              !!notifPrefs.p2p_order_completed &&
-              !!notifPrefs.p2p_order_cancelled &&
-              !!notifPrefs.p2p_dispute_opened
+              !!notifPrefs.p2p_order_created?.[notifChannel] &&
+              !!notifPrefs.p2p_payment_confirmed?.[notifChannel] &&
+              !!notifPrefs.p2p_order_completed?.[notifChannel] &&
+              !!notifPrefs.p2p_order_cancelled?.[notifChannel] &&
+              !!notifPrefs.p2p_dispute_opened?.[notifChannel]
             }
             loading={notifPrefsLoading}
             onChange={(v) =>
@@ -902,7 +956,7 @@ export function AccountClient() {
           <PrefToggle
             label="Arcade updates"
             hint="Reveals and hints"
-            enabled={!!notifPrefs.arcade_ready && !!notifPrefs.arcade_hint_ready}
+            enabled={!!notifPrefs.arcade_ready?.[notifChannel] && !!notifPrefs.arcade_hint_ready?.[notifChannel]}
             loading={notifPrefsLoading}
             onChange={(v) => setNotifCategory(["arcade_ready", "arcade_hint_ready"], v)}
           />
@@ -995,6 +1049,13 @@ export function AccountClient() {
             Uses your device timezone automatically.
           </div>
         </div>
+      </section>
+
+      {/* ────── Support ────── */}
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
+        <h2 className="mb-2 text-sm font-semibold tracking-tight">Support</h2>
+        <p className="mb-4 text-xs text-[var(--muted)]">Share this id to help support locate your request logs.</p>
+        <LastRequestIdCard compact />
       </section>
 
       {/* ────── Email Verification ────── */}

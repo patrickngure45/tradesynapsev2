@@ -1,4 +1,5 @@
 import { SiteChrome } from "@/components/SiteChrome";
+import { LastRequestIdCard } from "@/components/LastRequestIdCard";
 import { BRAND_NAME } from "@/lib/seo/brand";
 
 export const metadata = { title: `API Documentation — ${BRAND_NAME}` };
@@ -21,6 +22,10 @@ export default function ApiDocsPage() {
             <h1 className="text-3xl font-bold">API Documentation</h1>
                         <p className="mt-2 text-[var(--muted)]">Reference for the built-in API endpoints used by the Coinwaka web app.</p>
         </header>
+
+                <div className="mb-8">
+                    <LastRequestIdCard />
+                </div>
 
         <div className="grid gap-12 md:grid-cols-[200px_1fr]">
             <aside className="hidden md:block">

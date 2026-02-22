@@ -1,4 +1,5 @@
 import { SiteChrome } from "@/components/SiteChrome";
+import { LastRequestIdCard } from "@/components/LastRequestIdCard";
 import { BRAND_NAME } from "@/lib/seo/brand";
 
 export const metadata = { title: `Help Center — ${BRAND_NAME}` };
@@ -8,6 +9,11 @@ export default function HelpCenterPage() {
     <SiteChrome>
       <div className="mx-auto max-w-4xl px-6 py-12">
         <h1 className="text-3xl font-bold mb-2">How can we help you?</h1>
+
+        <div className="mt-4">
+          <LastRequestIdCard compact />
+        </div>
+
         <div className="relative mb-8">
             <input 
               type="text" 

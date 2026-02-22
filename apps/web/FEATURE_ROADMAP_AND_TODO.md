@@ -342,15 +342,18 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [ ] Auto-sweep thresholds and configurable sweep cadence.
 
 ## F) Notifications + retention
-- [ ] Order lifecycle notifications: placed, partial fill, filled, canceled, rejected.
-- [ ] Alert templates: crossing, % change, volatility spike, spread widening.
-- [ ] Digest mode + quiet hours + per-channel preferences.
+- [x] Order lifecycle notifications: placed, partial fill, filled, canceled, rejected.
+- [x] Alert templates: crossing, % change, volatility spike, spread widening.
+- [~] Digest mode + quiet hours + per-channel preferences.
+  - Implemented: quiet hours + digest deferral/flush and per-type prefs.
+  - Implemented: per-channel preference storage (in-app + email) UI + API.
+  - Pending: actual email delivery channel.
 
 ## G) Observability + support ops
-- [ ] Structured logging redaction for secrets/keys.
-- [ ] Trace/request id surfaced in UI and returned by API for support.
-- [ ] Admin “account timeline export” (deposits/withdrawals/orders/ledger entries).
-- [ ] Read-only admin impersonation (view-as) mode.
+- [x] Structured logging redaction for secrets/keys.
+- [x] Trace/request id surfaced in UI and returned by API for support.
+- [x] Admin “account timeline export” (deposits/withdrawals/orders/ledger entries).
+- [x] Read-only admin impersonation (view-as) mode.
 
 ## H) Security & hygiene (do before production marketing)
 - [ ] Rotate any secrets that have been exposed in local files, screenshots, logs, or chat history.
