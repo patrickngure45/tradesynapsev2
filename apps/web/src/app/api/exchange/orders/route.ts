@@ -42,6 +42,8 @@ const sideSchema = z.enum(["buy", "sell"]);
 
 const timeInForceSchema = z.enum(["GTC", "IOC", "FOK"]);
 
+const stpModeSchema = z.enum(["none", "cancel_newest", "cancel_oldest", "cancel_both"]);
+
 const idempotencyKeySchema = z
   .string()
   .trim()
@@ -58,6 +60,7 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     quantity: amount3818PositiveSchema,
     time_in_force: timeInForceSchema.optional().default("GTC"),
     post_only: z.boolean().optional().default(false),
+    stp_mode: stpModeSchema.optional().default("none"),
     idempotency_key: idempotencyKeySchema.optional(),
   }),
   z.object({
@@ -65,6 +68,7 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     side: sideSchema,
     type: z.literal("market"),
     quantity: amount3818PositiveSchema,
+    stp_mode: stpModeSchema.optional().default("none"),
     idempotency_key: idempotencyKeySchema.optional(),
   }),
 ]);
@@ -277,6 +281,7 @@ export async function POST(request: Request) {
           base_asset_id: string;
           quote_asset_id: string;
           status: string;
+          halt_until: string | null;
           tick_size: string;
           lot_size: string;
           maker_fee_bps: number;
@@ -290,6 +295,7 @@ export async function POST(request: Request) {
           base_asset_id,
           quote_asset_id,
           status,
+          halt_until::text AS halt_until,
           tick_size::text AS tick_size,
           lot_size::text AS lot_size,
           maker_fee_bps,
@@ -302,6 +308,13 @@ export async function POST(request: Request) {
       if (markets.length === 0) return { status: 404 as const, body: { error: "market_not_found" } };
       const market = markets[0]!;
       if (market.status !== "enabled") return { status: 409 as const, body: { error: "market_disabled" } };
+
+      if (market.halt_until) {
+        const untilMs = Date.parse(market.halt_until);
+        if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+          return { status: 409 as const, body: { error: "market_halted", details: { halt_until: market.halt_until } } };
+        }
+      }
 
       // --- Basic risk limits (env-gated) ---
       // Keep these simple and tunable for ops.
@@ -342,6 +355,7 @@ export async function POST(request: Request) {
                 WHERE o.market_id = ${market.id}::uuid
                   AND o.side = 'buy'
                   AND o.status IN ('open','partially_filled')
+                  AND o.user_id <> ${actingUserId}::uuid
                 ORDER BY o.price DESC, o.created_at ASC
                 LIMIT 1
               ) AS bid,
@@ -351,6 +365,7 @@ export async function POST(request: Request) {
                 WHERE o.market_id = ${market.id}::uuid
                   AND o.side = 'sell'
                   AND o.status IN ('open','partially_filled')
+                  AND o.user_id <> ${actingUserId}::uuid
                 ORDER BY o.price ASC, o.created_at ASC
                 LIMIT 1
               ) AS ask
@@ -421,6 +436,18 @@ export async function POST(request: Request) {
         if (ref && Number.isFinite(p) && p > 0) {
           const deviationBps = Math.abs((p - ref) / ref) * 10_000;
           if (Number.isFinite(deviationBps) && deviationBps > bandBps) {
+            const circuitSeconds = parseEnvInt("EXCHANGE_CIRCUIT_BREAKER_SECONDS");
+            if (circuitSeconds) {
+              await txSql`
+                UPDATE ex_market
+                SET halt_until = GREATEST(
+                  COALESCE(halt_until, now()),
+                  now() + make_interval(secs => ${circuitSeconds})
+                )
+                WHERE id = ${market.id}::uuid
+              `;
+            }
+
             const min = ref * (1 - bandBps / 10_000);
             const max = ref * (1 + bandBps / 10_000);
             return {
@@ -443,6 +470,62 @@ export async function POST(request: Request) {
       const timeInForce = input.type === "limit" ? input.time_in_force : "IOC";
       const postOnly = input.type === "limit" ? input.post_only : false;
       const inputPrice = input.type === "limit" ? input.price : "0";
+
+      // --- Self-trade prevention (STP) modes ---
+      // The matcher excludes same-user makers, but that can still create a crossed self-book.
+      // STP defines what to do when the incoming order would cross against the user's own resting orders.
+      const stpMode = (input as any).stp_mode as z.infer<typeof stpModeSchema>;
+      if (stpMode && stpMode !== "none") {
+        const makerSide = input.side === "buy" ? "sell" : "buy";
+        const crossers = await txSql<{ id: string; hold_id: string | null }[]>`
+          SELECT id::text AS id, hold_id::text AS hold_id
+          FROM ex_order
+          WHERE market_id = ${market.id}::uuid
+            AND user_id = ${actingUserId}::uuid
+            AND side = ${makerSide}
+            AND status IN ('open','partially_filled')
+            AND remaining_quantity > 0
+            AND (
+              ${isMarket}::boolean = true
+              OR (${input.side} = 'buy' AND price <= (${inputPrice}::numeric))
+              OR (${input.side} = 'sell' AND price >= (${inputPrice}::numeric))
+            )
+          ORDER BY
+            CASE WHEN ${input.side} = 'buy' THEN price END ASC,
+            CASE WHEN ${input.side} = 'sell' THEN price END DESC,
+            created_at ASC
+          LIMIT 200
+          FOR UPDATE
+        `;
+
+        if (crossers.length > 0) {
+          if (stpMode === "cancel_oldest" || stpMode === "cancel_both") {
+            for (const c of crossers) {
+              await txSql`
+                UPDATE ex_order
+                SET status = 'canceled', updated_at = now()
+                WHERE id = ${c.id}::uuid
+                  AND user_id = ${actingUserId}::uuid
+                  AND status IN ('open','partially_filled')
+              `;
+              await finalizeHoldIfTerminal(c.id, c.hold_id);
+            }
+          }
+
+          if (stpMode === "cancel_newest") {
+            return {
+              status: 409 as const,
+              body: { error: "stp_cancel_newest", details: { crossing_orders: crossers.length } },
+            };
+          }
+          if (stpMode === "cancel_both") {
+            return {
+              status: 409 as const,
+              body: { error: "stp_cancel_both", details: { crossing_orders: crossers.length } },
+            };
+          }
+        }
+      }
 
       // Tick-size validation (limit only — market orders have no price)
       if (input.type === "limit" && !isMultipleOfStep3818(input.price, market.tick_size)) {
@@ -518,6 +601,7 @@ export async function POST(request: Request) {
           WHERE market_id = ${market.id}::uuid
             AND side = 'sell'
             AND status IN ('open', 'partially_filled')
+            AND user_id <> ${actingUserId}::uuid
             AND remaining_quantity > 0
           ORDER BY price ASC, created_at ASC
           LIMIT 200

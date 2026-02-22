@@ -17,6 +17,7 @@ export async function GET() {
           base_asset_id: string;
           quote_asset_id: string;
           status: string;
+          halt_until: string | null;
           tick_size: string;
           lot_size: string;
           maker_fee_bps: number;
@@ -31,6 +32,7 @@ export async function GET() {
           base_asset_id,
           quote_asset_id,
           status,
+          halt_until::text AS halt_until,
           tick_size::text AS tick_size,
           lot_size::text AS lot_size,
           maker_fee_bps,

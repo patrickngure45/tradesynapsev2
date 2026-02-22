@@ -12,6 +12,8 @@ type MarketRow = {
   symbol: string;
   base_symbol: string;
   quote_symbol: string;
+  halt_until?: string | null;
+  is_halted?: boolean;
   tick_size: string;
   lot_size: string;
   maker_fee_bps: number;
@@ -1394,6 +1396,8 @@ export function TerminalClient() {
       symbol: String(x.symbol ?? ""),
       base_symbol: String(x.base_symbol ?? ""),
       quote_symbol: String(x.quote_symbol ?? ""),
+      halt_until: x.halt_until ?? null,
+      is_halted: Boolean(x.is_halted ?? false),
       tick_size: String(x.tick_size ?? "0.00000001"),
       lot_size: String(x.lot_size ?? "0.00000001"),
       maker_fee_bps: Number(x.maker_fee_bps ?? 0) || 0,
@@ -1438,6 +1442,12 @@ export function TerminalClient() {
   }, [markets, marketQuery]);
 
   const selected = useMemo(() => markets.find((m) => m.id === selectedMarketId) ?? null, [markets, selectedMarketId]);
+
+  const selectedHaltText = useMemo(() => {
+    if (!selected?.is_halted) return null;
+    const until = selected.halt_until ? new Date(selected.halt_until) : null;
+    return until && Number.isFinite(until.getTime()) ? until.toLocaleString() : "soon";
+  }, [selected?.halt_until, selected?.is_halted]);
 
   const setSlotKind = (slot: SlotId, kind: PanelKind) => {
     setLayout((prev) => ({ ...prev, slots: { ...prev.slots, [slot]: kind } }));
@@ -1499,6 +1509,12 @@ export function TerminalClient() {
                 {selected?.stats?.quote_volume ? ` · Vol ${formatNum(selected.stats.quote_volume)}` : ""}
               </div>
             </div>
+
+            {selected?.is_halted ? (
+              <div className="mt-2 rounded-lg border border-amber-300/40 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                Market halted until <span className="font-mono">{selectedHaltText ?? "soon"}</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-1 flex-wrap items-center justify-end gap-2">

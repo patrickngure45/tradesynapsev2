@@ -77,6 +77,9 @@ export function statusForApiError(code: string): number {
     case "open_orders_limit":
     case "order_notional_too_large":
     case "exchange_price_out_of_band":
+    case "market_halted":
+    case "stp_cancel_newest":
+    case "stp_cancel_both":
     case "passkey_not_configured":
       return 409;
 

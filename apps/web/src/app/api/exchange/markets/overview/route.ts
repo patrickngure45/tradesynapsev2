@@ -49,6 +49,7 @@ export async function GET(request: Request) {
           chain: string;
           symbol: string;
           status: string;
+          halt_until: string | null;
           tick_size: string;
           lot_size: string;
           maker_fee_bps: number;
@@ -62,6 +63,7 @@ export async function GET(request: Request) {
           m.chain,
           m.symbol,
           m.status,
+          m.halt_until::text AS halt_until,
           m.tick_size::text AS tick_size,
           m.lot_size::text AS lot_size,
           m.maker_fee_bps,
@@ -260,6 +262,9 @@ export async function GET(request: Request) {
           ? ((internalDisplayMid - indexUsdt) / indexUsdt) * 100
           : null;
 
+      const haltUntilMs = m.halt_until ? Date.parse(m.halt_until) : NaN;
+      const isHalted = Number.isFinite(haltUntilMs) && haltUntilMs > Date.now();
+
       const quoteSym = m.quote_symbol.toUpperCase();
       const quoteFiatMid = quoteSym === "USDT" ? usdtFiat?.mid ?? null : null;
 
@@ -274,6 +279,8 @@ export async function GET(request: Request) {
         chain: m.chain,
         symbol: m.symbol,
         status: m.status,
+        halt_until: m.halt_until,
+        is_halted: isHalted,
         tick_size: m.tick_size,
         lot_size: m.lot_size,
         maker_fee_bps: m.maker_fee_bps,

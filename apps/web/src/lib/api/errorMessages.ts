@@ -476,6 +476,18 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Price out of band",
     message: "That limit price is too far from the current market price band. Adjust the price and try again.",
   },
+  market_halted: {
+    title: "Market temporarily halted",
+    message: "This market is temporarily halted due to risk controls. Please try again shortly.",
+  },
+  stp_cancel_newest: {
+    title: "Self-trade prevented",
+    message: "This order would cross against your own resting order(s). Adjust your orders and try again.",
+  },
+  stp_cancel_both: {
+    title: "Self-trade prevented",
+    message: "This order would cross against your own resting order(s). Your crossing order(s) were canceled.",
+  },
   market_not_found: {
     title: "Market not found",
     message: "That market was not found.",
