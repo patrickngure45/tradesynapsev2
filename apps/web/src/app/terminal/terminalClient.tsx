@@ -733,7 +733,9 @@ function FillsPanel({ marketId }: { marketId: string | null }) {
 
 function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [type, setType] = useState<"limit" | "market" | "stop_limit" | "oco" | "trailing_stop" | "twap" | "tp_ladder">("limit");
+  const [type, setType] = useState<
+    "limit" | "market" | "iceberg" | "stop_limit" | "oco" | "trailing_stop" | "twap" | "tp_ladder"
+  >("limit");
   const [price, setPrice] = useState<string>("");
   const [triggerPrice, setTriggerPrice] = useState<string>("");
   const [takeProfitPrice, setTakeProfitPrice] = useState<string>("");
@@ -741,6 +743,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [timeInForce, setTimeInForce] = useState<"GTC" | "IOC" | "FOK">("GTC");
   const [postOnly, setPostOnly] = useState(false);
   const [qty, setQty] = useState<string>("");
+  const [icebergDisplayQty, setIcebergDisplayQty] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -791,6 +794,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setTimeInForce("GTC");
     setPostOnly(false);
     setQty("");
+    setIcebergDisplayQty("");
 
     setTwapTotalQty("");
     setTwapSlices("6");
@@ -906,7 +910,9 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
   const estimatedNotional = useMemo(() => {
     if (!market) return null;
-    const q = Number(String((type === "tp_ladder" ? tpLadderTotalQty : qty) ?? "").trim());
+    const qtyInput =
+      type === "tp_ladder" ? tpLadderTotalQty : type === "twap" ? twapTotalQty : type === "iceberg" ? qty : qty;
+    const q = Number(String(qtyInput ?? "").trim());
     if (!Number.isFinite(q) || q <= 0) return null;
 
     let px: number | null = null;
@@ -927,7 +933,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
     if (px == null || !Number.isFinite(px) || px <= 0) return null;
     return px * q;
-  }, [market, price, qty, type, tpLadderTotalQty, tpLadderStartPrice, tpLadderEndPrice]);
+  }, [market, price, qty, type, tpLadderTotalQty, tpLadderStartPrice, tpLadderEndPrice, twapTotalQty]);
 
   const highRiskThreshold = 5000;
   const requiresRiskConfirm = estimatedNotional != null && estimatedNotional >= highRiskThreshold;
@@ -1078,6 +1084,30 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
     setSubmitting(true);
     try {
+      if (type === "iceberg") {
+        const payload = {
+          market_id: market.id,
+          side,
+          type: "limit" as const,
+          price,
+          quantity: qty,
+          iceberg_display_quantity: icebergDisplayQty,
+          time_in_force: timeInForce,
+          post_only: postOnly,
+        };
+        await fetchJsonOrThrow(
+          "/api/exchange/orders",
+          withDevUserHeader({
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        );
+        setQty("");
+        setIcebergDisplayQty("");
+        return;
+      }
+
       if (type === "tp_ladder") {
         const levels = Math.trunc(Number(String(tpLadderLevels ?? "").trim()));
         if (!Number.isFinite(levels) || levels < 2 || levels > 25) {
@@ -1334,7 +1364,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-  <div className="grid grid-cols-7 gap-2">
+  <div className="grid grid-cols-8 gap-2">
         <button
           type="button"
           onClick={() => setType("limit")}
@@ -1358,6 +1388,19 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
           }
         >
           Market
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setType("iceberg")}
+          className={
+            "rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+            (type === "iceberg"
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] text-[var(--foreground)]"
+              : "border-[var(--border)] bg-[var(--bg)] text-[var(--muted)] hover:bg-[var(--card-2)]")
+          }
+        >
+          Iceberg
         </button>
         <button
           type="button"
@@ -1423,7 +1466,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         </button>
       </div>
 
-      {type === "limit" || type === "tp_ladder" ? (
+      {type === "limit" || type === "tp_ladder" || type === "iceberg" ? (
         <div className="grid grid-cols-2 gap-2">
           <select
             value={timeInForce}
@@ -1477,7 +1520,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         />
       ) : null}
 
-      {type === "limit" || type === "stop_limit" || type === "oco" || type === "trailing_stop" ? (
+      {type === "limit" || type === "iceberg" || type === "stop_limit" || type === "oco" || type === "trailing_stop" ? (
         <input
           value={price}
           onChange={(e) => setPrice(e.target.value)}
@@ -1491,6 +1534,16 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
                   ? "Limit Price"
                   : "Price"
           }
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
+        />
+      ) : null}
+
+      {type === "iceberg" ? (
+        <input
+          value={icebergDisplayQty}
+          onChange={(e) => setIcebergDisplayQty(e.target.value)}
+          onKeyDown={onHotkey}
+          placeholder="Display quantity"
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
       ) : null}

@@ -308,7 +308,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Post-only flag (reject if would cross; show user-facing reason).
 - [x] Time-in-force: IOC and FOK.
 - [x] Reduce-only flag (for future margin/positions; safe no-op for spot-only if not supported).
-- [ ] Iceberg orders (display quantity + hidden remainder).
+- [x] Iceberg orders (display quantity + hidden remainder).
 - [x] TWAP scheduler (split a large order into N slices over time).
 - [x] Take-profit ladder (split TP into multiple limit sells/buys).
 - [x] One-click “close position” equivalent for spot (sell 100% base / buy with 100% quote).

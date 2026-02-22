@@ -58,6 +58,7 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     type: z.literal("limit"),
     price: amount3818PositiveSchema,
     quantity: amount3818PositiveSchema,
+    iceberg_display_quantity: amount3818PositiveSchema.optional(),
     time_in_force: timeInForceSchema.optional().default("GTC"),
     post_only: z.boolean().optional().default(false),
     stp_mode: stpModeSchema.optional().default("none"),
@@ -177,6 +178,7 @@ export async function POST(request: Request) {
             type: input.type,
             price: input.price,
             quantity: input.quantity,
+            iceberg_display_quantity: (input as any).iceberg_display_quantity ?? null,
             time_in_force: input.time_in_force,
             post_only: input.post_only,
             stp_mode: (input as any).stp_mode,
@@ -477,6 +479,31 @@ export async function POST(request: Request) {
       const postOnly = input.type === "limit" ? input.post_only : false;
       const inputPrice = input.type === "limit" ? input.price : "0";
 
+      // --- Iceberg (limit only) ---
+      const icebergDisplayQty = input.type === "limit" ? (input as any).iceberg_display_quantity : undefined;
+      const icebergDisplayQtySql: string | null = icebergDisplayQty != null ? String(icebergDisplayQty) : null;
+      if (icebergDisplayQty != null && input.type !== "limit") {
+        return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_limit_only" } };
+      }
+
+      if (icebergDisplayQty != null) {
+        if (timeInForce !== "GTC") {
+          return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_gtc_only" } };
+        }
+        if (!isMultipleOfStep3818(String(icebergDisplayQty), market.lot_size)) {
+          return {
+            status: 400 as const,
+            body: { error: "iceberg_display_not_multiple_of_lot", details: { lot_size: market.lot_size } },
+          };
+        }
+
+        const disp = toBigInt3818(String(icebergDisplayQty));
+        const total = toBigInt3818(String((input as any).quantity));
+        if (disp <= 0n || disp >= total) {
+          return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_display_must_be_lt_total" } };
+        }
+      }
+
       // --- Self-trade prevention (STP) modes ---
       // The matcher excludes same-user makers, but that can still create a crossed self-book.
       // STP defines what to do when the incoming order would cross against the user's own resting orders.
@@ -668,7 +695,18 @@ export async function POST(request: Request) {
       }
 
       const orderRows = await txSql<OrderRow[]>`
-        INSERT INTO ex_order (market_id, user_id, side, type, price, quantity, remaining_quantity, status)
+        INSERT INTO ex_order (
+          market_id,
+          user_id,
+          side,
+          type,
+          price,
+          quantity,
+          remaining_quantity,
+          iceberg_display_quantity,
+          iceberg_hidden_remaining,
+          status
+        )
         VALUES (
           ${market.id}::uuid,
           ${actingUserId}::uuid,
@@ -676,7 +714,19 @@ export async function POST(request: Request) {
           ${input.type},
           (${inputPrice}::numeric),
           (${input.quantity}::numeric),
-          (${input.quantity}::numeric),
+          (
+            CASE
+              WHEN ${icebergDisplayQtySql}::numeric IS NULL THEN (${input.quantity}::numeric)
+              ELSE (${icebergDisplayQtySql}::numeric)
+            END
+          ),
+          (${icebergDisplayQtySql}::numeric),
+          (
+            CASE
+              WHEN ${icebergDisplayQtySql}::numeric IS NULL THEN 0
+              ELSE greatest((${input.quantity}::numeric) - (${icebergDisplayQtySql}::numeric), 0)
+            END
+          ),
           'open'
         )
         RETURNING
@@ -741,11 +791,22 @@ export async function POST(request: Request) {
           side: "buy" | "sell";
           price: string;
           remaining_quantity: string;
+          iceberg_display_quantity: string | null;
+          iceberg_hidden_remaining: string;
           hold_id: string | null;
           created_at: string;
         }[]
       >`
-        SELECT id, user_id, side, price::text AS price, remaining_quantity::text AS remaining_quantity, hold_id, created_at
+        SELECT
+          id,
+          user_id,
+          side,
+          price::text AS price,
+          remaining_quantity::text AS remaining_quantity,
+          iceberg_display_quantity::text AS iceberg_display_quantity,
+          iceberg_hidden_remaining::text AS iceberg_hidden_remaining,
+          hold_id,
+          created_at
         FROM ex_order
         WHERE market_id = ${market.id}::uuid
           AND side = ${makerSide}
@@ -954,8 +1015,25 @@ export async function POST(request: Request) {
         await txSql`
           UPDATE ex_order
           SET
-            remaining_quantity = remaining_quantity - (${fillQty}::numeric),
+            remaining_quantity = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN LEAST(iceberg_display_quantity, iceberg_hidden_remaining)
+              ELSE remaining_quantity - (${fillQty}::numeric)
+            END,
+            iceberg_hidden_remaining = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN GREATEST(iceberg_hidden_remaining - LEAST(iceberg_display_quantity, iceberg_hidden_remaining), 0)
+              ELSE iceberg_hidden_remaining
+            END,
             status = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN 'partially_filled'
               WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0 THEN 'filled'
               ELSE 'partially_filled'
             END,
@@ -964,9 +1042,9 @@ export async function POST(request: Request) {
         `;
 
         // Track maker fill for notification
-        const makerIsFilled = isZeroOrLess3818(
-          fromBigInt3818(toBigInt3818(maker.remaining_quantity) - toBigInt3818(fillQty)),
-        );
+        const makerVisibleAfter = fromBigInt3818(toBigInt3818(maker.remaining_quantity) - toBigInt3818(fillQty));
+        const makerHasHidden = !isZeroOrLess3818(maker.iceberg_hidden_remaining);
+        const makerIsFilled = isZeroOrLess3818(makerVisibleAfter) && !makerHasHidden;
         makerFillNotifs.push({
           userId: maker.user_id,
           orderId: maker.id,
@@ -979,8 +1057,25 @@ export async function POST(request: Request) {
         await txSql`
           UPDATE ex_order
           SET
-            remaining_quantity = remaining_quantity - (${fillQty}::numeric),
+            remaining_quantity = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN LEAST(iceberg_display_quantity, iceberg_hidden_remaining)
+              ELSE remaining_quantity - (${fillQty}::numeric)
+            END,
+            iceberg_hidden_remaining = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN GREATEST(iceberg_hidden_remaining - LEAST(iceberg_display_quantity, iceberg_hidden_remaining), 0)
+              ELSE iceberg_hidden_remaining
+            END,
             status = CASE
+              WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0
+                AND iceberg_hidden_remaining > 0
+                AND iceberg_display_quantity IS NOT NULL
+              THEN 'partially_filled'
               WHEN (remaining_quantity - (${fillQty}::numeric)) <= 0 THEN 'filled'
               ELSE 'partially_filled'
             END,
