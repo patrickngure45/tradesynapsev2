@@ -1929,8 +1929,8 @@ export function ArcadeClient() {
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
-                  <option value="high" disabled={gateKeyQty <= 0}>
-                    High{gateKeyQty <= 0 ? " (Key)" : ""}
+                  <option value="high" disabled={gateKeyQty + seasonSetKeyQty <= 0}>
+                    High{gateKeyQty + seasonSetKeyQty <= 0 ? " (Key)" : ""}
                   </option>
                 </select>
               </div>
@@ -1990,7 +1990,7 @@ export function ArcadeClient() {
                 In inventory: <span className="font-mono text-[var(--foreground)]">{invLoading ? "…" : gateKeyQty}</span>
               </div>
               <div className="mt-2 text-xs text-[var(--muted)]">
-                High volatility Insight Packs require a Gate Key.
+                High volatility Insight Packs require a Gate Key or a Seasonal Set Key.
               </div>
             </div>
 
