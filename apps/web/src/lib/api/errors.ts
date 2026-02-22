@@ -75,6 +75,7 @@ export function statusForApiError(code: string): number {
     case "idempotency_key_conflict":
     case "open_orders_limit":
     case "order_notional_too_large":
+    case "exchange_price_out_of_band":
     case "passkey_not_configured":
       return 409;
 

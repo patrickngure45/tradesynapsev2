@@ -55,6 +55,7 @@ describe("statusForApiError", () => {
     "idempotency_key_conflict",
     "open_orders_limit",
     "order_notional_too_large",
+    "exchange_price_out_of_band",
   ])("maps %s → 409", (code) => {
     expect(statusForApiError(code)).toBe(409);
   });

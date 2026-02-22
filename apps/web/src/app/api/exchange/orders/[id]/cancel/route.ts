@@ -9,6 +9,7 @@ import { responseForDbError } from "@/lib/dbTransient";
 import { logRouteResponse } from "@/lib/routeLog";
 import { canCancelOrder } from "@/lib/state/order";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
+import { createPgRateLimiter } from "@/lib/rateLimitPg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,18 @@ export async function POST(
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
     if (activeErr) return apiError(activeErr);
+
+    // Optional per-user cancel rate limit (prevents terminal cancel spam).
+    const cancelMax = Number(String(process.env.EXCHANGE_CANCEL_MAX_PER_MIN ?? "").trim() || "0");
+    if (Number.isFinite(cancelMax) && cancelMax > 0) {
+      try {
+        const limiter = createPgRateLimiter(sql as any, { name: "exchange-cancel", windowMs: 60_000, max: Math.trunc(cancelMax) });
+        const rl = await limiter.consume(`u:${actingUserId}`);
+        if (!rl.allowed) return apiError("rate_limit_exceeded", { status: 429 });
+      } catch {
+        // If limiter fails, do not block cancels.
+      }
+    }
 
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;

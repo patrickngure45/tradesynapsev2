@@ -467,6 +467,10 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Order too large",
     message: "This order exceeds the current maximum order size limit.",
   },
+  exchange_price_out_of_band: {
+    title: "Price out of band",
+    message: "That limit price is too far from the current market price band. Adjust the price and try again.",
+  },
   market_not_found: {
     title: "Market not found",
     message: "That market was not found.",

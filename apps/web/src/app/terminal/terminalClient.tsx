@@ -78,6 +78,12 @@ type LayoutState = {
 };
 
 const STORAGE_KEY = "cw_terminal_layout_v1";
+const WORKSPACES_KEY = "cw_terminal_workspaces_v1";
+
+type WorkspacePreset = {
+  name: string;
+  layout: LayoutState;
+};
 
 function withDevUserHeader(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
@@ -733,6 +739,14 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     }
   };
 
+  const onHotkey = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!submitting) void submit();
+    }
+  };
+
   if (!market) return <Placeholder title="Order" hint="Select a market." />;
 
   return (
@@ -858,6 +872,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         <input
           value={takeProfitPrice}
           onChange={(e) => setTakeProfitPrice(e.target.value)}
+          onKeyDown={onHotkey}
           placeholder="Take Profit Price"
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
@@ -867,6 +882,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         <input
           value={triggerPrice}
           onChange={(e) => setTriggerPrice(e.target.value)}
+          onKeyDown={onHotkey}
           placeholder={type === "oco" ? "Stop Trigger Price" : type === "trailing_stop" ? "Activation Price" : "Trigger Price"}
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
@@ -876,6 +892,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         <input
           value={trailBps}
           onChange={(e) => setTrailBps(e.target.value)}
+          onKeyDown={onHotkey}
           placeholder="Trail (bps)"
           className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
         />
@@ -885,6 +902,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         <input
           value={price}
           onChange={(e) => setPrice(e.target.value)}
+          onKeyDown={onHotkey}
           placeholder={
             type === "oco"
               ? "Stop Limit Price"
@@ -901,6 +919,7 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
       <input
         value={qty}
         onChange={(e) => setQty(e.target.value)}
+        onKeyDown={onHotkey}
         placeholder="Quantity"
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
       />
@@ -1017,6 +1036,13 @@ export function TerminalClient() {
   const [marketQuery, setMarketQuery] = useState("");
   const [selectedMarketId, setSelectedMarketId] = useState<string | null>(null);
 
+  const [presets, setPresets] = useState<WorkspacePreset[]>(() => {
+    if (typeof window === "undefined") return [];
+    const raw = safeJsonParse<WorkspacePreset[]>(window.localStorage.getItem(WORKSPACES_KEY));
+    return Array.isArray(raw) ? raw.filter((p) => p && typeof p.name === "string" && p.layout && p.layout.version === 1) : [];
+  });
+  const [presetName, setPresetName] = useState<string>("default");
+
   const [layout, setLayout] = useState<LayoutState>(() => {
     if (typeof window === "undefined") return defaultLayout();
     const saved = safeJsonParse<LayoutState>(window.localStorage.getItem(STORAGE_KEY));
@@ -1038,6 +1064,33 @@ export function TerminalClient() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
   }, [layout]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(WORKSPACES_KEY, JSON.stringify(presets));
+  }, [presets]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase?.() ?? "";
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const map: Record<string, SlotId> = { "1": "A", "2": "B", "3": "C", "4": "D" };
+        const slot = map[e.key];
+        if (slot) {
+          e.preventDefault();
+          setLayout((prev) => ({
+            ...prev,
+            collapsed: { ...prev.collapsed, [slot]: !prev.collapsed?.[slot] },
+          }));
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const loadMarkets = useCallback(async () => {
     const qs = new URLSearchParams({ fiat: "USD" });
@@ -1109,6 +1162,30 @@ export function TerminalClient() {
 
   const resetLayout = () => setLayout(defaultLayout());
 
+  const applyPreset = (name: string) => {
+    const p = presets.find((x) => x.name === name);
+    if (!p) return;
+    setLayout(p.layout);
+  };
+
+  const savePreset = () => {
+    const name = presetName.trim() || "default";
+    setPresetName(name);
+    setPresets((prev) => {
+      const next = prev.filter((p) => p.name !== name);
+      next.push({ name, layout });
+      next.sort((a, b) => a.name.localeCompare(b.name));
+      return next;
+    });
+  };
+
+  const deletePreset = () => {
+    const name = presetName.trim();
+    if (!name) return;
+    setPresets((prev) => prev.filter((p) => p.name !== name));
+    setPresetName("default");
+  };
+
   const densityLabel = layout.density === "pro" ? "Pro" : "Focus";
 
   return (
@@ -1155,6 +1232,42 @@ export function TerminalClient() {
               <option value="pro">Pro</option>
             </select>
 
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+              <div className="text-[10px] font-extrabold tracking-[0.22em] text-[var(--muted)]">WS</div>
+              <select
+                value={presetName}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPresetName(v);
+                  applyPreset(v);
+                }}
+                className="bg-transparent text-xs font-semibold text-[var(--foreground)] outline-none"
+              >
+                <option value="default">default</option>
+                {presets
+                  .filter((p) => p.name !== "default")
+                  .map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={savePreset}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={deletePreset}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+              >
+                Del
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={resetLayout}
@@ -1195,6 +1308,10 @@ export function TerminalClient() {
 
         <div className="relative mt-3 text-[11px] text-[var(--muted)]">
           Mode: <span className="text-[var(--foreground)] font-semibold">{densityLabel}</span> · Slots A–D are dockable.
+        </div>
+
+        <div className="relative mt-1 text-[10px] text-[var(--muted)]">
+          Hotkeys: <span className="text-[var(--foreground)]">Ctrl+Enter</span> submit · <span className="text-[var(--foreground)]">Alt+1..4</span> dock/expand
         </div>
       </div>
 

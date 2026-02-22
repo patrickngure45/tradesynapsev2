@@ -376,6 +376,69 @@ export async function POST(request: Request) {
         }
       }
 
+      // Price-band protection (limit orders only).
+      // Prevents fat-fingered limit orders far away from current trading range.
+      const bandBps = parseEnvInt("EXCHANGE_PRICE_BAND_BPS");
+      if (bandBps && input.type === "limit") {
+        const rows = await txSql<{ last_exec_price: string | null; bid: string | null; ask: string | null }[]>`
+          SELECT
+            (
+              SELECT e.price::text
+              FROM ex_execution e
+              WHERE e.market_id = ${market.id}::uuid
+              ORDER BY e.created_at DESC
+              LIMIT 1
+            ) AS last_exec_price,
+            (
+              SELECT o.price::text
+              FROM ex_order o
+              WHERE o.market_id = ${market.id}::uuid
+                AND o.side = 'buy'
+                AND o.status IN ('open','partially_filled')
+              ORDER BY o.price DESC, o.created_at ASC
+              LIMIT 1
+            ) AS bid,
+            (
+              SELECT o.price::text
+              FROM ex_order o
+              WHERE o.market_id = ${market.id}::uuid
+                AND o.side = 'sell'
+                AND o.status IN ('open','partially_filled')
+              ORDER BY o.price ASC, o.created_at ASC
+              LIMIT 1
+            ) AS ask
+        `;
+
+        const r = rows[0];
+        const last = r?.last_exec_price != null ? Number(r.last_exec_price) : NaN;
+        const bid = r?.bid != null ? Number(r.bid) : NaN;
+        const ask = r?.ask != null ? Number(r.ask) : NaN;
+        const mid = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0 ? (bid + ask) / 2 : NaN;
+
+        const ref = Number.isFinite(last) && last > 0 ? last : Number.isFinite(mid) && mid > 0 ? mid : null;
+        const p = Number(input.price);
+
+        if (ref && Number.isFinite(p) && p > 0) {
+          const deviationBps = Math.abs((p - ref) / ref) * 10_000;
+          if (Number.isFinite(deviationBps) && deviationBps > bandBps) {
+            const min = ref * (1 - bandBps / 10_000);
+            const max = ref * (1 + bandBps / 10_000);
+            return {
+              status: 409 as const,
+              body: {
+                error: "exchange_price_out_of_band",
+                details: {
+                  reference_price: String(ref),
+                  band_bps: bandBps,
+                  min_price: String(min),
+                  max_price: String(max),
+                },
+              },
+            };
+          }
+        }
+      }
+
       const isMarket = input.type === "market";
       const timeInForce = input.type === "limit" ? input.time_in_force : "IOC";
       const postOnly = input.type === "limit" ? input.post_only : false;
