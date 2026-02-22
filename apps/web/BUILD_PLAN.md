@@ -37,7 +37,7 @@ This file is the single source of truth for what we’re building next, why, and
 
 ## Phase 3: Automation
 
-- [ ] Recurring buys (DCA) with strict caps and idempotency
+- [x] Recurring buys (DCA) with strict caps and idempotency
 
 ## Phase 4: Explainability
 

@@ -76,6 +76,30 @@ export function HomeClient() {
   const [summary, setSummary] = useState<{ open_orders: number; pending_withdrawals: number; active_p2p_orders: number } | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
+  const [dcaPlans, setDcaPlans] = useState<
+    Array<{
+      id: string;
+      status: string;
+      from_symbol: string;
+      to_symbol: string;
+      amount_in: string;
+      cadence: string;
+      next_run_at: string;
+      last_run_at: string | null;
+      auth_expires_at: string | null;
+      last_run_status: string | null;
+      last_run_error: string | null;
+    }>
+  >([]);
+  const [dcaLoading, setDcaLoading] = useState(false);
+  const [dcaError, setDcaError] = useState<string | null>(null);
+  const [dcaFrom, setDcaFrom] = useState("USDT");
+  const [dcaTo, setDcaTo] = useState("BTC");
+  const [dcaAmountIn, setDcaAmountIn] = useState("");
+  const [dcaCadence, setDcaCadence] = useState<"daily" | "weekly">("daily");
+  const [dcaFirstRunMin, setDcaFirstRunMin] = useState("5");
+  const [dcaTotpCode, setDcaTotpCode] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -159,6 +183,23 @@ export function HomeClient() {
     }
   }, []);
 
+  const loadDca = useCallback(async () => {
+    setDcaLoading(true);
+    setDcaError(null);
+    try {
+      const data = await fetchJsonOrThrow<{ plans?: any[] }>(
+        "/api/exchange/recurring-buys?limit=10",
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setDcaPlans(Array.isArray(data.plans) ? (data.plans as any[]) : []);
+    } catch (e: any) {
+      setDcaPlans([]);
+      setDcaError(e?.message ? String(e.message) : "recurring_buys_failed");
+    } finally {
+      setDcaLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
     const t = setInterval(load, 25_000);
@@ -170,14 +211,76 @@ export function HomeClient() {
     loadAlerts();
     loadNotifications();
     loadSummary();
+    loadDca();
     const t = setInterval(() => {
       loadWatchlist();
       loadAlerts();
       loadNotifications();
       loadSummary();
+      loadDca();
     }, 45_000);
     return () => clearInterval(t);
-  }, [loadWatchlist, loadAlerts, loadNotifications, loadSummary]);
+  }, [loadWatchlist, loadAlerts, loadNotifications, loadSummary, loadDca]);
+
+  const createDca = async () => {
+    setDcaError(null);
+    try {
+      await fetchJsonOrThrow(
+        "/api/exchange/recurring-buys",
+        withDevUserHeader({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            from_symbol: dcaFrom.trim().toUpperCase(),
+            to_symbol: dcaTo.trim().toUpperCase(),
+            amount_in: dcaAmountIn.trim(),
+            cadence: dcaCadence,
+            first_run_in_min: Number(dcaFirstRunMin) || 5,
+            totp_code: dcaTotpCode.trim() || undefined,
+          }),
+        }),
+      );
+      setDcaAmountIn("");
+      await loadDca();
+    } catch (e: any) {
+      setDcaError(e?.message ? String(e.message) : "create_failed");
+    }
+  };
+
+  const setDcaStatus = async (id: string, status: "active" | "paused" | "canceled") => {
+    setDcaError(null);
+    try {
+      await fetchJsonOrThrow(
+        "/api/exchange/recurring-buys",
+        withDevUserHeader({
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id,
+            status,
+            totp_code: status === "active" ? (dcaTotpCode.trim() || undefined) : undefined,
+          }),
+        }),
+      );
+      await loadDca();
+    } catch (e: any) {
+      setDcaError(e?.message ? String(e.message) : "update_failed");
+    }
+  };
+
+  const cancelDca = async (id: string) => {
+    setDcaError(null);
+    try {
+      const qs = new URLSearchParams({ id });
+      await fetchJsonOrThrow(
+        `/api/exchange/recurring-buys?${qs.toString()}`,
+        withDevUserHeader({ method: "DELETE" }),
+      );
+      await loadDca();
+    } catch (e: any) {
+      setDcaError(e?.message ? String(e.message) : "cancel_failed");
+    }
+  };
 
   const addToWatchlist = async () => {
     const sym = newSymbol.trim().toUpperCase();
@@ -534,6 +637,130 @@ export function HomeClient() {
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
           <h2 className="text-sm font-semibold tracking-tight">Next steps</h2>
           <div className="mt-2 text-xs text-[var(--muted)]">Common actions to keep the daily loop tight.</div>
+
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">Automation</div>
+              <button
+                type="button"
+                onClick={loadDca}
+                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+                disabled={dcaLoading}
+              >
+                refresh
+              </button>
+            </div>
+            <div className="mt-1 text-xs text-[var(--muted)]">Recurring buys run via convert (USDT→asset) on a schedule.</div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <input
+                value={dcaFrom}
+                onChange={(e) => setDcaFrom(e.target.value)}
+                placeholder="USDT"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+              />
+              <input
+                value={dcaTo}
+                onChange={(e) => setDcaTo(e.target.value)}
+                placeholder="BTC"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+              />
+              <input
+                value={dcaAmountIn}
+                onChange={(e) => setDcaAmountIn(e.target.value)}
+                placeholder="Amount in FROM"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+              />
+              <select
+                value={dcaCadence}
+                onChange={(e) => setDcaCadence(e.target.value as any)}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)]"
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+              <input
+                value={dcaFirstRunMin}
+                onChange={(e) => setDcaFirstRunMin(e.target.value)}
+                placeholder="First run in (min)"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+              />
+              <input
+                value={dcaTotpCode}
+                onChange={(e) => setDcaTotpCode(e.target.value)}
+                placeholder="2FA code (if enabled)"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted)]"
+              />
+            </div>
+
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={createDca}
+                className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                disabled={dcaLoading}
+              >
+                Create
+              </button>
+              <span className="text-[11px] text-[var(--muted)]">Max 10 shown</span>
+            </div>
+
+            {dcaError ? <div className="mt-2 text-[11px] text-[var(--down)]">{dcaError}</div> : null}
+
+            <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)]">
+              {dcaLoading && dcaPlans.length === 0 ? (
+                <div className="bg-[var(--card)] px-3 py-3 text-xs text-[var(--muted)]">Loading…</div>
+              ) : dcaPlans.length === 0 ? (
+                <div className="bg-[var(--card)] px-3 py-3 text-xs text-[var(--muted)]">No recurring buys yet.</div>
+              ) : (
+                <ul className="divide-y divide-[var(--border)]">
+                  {dcaPlans.map((p) => (
+                    <li key={p.id} className="bg-[var(--card)] px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-[var(--foreground)]">
+                            {p.amount_in} {p.from_symbol} → {p.to_symbol} ({p.cadence})
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                            Status: {p.status}
+                            {p.next_run_at ? ` · next ${new Date(p.next_run_at).toLocaleString()}` : ""}
+                            {p.last_run_status ? ` · last ${p.last_run_status}` : ""}
+                            {p.last_run_error ? ` (${p.last_run_error})` : ""}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {p.status === "active" ? (
+                            <button
+                              type="button"
+                              onClick={() => void setDcaStatus(p.id, "paused")}
+                              className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                            >
+                              Pause
+                            </button>
+                          ) : p.status === "paused" ? (
+                            <button
+                              type="button"
+                              onClick={() => void setDcaStatus(p.id, "active")}
+                              className="rounded-lg bg-[var(--accent-2)] px-2 py-1 text-[11px] font-semibold text-white hover:brightness-110"
+                            >
+                              Resume
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => void cancelDca(p.id)}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--card-2)]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
 
           <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
             <div className="flex items-center justify-between gap-2">

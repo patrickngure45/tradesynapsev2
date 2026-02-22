@@ -25,6 +25,10 @@ function getExpectedServices(): ServiceExpectation[] {
   const enablePriceAlerts = (process.env.EXCHANGE_ENABLE_PRICE_ALERTS ?? "").trim() === "1";
   if (enablePriceAlerts) expected.push({ service: "cron:price-alerts", staleAfterMs: 15 * 60_000 });
 
+  const enableRecurringBuys = (process.env.EXCHANGE_ENABLE_RECURRING_BUYS ?? "").trim() === "1";
+  // DCA typically runs daily/weekly; allow a wide stale window.
+  if (enableRecurringBuys) expected.push({ service: "cron:recurring-buys", staleAfterMs: 36 * 60 * 60_000 });
+
   // Optional scheduled jobs: only treat as required when explicitly enabled.
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
   const expectSweepDeposits = (process.env.EXPECT_SWEEP_DEPOSITS ?? "").trim() === "1";
