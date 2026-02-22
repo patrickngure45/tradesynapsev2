@@ -16,6 +16,7 @@ const postSchema = z.object({
 });
 
 const MODULE_KEY = "insight_pack";
+const GATE_KEY = { kind: "key", code: "gate_key" };
 
 export async function POST(request: Request) {
   const actingUserId = getActingUserId(request);
@@ -57,6 +58,21 @@ export async function POST(request: Request) {
             AND requested_at >= (now() - interval '60 seconds')
         `;
         if (Number(lim?.c ?? "0") >= 10) return { kind: "err" as const, err: apiError("rate_limit_exceeded") };
+
+        // Keys & Gates: profile=high requires a Gate Key.
+        if (profile === "high") {
+          const rows = await txSql<{ quantity: number }[]>`
+            SELECT quantity
+            FROM arcade_inventory
+            WHERE user_id = ${actingUserId}::uuid
+              AND kind = ${GATE_KEY.kind}
+              AND code = ${GATE_KEY.code}
+              AND quantity > 0
+            LIMIT 1
+          `;
+          const q = Number(rows[0]?.quantity ?? 0) || 0;
+          if (q <= 0) return { kind: "err" as const, err: apiError("arcade_key_required", { details: { key: GATE_KEY.code } }) };
+        }
 
         const [action] = await txSql<{ id: string; requested_at: string }[]>`
           INSERT INTO arcade_action (

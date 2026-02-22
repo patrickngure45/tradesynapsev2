@@ -3,7 +3,7 @@ import { bytesToU64BigInt, sha256Hex } from "@/lib/uncertainty/hash";
 export type VolatilityProfile = "low" | "medium" | "high";
 
 export type WheelOutcome = {
-  kind: "cosmetic";
+  kind: "cosmetic" | "key";
   code: string;
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   label: string;
@@ -29,6 +29,7 @@ const OUTCOMES: Record<WheelOutcome["rarity"], WheelOutcome[]> = {
   ],
   legendary: [
     { kind: "cosmetic", code: "wheel_crown", rarity: "legendary", label: "Wheel Crown" },
+    { kind: "key", code: "gate_key", rarity: "legendary", label: "Gate Key" },
   ],
 };
 

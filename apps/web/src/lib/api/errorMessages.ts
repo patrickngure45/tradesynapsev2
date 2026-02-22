@@ -132,6 +132,11 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Acting user mismatch",
     message: "The acting user does not match the user for this action.",
   },
+
+  arcade_key_required: {
+    title: "Key required",
+    message: "This action requires a Gate Key. Earn one from Arcade drops, then try again.",
+  },
   user_not_found: {
     title: "User not found",
     message: "That user id does not exist.",

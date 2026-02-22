@@ -333,6 +333,25 @@ function OrderbookPanel({ marketId }: { marketId: string | null }) {
   const [asks, setAsks] = useState<DepthLevel[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const bidSum = useMemo(() => bids.reduce((acc, b) => acc + (Number(b.quantity) || 0), 0), [bids]);
+  const askSum = useMemo(() => asks.reduce((acc, a) => acc + (Number(a.quantity) || 0), 0), [asks]);
+  const imbalancePct = useMemo(() => {
+    const tot = bidSum + askSum;
+    if (!Number.isFinite(tot) || tot <= 0) return null;
+    return Math.round(((bidSum / tot) * 10_000)) / 100;
+  }, [bidSum, askSum]);
+
+  const maxBidQty = useMemo(() => {
+    let m = 0;
+    for (const b of bids) m = Math.max(m, Number(b.quantity) || 0);
+    return m;
+  }, [bids]);
+  const maxAskQty = useMemo(() => {
+    let m = 0;
+    for (const a of asks) m = Math.max(m, Number(a.quantity) || 0);
+    return m;
+  }, [asks]);
+
   const load = useCallback(async () => {
     if (!marketId) return;
     setLoading(true);
@@ -363,7 +382,12 @@ function OrderbookPanel({ marketId }: { marketId: string | null }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
-        <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Asks</div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Asks</div>
+          {imbalancePct != null ? (
+            <div className="text-[10px] font-extrabold tracking-[0.18em] text-[var(--muted)]">Imb {imbalancePct}% bid</div>
+          ) : null}
+        </div>
         <div className="border-t border-[var(--border)]">
           {loading && asks.length === 0 ? (
             <div className="px-3 py-3 text-xs text-[var(--muted)]">Loading…</div>
@@ -373,7 +397,16 @@ function OrderbookPanel({ marketId }: { marketId: string | null }) {
             <table className="w-full text-[11px]">
               <tbody>
                 {asks.slice(0, 14).map((a) => (
-                  <tr key={`a-${a.price}`} className="border-b border-[var(--border)] last:border-b-0">
+                  <tr
+                    key={`a-${a.price}`}
+                    className="border-b border-[var(--border)] last:border-b-0"
+                    style={{
+                      background:
+                        maxAskQty > 0
+                          ? `linear-gradient(to left, color-mix(in_srgb, var(--down) 14%, transparent) ${Math.min(100, Math.max(0, Math.round(((Number(a.quantity) || 0) * 100) / maxAskQty)))}%, transparent 0%)`
+                          : undefined,
+                    }}
+                  >
                     <td className="px-3 py-1 font-semibold text-[var(--down)]">{fmtCompact(a.price, 8)}</td>
                     <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(a.quantity, 8)}</td>
                   </tr>
@@ -395,7 +428,16 @@ function OrderbookPanel({ marketId }: { marketId: string | null }) {
             <table className="w-full text-[11px]">
               <tbody>
                 {bids.slice(0, 14).map((b) => (
-                  <tr key={`b-${b.price}`} className="border-b border-[var(--border)] last:border-b-0">
+                  <tr
+                    key={`b-${b.price}`}
+                    className="border-b border-[var(--border)] last:border-b-0"
+                    style={{
+                      background:
+                        maxBidQty > 0
+                          ? `linear-gradient(to right, color-mix(in_srgb, var(--up) 14%, transparent) ${Math.min(100, Math.max(0, Math.round(((Number(b.quantity) || 0) * 100) / maxBidQty)))}%, transparent 0%)`
+                          : undefined,
+                    }}
+                  >
                     <td className="px-3 py-1 font-semibold text-[var(--up)]">{fmtCompact(b.price, 8)}</td>
                     <td className="px-3 py-1 text-right text-[var(--foreground)]">{fmtCompact(b.quantity, 8)}</td>
                   </tr>
@@ -412,23 +454,62 @@ function OrderbookPanel({ marketId }: { marketId: string | null }) {
 function TapePanel({ marketId }: { marketId: string | null }) {
   const [trades, setTrades] = useState<TradeRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"all" | "mine">("all");
+  const [largeOnly, setLargeOnly] = useState(false);
+
+  const largeNotionalThreshold = 1000;
+
+  const copyText = async (text: string) => {
+    const v = String(text ?? "");
+    if (!v) return;
+    try {
+      await navigator.clipboard.writeText(v);
+    } catch {
+      // ignore
+    }
+  };
 
   const load = useCallback(async () => {
     if (!marketId) return;
     setLoading(true);
     try {
-      const qs = new URLSearchParams({ market_id: marketId, limit: "60" });
-      const data = await fetchJsonOrThrow<{ trades?: any[] }>(
-        `/api/exchange/marketdata/trades?${qs.toString()}`,
-        withDevUserHeader({ cache: "no-store" }),
-      );
-      setTrades(Array.isArray((data as any).trades) ? ((data as any).trades as any[]) : []);
+      if (mode === "mine") {
+        const qs = new URLSearchParams({ status: "all", limit: "40", market_id: marketId });
+        const data = await fetchJsonOrThrow<{ orders?: any[] }>(
+          `/api/exchange/orders/history?${qs.toString()}`,
+          withDevUserHeader({ cache: "no-store" }),
+        );
+        const orders = Array.isArray((data as any).orders) ? ((data as any).orders as any[]) : [];
+        const fills: TradeRow[] = [];
+        for (const o of orders) {
+          const list = Array.isArray(o.fills) ? o.fills : [];
+          for (const f of list) {
+            fills.push({
+              id: String(f.id ?? ""),
+              price: String(f.price ?? "0"),
+              quantity: String(f.quantity ?? "0"),
+              maker_order_id: String(o.id ?? ""),
+              taker_order_id: String(o.id ?? ""),
+              created_at: String(f.created_at ?? ""),
+            } as any);
+          }
+        }
+        fills.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        setTrades(fills.slice(0, 60));
+      } else {
+        const qs = new URLSearchParams({ market_id: marketId, limit: "60" });
+        const data = await fetchJsonOrThrow<{ trades?: any[] }>(
+          `/api/exchange/marketdata/trades?${qs.toString()}`,
+          withDevUserHeader({ cache: "no-store" }),
+        );
+        setTrades(Array.isArray((data as any).trades) ? ((data as any).trades as any[]) : []);
+      }
     } catch {
       setTrades([]);
     } finally {
       setLoading(false);
     }
-  }, [marketId]);
+  }, [marketId, mode]);
 
   useEffect(() => {
     void load();
@@ -441,7 +522,43 @@ function TapePanel({ marketId }: { marketId: string | null }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)]">
       <div className="flex items-center justify-between gap-3 px-3 py-2">
-        <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Executions</div>
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Tape</div>
+          <div className="inline-flex overflow-hidden rounded-lg border border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setMode("all")}
+              className={
+                "px-2 py-1 text-[10px] font-extrabold tracking-[0.12em] " +
+                (mode === "all" ? "bg-[var(--card)] text-[var(--foreground)]" : "bg-[var(--bg)] text-[var(--muted)]")
+              }
+            >
+              ALL
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("mine")}
+              className={
+                "border-l border-[var(--border)] px-2 py-1 text-[10px] font-extrabold tracking-[0.12em] " +
+                (mode === "mine" ? "bg-[var(--card)] text-[var(--foreground)]" : "bg-[var(--bg)] text-[var(--muted)]")
+              }
+            >
+              MINE
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setLargeOnly((v) => !v)}
+            className={
+              "rounded-lg border border-[var(--border)] px-2 py-1 text-[10px] font-extrabold tracking-[0.12em] " +
+              (largeOnly ? "bg-[var(--card)] text-[var(--foreground)]" : "bg-[var(--bg)] text-[var(--muted)]")
+            }
+            title={`Large = notional ≥ ${largeNotionalThreshold}`}
+          >
+            LARGE
+          </button>
+        </div>
         <div className="text-[10px] text-[var(--muted)]">{loading ? "sync" : `${trades.length}`}</div>
       </div>
       <div className="border-t border-[var(--border)]">
@@ -450,15 +567,34 @@ function TapePanel({ marketId }: { marketId: string | null }) {
         ) : (
           <table className="w-full text-[11px]">
             <tbody>
-              {trades.slice(0, 60).map((t) => (
-                <tr key={t.id} className="border-b border-[var(--border)] last:border-b-0">
-                  <td className="px-3 py-1 font-semibold text-[var(--foreground)]">{fmtCompact(t.price, 8)}</td>
-                  <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(t.quantity, 8)}</td>
-                  <td className="px-3 py-1 text-right text-[10px] text-[var(--muted)]">
-                    {new Date(t.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </td>
-                </tr>
-              ))}
+              {trades
+                .filter((t) => {
+                  if (!largeOnly) return true;
+                  const px = Number(t.price);
+                  const q = Number(t.quantity);
+                  const n = (Number.isFinite(px) ? px : 0) * (Number.isFinite(q) ? q : 0);
+                  return n >= largeNotionalThreshold;
+                })
+                .slice(0, 60)
+                .map((t) => (
+                  <tr key={t.id} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-3 py-1 font-semibold text-[var(--foreground)]">{fmtCompact(t.price, 8)}</td>
+                    <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(t.quantity, 8)}</td>
+                    <td className="px-3 py-1 text-right text-[10px] text-[var(--muted)]">
+                      {t.created_at ? new Date(t.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}
+                    </td>
+                    <td className="px-3 py-1 text-right">
+                      <button
+                        type="button"
+                        onClick={() => void copyText(String(t.id))}
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-extrabold tracking-[0.1em] text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
+                        title="Copy execution id"
+                      >
+                        ID
+                      </button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         )}
@@ -599,6 +735,11 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [riskConfirmed, setRiskConfirmed] = useState(false);
+
+  const [impactBids, setImpactBids] = useState<DepthLevel[]>([]);
+  const [impactAsks, setImpactAsks] = useState<DepthLevel[]>([]);
+
   const [stops, setStops] = useState<ConditionalOrderRow[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
 
@@ -611,7 +752,109 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     setTimeInForce("GTC");
     setPostOnly(false);
     setQty("");
+
+    setRiskConfirmed(false);
   }, [market?.id]);
+
+  const quoteSymbol = useMemo(() => {
+    const sym = String(market?.symbol ?? "");
+    const parts = sym.split("/");
+    return parts.length === 2 ? parts[1]!.trim() : "QUOTE";
+  }, [market?.symbol]);
+
+  const loadImpactDepth = useCallback(async () => {
+    if (!market?.id) {
+      setImpactBids([]);
+      setImpactAsks([]);
+      return;
+    }
+    try {
+      const qs = new URLSearchParams({ market_id: market.id, levels: "20" });
+      const data = await fetchJsonOrThrow<{ depth?: { bids?: DepthLevel[]; asks?: DepthLevel[] } }>(
+        `/api/exchange/marketdata/depth?${qs.toString()}`,
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      setImpactBids(Array.isArray(data.depth?.bids) ? (data.depth!.bids as any) : []);
+      setImpactAsks(Array.isArray(data.depth?.asks) ? (data.depth!.asks as any) : []);
+    } catch {
+      setImpactBids([]);
+      setImpactAsks([]);
+    }
+  }, [market?.id]);
+
+  useEffect(() => {
+    void loadImpactDepth();
+    const t = setInterval(() => void loadImpactDepth(), 3000);
+    return () => clearInterval(t);
+  }, [loadImpactDepth]);
+
+  const estimatedNotional = useMemo(() => {
+    if (!market) return null;
+    const q = Number(String(qty ?? "").trim());
+    if (!Number.isFinite(q) || q <= 0) return null;
+
+    let px: number | null = null;
+    if (type === "market") {
+      const bid = market.book?.bid ? Number(market.book.bid) : NaN;
+      const ask = market.book?.ask ? Number(market.book.ask) : NaN;
+      if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) px = (bid + ask) / 2;
+      else if (Number.isFinite(ask) && ask > 0) px = ask;
+      else if (Number.isFinite(bid) && bid > 0) px = bid;
+    } else {
+      const p = Number(String(price ?? "").trim());
+      if (Number.isFinite(p) && p > 0) px = p;
+    }
+
+    if (px == null || !Number.isFinite(px) || px <= 0) return null;
+    return px * q;
+  }, [market, price, qty, type]);
+
+  const highRiskThreshold = 5000;
+  const requiresRiskConfirm = estimatedNotional != null && estimatedNotional >= highRiskThreshold;
+
+  useEffect(() => {
+    if (!requiresRiskConfirm && riskConfirmed) setRiskConfirmed(false);
+  }, [requiresRiskConfirm, riskConfirmed]);
+
+  const marketImpact = useMemo((): (
+    | null
+    | { kind: "estimate"; ok: boolean; filledQty: number; avgPrice: number; slipBps: number | null }
+    | { kind: "error"; reason: string }
+  ) => {
+    if (!market) return null;
+    if (type !== "market") return null;
+    const q = Number(String(qty ?? "").trim());
+    if (!Number.isFinite(q) || q <= 0) return null;
+
+    const levels = side === "buy" ? impactAsks : impactBids;
+    if (!Array.isArray(levels) || levels.length === 0) return { kind: "error", reason: "no_book" };
+
+    let remaining = q;
+    let filled = 0;
+    let totalQuote = 0;
+
+    for (const lvl of levels) {
+      const px = Number(lvl.price);
+      const avail = Number(lvl.quantity);
+      if (!Number.isFinite(px) || px <= 0) continue;
+      if (!Number.isFinite(avail) || avail <= 0) continue;
+      const take = Math.min(remaining, avail);
+      totalQuote += take * px;
+      filled += take;
+      remaining -= take;
+      if (remaining <= 0) break;
+    }
+
+    if (!filled) return { kind: "error", reason: "no_liquidity" };
+
+    const avg = totalQuote / filled;
+    const best = levels.length > 0 ? Number(levels[0]!.price) : NaN;
+    const slipBps = Number.isFinite(best) && best > 0
+      ? Math.round(((Math.abs(avg - best) / best) * 10_000) * 100) / 100
+      : null;
+
+    return { kind: "estimate", ok: remaining <= 0, filledQty: filled, avgPrice: avg, slipBps };
+  }, [impactAsks, impactBids, market, qty, side, type]);
 
   const loadStops = useCallback(async () => {
     if (!market?.id) {
@@ -648,6 +891,12 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const submit = async () => {
     if (!market) return;
     setErr(null);
+
+    if (requiresRiskConfirm && !riskConfirmed) {
+      setErr("confirm_high_risk_required");
+      return;
+    }
+
     setSubmitting(true);
     try {
       if (type === "stop_limit") {
@@ -924,12 +1173,52 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
       />
 
-      {err ? <div className="text-xs text-[var(--down)]">{err}</div> : null}
+      {type === "market" ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
+          {marketImpact ? (
+            marketImpact.kind === "estimate" ? (
+              <>
+                Est. avg {marketImpact.avgPrice.toLocaleString(undefined, { maximumFractionDigits: 6 })} {quoteSymbol}
+                {marketImpact.slipBps != null ? ` · slip ${marketImpact.slipBps} bps` : ""}
+                {!marketImpact.ok ? ` · partial (fills ${marketImpact.filledQty.toLocaleString(undefined, { maximumFractionDigits: 8 })})` : ""}
+              </>
+            ) : (
+              <>Impact estimate: {marketImpact.reason}</>
+            )
+          ) : (
+            <>Impact estimate: enter quantity</>
+          )}
+        </div>
+      ) : null}
+
+      {requiresRiskConfirm ? (
+        <label className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)]">
+          <div className="min-w-0">
+            <div className="font-extrabold tracking-tight">Confirm high-risk order</div>
+            <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+              Est. notional {estimatedNotional != null ? estimatedNotional.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"} {quoteSymbol}
+              {" "}≥ {highRiskThreshold.toLocaleString()} {quoteSymbol}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={riskConfirmed}
+            onChange={(e) => setRiskConfirmed(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+          />
+        </label>
+      ) : null}
+
+      {err ? (
+        <div className="text-xs text-[var(--down)]">
+          {err === "confirm_high_risk_required" ? "Please confirm the high-risk order checkbox." : err}
+        </div>
+      ) : null}
 
       <button
         type="button"
         onClick={submit}
-        disabled={submitting}
+        disabled={submitting || (requiresRiskConfirm && !riskConfirmed)}
         className={
           "w-full rounded-xl px-3 py-2 text-xs font-extrabold tracking-tight text-white hover:brightness-110 disabled:opacity-60 " +
           (side === "buy" ? "bg-[var(--up)]" : "bg-[var(--down)]")

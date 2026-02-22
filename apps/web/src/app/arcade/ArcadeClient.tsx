@@ -136,6 +136,16 @@ type SafetyResponse = {
   };
 };
 
+type SeasonResponse = {
+  ok: true;
+  season: {
+    key: string;
+    starts_at: string;
+    next_shift_at: string;
+    rules: string[];
+  };
+};
+
 type CommunityStatusResponse = {
   ok: true;
   module: string;
@@ -285,6 +295,8 @@ export function ArcadeClient() {
   const [invItems, setInvItems] = useState<InventoryItem[]>([]);
   const [invShards, setInvShards] = useState<number>(0);
 
+  const [season, setSeason] = useState<SeasonResponse["season"] | null>(null);
+
   const [salvageKey, setSalvageKey] = useState<string>("");
   const [salvageQty, setSalvageQty] = useState<number>(1);
   const [salvageLoading, setSalvageLoading] = useState(false);
@@ -300,6 +312,11 @@ export function ArcadeClient() {
 
   const streakProtectorQty = useMemo(() => {
     const row = invItems.find((i) => i.kind === "perk" && String(i.code ?? "") === "streak_protector");
+    return Number(row?.quantity ?? 0) || 0;
+  }, [invItems]);
+
+  const gateKeyQty = useMemo(() => {
+    const row = invItems.find((i) => i.kind === "key" && String(i.code ?? "") === "gate_key");
     return Number(row?.quantity ?? 0) || 0;
   }, [invItems]);
 
@@ -589,6 +606,30 @@ export function ArcadeClient() {
   useEffect(() => {
     void refreshInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchJsonOrThrow<SeasonResponse>("/api/arcade/season", { cache: "no-store" });
+        if (!cancelled) setSeason(res.season ?? null);
+      } catch {
+        if (!cancelled) setSeason(null);
+      }
+    })();
+    const t = setInterval(() => void (async () => {
+      try {
+        const res = await fetchJsonOrThrow<SeasonResponse>("/api/arcade/season", { cache: "no-store" });
+        if (!cancelled) setSeason(res.season ?? null);
+      } catch {
+        // ignore
+      }
+    })(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, []);
 
   async function claimCalendarDaily() {
@@ -1309,7 +1350,9 @@ export function ArcadeClient() {
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
-                  <option value="high">High</option>
+                  <option value="high" disabled={gateKeyQty <= 0}>
+                    High{gateKeyQty <= 0 ? " (Key)" : ""}
+                  </option>
                 </select>
               </div>
 
@@ -1344,6 +1387,30 @@ export function ArcadeClient() {
               <div className="mt-3 text-[11px] text-[var(--muted)]">{insightLast.outcome.metadata?.disclaimer ?? ""}</div>
             </div>
           ) : null}
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Keys & Gates</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">Gate Key</div>
+              <div className="mt-1 text-xs text-[var(--muted)]">
+                In inventory: <span className="font-mono text-[var(--foreground)]">{invLoading ? "…" : gateKeyQty}</span>
+              </div>
+              <div className="mt-2 text-xs text-[var(--muted)]">
+                High volatility Insight Packs require a Gate Key.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Season</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{season?.key ?? "—"}</div>
+              <div className="mt-1 text-xs text-[var(--muted)]">
+                Next shift: {season?.next_shift_at ? new Date(season.next_shift_at).toUTCString() : "—"}
+              </div>
+              {Array.isArray(season?.rules) && season!.rules.length ? (
+                <div className="mt-2 text-xs text-[var(--muted)]">{season!.rules[0]}</div>
+              ) : null}
+            </div>
+          </div>
         </div>
       </section>
 

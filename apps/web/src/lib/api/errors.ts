@@ -32,6 +32,7 @@ export function statusForApiError(code: string): number {
     case "buyer_not_active":
     case "seller_not_active":
     case "p2p_country_not_supported":
+    case "arcade_key_required":
       return 403;
 
     // Not found
