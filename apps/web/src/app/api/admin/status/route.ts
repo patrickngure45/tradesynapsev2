@@ -90,6 +90,13 @@ export async function GET(request: Request) {
   let outboxOpen = 0;
   let outboxDead = 0;
   let outboxWithErrors = 0;
+
+  let emailOutboxPending = 0;
+  let emailOutboxFailed = 0;
+  let emailOutboxOldestPendingAt: string | null = null;
+  let emailOutboxOldestAgeMin: number | null = null;
+
+  let opsAlertLastSentAt: string | null = null;
   if (dbOk) {
     try {
       const rows = await sql<
@@ -112,6 +119,41 @@ export async function GET(request: Request) {
       outboxOpen = 0;
       outboxDead = 0;
       outboxWithErrors = 0;
+    }
+
+    try {
+      const rows = await sql<{ pending: number; failed: number; oldest_pending_at: string | null }[]>`
+        SELECT
+          count(*) FILTER (WHERE status = 'pending')::int AS pending,
+          count(*) FILTER (WHERE status = 'failed')::int AS failed,
+          min(created_at) FILTER (WHERE status = 'pending')::timestamptz::text AS oldest_pending_at
+        FROM ex_email_outbox
+      `;
+      const row = rows[0];
+      if (row) {
+        emailOutboxPending = row.pending ?? 0;
+        emailOutboxFailed = row.failed ?? 0;
+        emailOutboxOldestPendingAt = row.oldest_pending_at ?? null;
+      }
+      const oldestMs = emailOutboxOldestPendingAt ? Date.parse(String(emailOutboxOldestPendingAt)) : NaN;
+      emailOutboxOldestAgeMin = Number.isFinite(oldestMs) ? Math.max(0, Math.floor((Date.now() - oldestMs) / 60_000)) : null;
+    } catch {
+      emailOutboxPending = 0;
+      emailOutboxFailed = 0;
+      emailOutboxOldestPendingAt = null;
+      emailOutboxOldestAgeMin = null;
+    }
+
+    try {
+      const rows = await sql<{ last_sent_at: string | null }[]>`
+        SELECT last_sent_at::text AS last_sent_at
+        FROM app_ops_alert_state
+        WHERE key = 'ops:degraded'
+        LIMIT 1
+      `;
+      opsAlertLastSentAt = rows[0]?.last_sent_at ?? null;
+    } catch {
+      opsAlertLastSentAt = null;
     }
   }
 
@@ -169,6 +211,15 @@ export async function GET(request: Request) {
     overall,
     db: { ok: dbOk, latency_ms: dbLatencyMs },
     outbox: { open: outboxOpen, dead: outboxDead, with_errors: outboxWithErrors },
+    email_outbox: {
+      pending: emailOutboxPending,
+      failed: emailOutboxFailed,
+      oldest_pending_at: emailOutboxOldestPendingAt,
+      oldest_age_min: emailOutboxOldestAgeMin,
+    },
+    ops_alerts: {
+      degraded_last_sent_at: opsAlertLastSentAt,
+    },
     email: {
       configured: emailCfg.configured,
       smtp_host_configured: emailCfg.smtp_host_configured,

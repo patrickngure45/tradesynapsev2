@@ -8,6 +8,8 @@ type StatusPayload = {
   overall: "online" | "degraded" | "offline";
   db?: { ok?: boolean; latency_ms?: number | null };
   outbox?: { open?: number; dead?: number; with_errors?: number };
+  email_outbox?: { pending?: number; failed?: number; oldest_pending_at?: string | null; oldest_age_min?: number | null };
+  ops_alerts?: { degraded_last_sent_at?: string | null };
   expected_services?: Array<{ service: string; staleAfterMs: number }>;
   stale_expected_services?: string[];
   heartbeats?: Array<{ service: string; status: string; last_seen_at: string }>;
@@ -108,7 +110,7 @@ export function StatusClient() {
         {loading && !data ? <div className="relative mt-3 text-[11px] text-[var(--muted)]">Checking…</div> : null}
 
         {data ? (
-          <div className="relative mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="relative mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
               <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Database</div>
               <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">
@@ -127,6 +129,18 @@ export function StatusClient() {
               </div>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+              <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Email Outbox</div>
+              <div className="mt-2 text-[11px] text-[var(--muted)]">
+                pending <span className="text-[var(--foreground)] font-semibold">{data.email_outbox?.pending ?? 0}</span>
+                {" · "}failed <span className="text-[var(--foreground)] font-semibold">{data.email_outbox?.failed ?? 0}</span>
+                {data.email_outbox?.oldest_age_min != null ? (
+                  <div className="mt-1 text-[10px]">
+                    oldest pending: <span className="text-[var(--foreground)] font-semibold">{data.email_outbox.oldest_age_min}m</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
               <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Expected Jobs</div>
               <div className="mt-2 text-[11px] text-[var(--muted)]">
                 {Array.isArray(data.expected_services) && data.expected_services.length > 0 ? (
@@ -142,6 +156,21 @@ export function StatusClient() {
                   </>
                 ) : (
                   <span className="text-[var(--muted)]">none configured</span>
+                )}
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
+              <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Ops Alerts</div>
+              <div className="mt-2 text-[11px] text-[var(--muted)]">
+                {data.ops_alerts?.degraded_last_sent_at ? (
+                  <>
+                    last sent
+                    <div className="mt-1 text-[10px] text-[var(--foreground)] font-semibold">
+                      {new Date(String(data.ops_alerts.degraded_last_sent_at)).toLocaleString()}
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-[var(--muted)]">none yet</span>
                 )}
               </div>
             </div>

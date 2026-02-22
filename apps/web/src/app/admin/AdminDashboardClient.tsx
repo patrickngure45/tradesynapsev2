@@ -123,6 +123,8 @@ type AdminSystemStatus = {
   overall: "online" | "degraded" | "offline";
   db?: { ok: boolean; latency_ms: number | null };
   outbox?: { open: number; dead: number; with_errors: number };
+  email_outbox?: { pending: number; failed: number; oldest_pending_at: string | null; oldest_age_min: number | null };
+  ops_alerts?: { degraded_last_sent_at: string | null };
   email?: {
     configured: boolean;
     smtp_host_configured: boolean;
@@ -1282,6 +1284,10 @@ export function AdminDashboardClient() {
                 Outbox: open {sysStatus.outbox?.open ?? 0}, dead {sysStatus.outbox?.dead ?? 0}, errors {sysStatus.outbox?.with_errors ?? 0}
               </div>
               <div>
+                Email outbox: pending {sysStatus.email_outbox?.pending ?? 0}, failed {sysStatus.email_outbox?.failed ?? 0}
+                {sysStatus.email_outbox?.oldest_age_min != null ? ` (oldest ${sysStatus.email_outbox.oldest_age_min}m)` : ""}
+              </div>
+              <div>
                 Email: {sysStatus.email?.configured ? "configured" : "demo"}
                 {sysStatus.email?.from ? ` (${sysStatus.email.from})` : ""}
                 {sysStatus.email && !sysStatus.email.configured ? (
@@ -1292,9 +1298,23 @@ export function AdminDashboardClient() {
                 ) : null}
                 {sysStatus.email?.resend_api_configured ? <span> — resend:api</span> : null}
               </div>
-              <div>
-                Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
+            </div>
+
+            <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Stuck signals</div>
+                <div className="text-[10px] text-[var(--muted)]">
+                  Ops alert last sent: {sysStatus.ops_alerts?.degraded_last_sent_at ? new Date(String(sysStatus.ops_alerts.degraded_last_sent_at)).toLocaleString() : "—"}
+                </div>
               </div>
+              <div className="mt-1 text-[10px] text-[var(--muted)]">
+                Stale services: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
+              </div>
+              {(sysStatus.outbox?.dead ?? 0) > 0 || (sysStatus.outbox?.with_errors ?? 0) > 0 || (sysStatus.email_outbox?.failed ?? 0) > 0 ? (
+                <div className="mt-1 text-[10px] text-[var(--down)]">
+                  Attention: outbox dead/errors or email failures detected.
+                </div>
+              ) : null}
             </div>
 
             {Array.isArray(sysStatus.heartbeats) && sysStatus.heartbeats.length > 0 ? (
