@@ -116,6 +116,20 @@ export async function POST(request: Request) {
       return apiZodError(e) ?? apiError("invalid_input");
     }
 
+    // Load asset symbol early (outside tx) so we can enforce auth/tier rules.
+    const preAssets = await sql<{ id: string; chain: string; symbol: string }[]>`
+      SELECT id, chain, symbol
+      FROM ex_asset
+      WHERE id = ${input.asset_id} AND is_enabled = true
+      LIMIT 1
+    `;
+    if (preAssets.length === 0) return apiError("not_found", { status: 404 });
+    const preAsset = preAssets[0]!;
+    if (preAsset.chain !== "bsc") {
+      return apiError("invalid_input", { status: 400, details: "unsupported_chain" });
+    }
+    const sym = String(preAsset.symbol ?? "").toUpperCase();
+
     // ── Withdrawal security gates ──────────────────────────────────
     const uRows = await sql<{ email_verified: boolean; kyc_level: string; totp_enabled: boolean }[]>`
       SELECT email_verified, kyc_level, totp_enabled
@@ -132,7 +146,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Strong auth required: passkey step-up (preferred) OR TOTP (fallback).
+    // Strong auth required. For large withdrawals, require passkey step-up if available.
     const secret = process.env.PROOFPACK_SESSION_SECRET ?? "";
     if (!secret) return apiError("session_secret_not_configured");
 
@@ -143,17 +157,46 @@ export async function POST(request: Request) {
         : null;
     const stepUpOk = !!stepUp && stepUp.ok && stepUp.payload.uid === actingUserId;
 
+    const largeStepUpAssets = csvEnv("WITHDRAWAL_LARGE_STEPUP_ASSETS", "USDT,USDC,BUSD").map((s) => s.toUpperCase());
+    const largeStepUpMin = envLimit3818("WITHDRAWAL_LARGE_STEPUP_MIN", "1000");
+    const isLargeWithdrawal = !!largeStepUpMin
+      && largeStepUpAssets.includes(sym)
+      && toBigInt3818(input.amount) >= largeStepUpMin;
+
+    let passkeyCount: number | null = null;
+    const getPasskeyCount = async () => {
+      if (passkeyCount !== null) return passkeyCount;
+      const pk = await sql<{ c: number }[]>`
+        SELECT count(*)::int AS c
+        FROM user_passkey_credential
+        WHERE user_id = ${actingUserId}::uuid
+      `;
+      passkeyCount = pk[0]?.c ?? 0;
+      return passkeyCount;
+    };
+
     if (!stepUpOk) {
-      if (u.totp_enabled) {
+      if (isLargeWithdrawal) {
+        if ((await getPasskeyCount()) > 0) {
+          return apiError("stepup_required", {
+            status: 403,
+            details: { message: "Large withdrawals require passkey confirmation.", required_for: "large_withdrawal" },
+          });
+        }
+        if (u.totp_enabled) {
+          const totpResp = await enforceTotpRequired(sql, actingUserId, input.totp_code);
+          if (totpResp) return totpResp;
+        } else {
+          return apiError("totp_setup_required", {
+            status: 403,
+            details: { message: "Set up 2FA before requesting large withdrawals." },
+          });
+        }
+      } else if (u.totp_enabled) {
         const totpResp = await enforceTotpRequired(sql, actingUserId, input.totp_code);
         if (totpResp) return totpResp;
       } else {
-        const pk = await sql<{ c: number }[]>`
-          SELECT count(*)::int AS c
-          FROM user_passkey_credential
-          WHERE user_id = ${actingUserId}::uuid
-        `;
-        if ((pk[0]?.c ?? 0) > 0) {
+        if ((await getPasskeyCount()) > 0) {
           return apiError("stepup_required", {
             status: 403,
             details: { message: "Confirm with your passkey to continue." },
@@ -189,20 +232,6 @@ export async function POST(request: Request) {
     const noneMax24h = envLimit3818("WITHDRAWAL_NO_KYC_MAX_24H", "100");
     const basicMaxSingle = envLimit3818("WITHDRAWAL_BASIC_MAX_SINGLE", "2000");
     const basicMax24h = envLimit3818("WITHDRAWAL_BASIC_MAX_24H", "5000");
-
-    // Load asset symbol early (outside tx) so we can enforce tier rules.
-    const preAssets = await sql<{ id: string; chain: string; symbol: string }[]>`
-      SELECT id, chain, symbol
-      FROM ex_asset
-      WHERE id = ${input.asset_id} AND is_enabled = true
-      LIMIT 1
-    `;
-    if (preAssets.length === 0) return apiError("not_found", { status: 404 });
-    const preAsset = preAssets[0]!;
-    if (preAsset.chain !== "bsc") {
-      return apiError("invalid_input", { status: 400, details: "unsupported_chain" });
-    }
-    const sym = String(preAsset.symbol ?? "").toUpperCase();
 
     if (kycLevel === "none") {
       if (!noneAllowed.includes(sym)) {
