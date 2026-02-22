@@ -180,6 +180,23 @@ These are the common operational jobs:
 **Avoid overlap**: `scan-deposits` uses a distributed DB lock. If two scans overlap, one returns `429 scan_in_progress`.
 Run the scan job every 2–3 minutes (not every minute) and keep `EXCHANGE_SCAN_LOCK_TTL_MS` short.
 
+### Recommended (P2P ops)
+
+Expire stale P2P orders and send “expiring soon” reminders (every **1 minute**):
+
+- `GET /api/p2p/cron/expire-orders?secret=...&limit=50`
+
+Notes:
+- Uses `P2P_CRON_SECRET` if set; otherwise accepts the shared `EXCHANGE_CRON_SECRET` / `CRON_SECRET`.
+
+### Optional (price alerts)
+
+If you’re using price alerts (`app_price_alert`) and want notifications to trigger automatically:
+
+- Enable with `EXCHANGE_ENABLE_PRICE_ALERTS=1`
+- Run every **1–5 minutes**:
+	- `GET /api/cron/price-alerts?secret=...&max=200`
+
 ### Security note
 
 The `secret=...` value is a bearer credential. Rotate it before any real funds / mainnet usage.

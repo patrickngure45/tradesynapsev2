@@ -10,7 +10,8 @@ function requireCronAuth(req: NextRequest): string | null {
 	// In dev, allow unauthenticated calls for local testing.
 	if (process.env.NODE_ENV !== "production") return null;
 
-	const configured = process.env.P2P_CRON_SECRET ?? process.env.CRON_SECRET;
+	// Prefer a dedicated P2P secret, but allow reusing the existing exchange/cron secret.
+	const configured = process.env.P2P_CRON_SECRET ?? process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET;
 	if (!configured) return "cron_secret_not_configured";
 
 	const provided = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
@@ -191,5 +192,10 @@ export async function POST(req: NextRequest) {
 		console.error("P2P expire-orders cron failed:", err);
 		return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
 	}
+}
+
+// Allow simple cron providers that only support GET.
+export async function GET(req: NextRequest) {
+	return POST(req);
 }
 
