@@ -210,3 +210,23 @@ export function securityAlertEmail(action: string, ip: string, timestamp: string
   });
   return { subject, text, html };
 }
+
+// ── Password Reset ─────────────────────────────────────────────
+export function passwordResetEmail(resetUrl: string): { subject: string; text: string; html: string } {
+  const subject = `Reset your password — ${BRAND}`;
+  const text = `A password reset was requested for your ${BRAND} account.\n\nReset your password using this link (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, you can ignore this email.`;
+  const html = wrap({
+    preheader: `Reset your password (link expires in 1 hour).`,
+    bodyHtml: `
+      <h2 style="margin:0 0 12px;font-size:18px;line-height:1.3;color:#111827;">Reset your password</h2>
+      <p style="margin:0 0 12px;">A password reset was requested for your account.</p>
+      ${button({ url: resetUrl, label: "Reset password" })}
+      <p style="margin:0 0 8px;color:#6b7280;font-size:12px;">This link expires in 1 hour.</p>
+      <p style="margin:14px 0 6px;color:#111827;font-weight:600;">If the button doesn’t work, copy and paste this link:</p>
+      <p style="margin:0 0 10px;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12px;color:#374151;">${escapeHtml(resetUrl)}</p>
+      <p style="margin:0;color:#6b7280;font-size:12px;">If you didn’t request this, you can ignore this email.</p>
+    `,
+  });
+  return { subject, text, html };
+}
+

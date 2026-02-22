@@ -457,6 +457,17 @@ export function AuthClient({
           </div>
         </label>
 
+        {mode === "login" ? (
+          <div className="-mt-1 text-right">
+            <Link
+              href="/forgot-password"
+              className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        ) : null}
+
         {mode === "login" && needsTotp && (
           <>
             <label className="block">

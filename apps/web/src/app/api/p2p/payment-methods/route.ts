@@ -63,7 +63,26 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-    // Optional: Delete/Disable method
-    // For brevity, skipping unless requested
-    return apiError("not_implemented", { status: 501 });
+  const actingUserId = getActingUserId(req);
+  const authErr = requireActingUserIdInProd(actingUserId);
+  if (authErr) return apiError(authErr);
+  if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+  const url = new URL(req.url);
+  const id = String(url.searchParams.get("id") ?? "").trim();
+  if (!id) return apiError("invalid_input", { status: 400, details: "Missing id" });
+
+  const sql = getSql();
+  try {
+    const result = await sql`
+      UPDATE p2p_payment_method
+      SET is_enabled = false, updated_at = now()
+      WHERE id = ${id}::uuid AND user_id = ${actingUserId}::uuid
+    `;
+    if (result.count === 0) return apiError("not_found", { status: 404 });
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    return apiError("internal_error", { details: error?.message ?? String(error) });
+  }
 }
+
