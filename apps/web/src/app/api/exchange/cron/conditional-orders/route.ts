@@ -380,3 +380,8 @@ export async function POST(request: Request) {
     throw e;
   }
 }
+
+// Allow simple cron providers that only support GET.
+export async function GET(request: Request) {
+  return POST(request);
+}

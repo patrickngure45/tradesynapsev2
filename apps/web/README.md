@@ -119,7 +119,7 @@ If you’re enabling the pro trading / conditional orders stack in production, d
 
 3) Enable conditional orders + schedule cron
 	- Set `EXCHANGE_ENABLE_CONDITIONAL_ORDERS=1`.
-	- Schedule: `POST /api/exchange/cron/conditional-orders?secret=...&limit=50`.
+	- Schedule: `POST /api/exchange/cron/conditional-orders?secret=...&limit=50` (or `GET` for simple cron providers).
 	- Recommended cadence: every **2–5s** for a fast terminal, or **10–15s** to reduce load.
 
 4) (Optional) Turn on safety limits (start conservative)
@@ -152,11 +152,11 @@ Run this every **1–2 minutes**:
 These are the common operational jobs:
 
 - Outbox worker (every **1 minute**)
-	- `GET /api/exchange/cron/outbox-worker?secret=...&max_ms=20000&batch=50&max_batches=10`
+	- `GET /api/exchange/cron/outbox-worker?secret=...&max_ms=8000&batch=25&max_batches=2`
 
 - Deposit scan (native + allowlisted token logs) (every **2–3 minutes**)
 	- Recommended (BSC):
-		- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=1&tokens=1&symbols=USDT%2CUSDC&max_ms=20000&max_blocks=120&blocks_per_batch=60`
+		- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=1&tokens=1&symbols=USDT%2CUSDC&max_ms=8000&max_blocks=40&blocks_per_batch=20`
 
 	Notes:
 	- In production, token scanning requires an allowlist via `symbols=...` unless `ALLOW_TOKEN_SCAN_ALL=1` is set.
@@ -171,7 +171,7 @@ These are the common operational jobs:
 
 - Conditional orders (Stop‑Limit, OCO, Trailing Stop) trigger (every **2–5 seconds** for a fast UI, or every **10–15 seconds** to reduce load)
 	- Disabled by default in production; enable with `EXCHANGE_ENABLE_CONDITIONAL_ORDERS=1`
-	- `POST /api/exchange/cron/conditional-orders?secret=...&limit=50`
+	- `GET /api/exchange/cron/conditional-orders?secret=...&limit=50` (or `POST`)
 
 	Notes:
 	- The cron handler writes a service heartbeat (`exchange:conditional-orders`) visible in the admin dashboard system status.
