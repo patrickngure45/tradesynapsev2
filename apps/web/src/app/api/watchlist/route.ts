@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 
@@ -25,15 +26,19 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
+    const activeErr = await requireActiveUser(sql, userId);
     if (activeErr) return apiError(activeErr);
 
     const items = await retryOnceOnTransientDbError(async () => {
       return await sql<{ id: string; base_symbol: string; created_at: string }[]>`
         SELECT id::text, base_symbol, created_at
         FROM app_watchlist_item
-        WHERE user_id = ${actingUserId}::uuid
+        WHERE user_id = ${userId}::uuid
         ORDER BY created_at DESC
         LIMIT 200
       `;

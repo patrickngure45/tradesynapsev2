@@ -524,6 +524,12 @@ export function AdminDashboardClient() {
   const [auditFilter, setAuditFilter] = useState("");
   const [auditLoading, setAuditLoading] = useState(false);
 
+  // Account timeline export (Admin)
+  const [timelineUserId, setTimelineUserId] = useState("");
+  const [timelineLimit, setTimelineLimit] = useState<number>(500);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+
   // Explain tools (orders)
   const [explainOrderId, setExplainOrderId] = useState("");
   const [explainOrderLoading, setExplainOrderLoading] = useState(false);
@@ -796,6 +802,28 @@ export function AdminDashboardClient() {
     a.remove();
     URL.revokeObjectURL(url);
   };
+
+  const exportAccountTimeline = useCallback(async () => {
+    const userId = timelineUserId.trim();
+    if (!userId) {
+      setTimelineError("missing_user_id");
+      return;
+    }
+
+    const limit = Math.max(1, Math.min(5000, Number(timelineLimit || 0) || 500));
+
+    setTimelineLoading(true);
+    setTimelineError(null);
+    try {
+      const params = new URLSearchParams({ user_id: userId, limit: String(limit) });
+      const data = await adminFetch(`/api/admin/account-timeline?${params.toString()}`, { cache: "no-store" });
+      downloadJson(`account-timeline-${userId}.json`, data);
+    } catch (e: any) {
+      setTimelineError(e?.message ?? "export_failed");
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [timelineUserId, timelineLimit]);
 
   const handleExportDeadLetter = async (dl: DeadLetter) => {
     try {
@@ -1975,6 +2003,53 @@ export function AdminDashboardClient() {
       {/* ========== Audit Log ========== */}
       {tab === "audit-log" ? (
         <div className="grid gap-4">
+          <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Account Timeline Export</div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="block md:col-span-2">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">User ID (uuid)</div>
+                <input
+                  type="text"
+                  placeholder="e.g. 6d8c..."
+                  className="mt-1 w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs font-mono outline-none transition focus:border-[var(--accent)]"
+                  value={timelineUserId}
+                  onChange={(e) => setTimelineUserId(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void exportAccountTimeline();
+                  }}
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Limit</div>
+                <input
+                  type="number"
+                  min={1}
+                  max={5000}
+                  className="mt-1 w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                  value={timelineLimit}
+                  onChange={(e) => setTimelineLimit(Number(e.target.value || 0))}
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-[var(--accent-foreground)] hover:opacity-90 disabled:opacity-60"
+                disabled={timelineLoading || !timelineUserId.trim()}
+                onClick={() => void exportAccountTimeline()}
+              >
+                {timelineLoading ? "Exporting…" : "Download JSON"}
+              </button>
+              <span className="text-[11px] text-[var(--muted)]">Includes deposits, withdrawals, orders, and ledger entries.</span>
+            </div>
+
+            {timelineError ? (
+              <div className="text-xs text-[var(--muted)]">Unable to export: {timelineError}</div>
+            ) : null}
+          </div>
+
           <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
             <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Explain by ID</div>
 

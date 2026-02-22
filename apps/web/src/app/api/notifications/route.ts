@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { listNotifications, countUnread, markRead, markAllRead } from "@/lib/notifications";
@@ -22,8 +23,12 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
+    const activeErr = await requireActiveUser(sql, userId);
     if (activeErr) return apiError(activeErr);
 
     const url = new URL(request.url);
@@ -32,8 +37,8 @@ export async function GET(request: Request) {
 
     const [notifications, unreadCount] = await retryOnceOnTransientDbError(async () => {
       return await Promise.all([
-        listNotifications(sql, { userId: actingUserId, limit, unreadOnly }),
-        countUnread(sql, actingUserId),
+        listNotifications(sql, { userId, limit, unreadOnly }),
+        countUnread(sql, userId),
       ]);
     });
 

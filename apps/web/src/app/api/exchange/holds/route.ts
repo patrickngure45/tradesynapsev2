@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { amount3818PositiveSchema } from "@/lib/exchange/amount";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
@@ -20,8 +21,12 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, userId));
     if (activeErr) return apiError(activeErr);
 
     const url = new URL(request.url);
@@ -62,7 +67,7 @@ export async function GET(request: Request) {
         FROM ex_hold h
         JOIN ex_ledger_account acct ON acct.id = h.account_id
         JOIN ex_asset a ON a.id = h.asset_id
-        WHERE acct.user_id = ${actingUserId}
+        WHERE acct.user_id = ${userId}
           AND (
             ${status} = 'all'
             OR h.status = ${status}
@@ -72,7 +77,7 @@ export async function GET(request: Request) {
       `;
     });
 
-    return Response.json({ user_id: actingUserId, holds: rows });
+    return Response.json({ user_id: userId, holds: rows });
   } catch (e) {
     const resp = responseForDbError("exchange.holds.list", e);
     if (resp) return resp;

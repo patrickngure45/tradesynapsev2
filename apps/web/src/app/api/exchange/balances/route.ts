@@ -4,6 +4,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError } from "@/lib/api/errors";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { logRouteResponse } from "@/lib/routeLog";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +18,12 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, userId));
     if (activeErr) return apiError(activeErr);
 
     const rows = await retryOnceOnTransientDbError(async () => {
@@ -36,7 +41,7 @@ export async function GET(request: Request) {
         WITH accounts AS (
           SELECT id, asset_id
           FROM ex_ledger_account
-          WHERE user_id = ${actingUserId}
+          WHERE user_id = ${userId}
         )
         SELECT
           asset.id AS asset_id,
@@ -63,8 +68,12 @@ export async function GET(request: Request) {
       `;
     });
 
-    const response = Response.json({ user_id: actingUserId, balances: rows });
-    logRouteResponse(request, response, { startMs, userId: actingUserId });
+    const response = Response.json({ user_id: userId, balances: rows });
+    logRouteResponse(request, response, {
+      startMs,
+      userId: actingUserId,
+      meta: scopeRes.scope.impersonating ? { impersonate_user_id: userId } : undefined,
+    });
     return response;
   } catch (e) {
     const resp = responseForDbError("exchange.balances.list", e);

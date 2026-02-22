@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,10 @@ export async function GET(req: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, req, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   const url = new URL(req.url);
   let q: z.infer<typeof querySchema>;
   try {
@@ -45,7 +50,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, userId));
     if (activeErr) return apiError(activeErr);
 
     const orders = await retryOnceOnTransientDbError(async () => {
@@ -79,7 +84,7 @@ export async function GET(req: Request) {
         ) AS fills
       FROM ex_order o
       JOIN ex_market m ON m.id = o.market_id
-      WHERE o.user_id = ${actingUserId}::uuid
+      WHERE o.user_id = ${userId}::uuid
         AND (${q.status} = 'all' OR o.status = ${q.status})
         AND (${q.market_id ?? null}::uuid IS NULL OR o.market_id = ${q.market_id ?? null}::uuid)
       ORDER BY o.created_at DESC

@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   const url = new URL(request.url);
   let q: z.infer<typeof querySchema>;
   try {
@@ -36,7 +41,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, userId));
     if (activeErr) return apiError(activeErr);
 
     const lookback = `${q.lookback_days} days`;
@@ -52,21 +57,21 @@ export async function GET(request: Request) {
           (
             SELECT count(*)::int
             FROM ex_order
-            WHERE user_id = ${actingUserId}::uuid
+            WHERE user_id = ${userId}::uuid
               AND status IN ('open','partially_filled')
               AND created_at >= now() - ${lookback}::interval
           ) AS open_orders,
           (
             SELECT count(*)::int
             FROM ex_withdrawal_request
-            WHERE user_id = ${actingUserId}::uuid
+            WHERE user_id = ${userId}::uuid
               AND status IN ('requested','approved','broadcasted')
               AND created_at >= now() - ${lookback}::interval
           ) AS pending_withdrawals,
           (
             SELECT count(*)::int
             FROM p2p_order
-            WHERE (buyer_id = ${actingUserId}::uuid OR seller_id = ${actingUserId}::uuid)
+            WHERE (buyer_id = ${userId}::uuid OR seller_id = ${userId}::uuid)
               AND status IN ('created','paid_confirmed','disputed')
               AND created_at >= now() - ${lookback}::interval
           ) AS active_p2p_orders

@@ -51,16 +51,112 @@ export function extractClientIp(request: Request): string | null {
 
 const isProd = process.env.NODE_ENV === "production";
 
+function looksSecretKey(key: string): boolean {
+  const k = key.toLowerCase();
+  return (
+    k.includes("password") ||
+    k.includes("secret") ||
+    k.includes("token") ||
+    k.includes("apikey") ||
+    k.includes("api_key") ||
+    k.includes("private") ||
+    k.includes("seed") ||
+    k.includes("jwt") ||
+    k.includes("authorization") ||
+    k.includes("cookie")
+  );
+}
+
+function envSecrets(): string[] {
+  const names = [
+    "SECRET_KEY",
+    "PROOFPACK_SESSION_SECRET",
+    "PROOFPACK_SESSION_BOOTSTRAP_KEY",
+    "PROOFPACK_REVIEWER_KEY",
+    "EXCHANGE_ADMIN_KEY",
+    "EXCHANGE_CRON_SECRET",
+    "CRON_SECRET",
+    "RESET_SECRET",
+    "ADMIN_RESET_SECRET",
+    "INTERNAL_SERVICE_SECRET",
+    "DEPLOYER_PRIVATE_KEY",
+    "CITADEL_MASTER_SEED",
+    "GROQ_API_KEY",
+    "GOOGLE_API_KEY",
+    "PINATA_JWT",
+    "BINANCE_API_KEY",
+    "BINANCE_API_SECRET",
+  ];
+
+  const out: string[] = [];
+  for (const n of names) {
+    const v = String(process.env[n] ?? "").trim();
+    if (v && v.length >= 8) out.push(v);
+  }
+  return out;
+}
+
+const SECRET_VALUES = envSecrets();
+
+function redactString(s: string): string {
+  let out = s;
+  for (const secret of SECRET_VALUES) {
+    if (!secret) continue;
+    if (out.includes(secret)) out = out.split(secret).join("[REDACTED]");
+  }
+  return out;
+}
+
+function redactUnknown(v: unknown, depth: number): unknown {
+  if (depth > 6) return "[TRUNCATED]";
+
+  if (v == null) return v;
+  if (typeof v === "string") return redactString(v);
+  if (typeof v === "number" || typeof v === "boolean") return v;
+
+  if (Array.isArray(v)) return v.slice(0, 50).map((x) => redactUnknown(x, depth + 1));
+
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    let count = 0;
+    for (const [k, val] of Object.entries(obj)) {
+      count += 1;
+      if (count > 80) {
+        out.__more__ = "[TRUNCATED]";
+        break;
+      }
+      if (looksSecretKey(k)) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = redactUnknown(val, depth + 1);
+      }
+    }
+    return out;
+  }
+
+  return String(v);
+}
+
+function redactEntry(entry: RequestLogEntry): RequestLogEntry {
+  return {
+    ...entry,
+    userAgent: entry.userAgent ? redactString(entry.userAgent) : entry.userAgent,
+    meta: entry.meta ? (redactUnknown(entry.meta, 0) as Record<string, unknown>) : entry.meta,
+  };
+}
+
 export function logRequest(entry: RequestLogEntry): void {
+  const safe = redactEntry(entry);
   if (isProd) {
     // Machine-readable JSON line for log aggregators.
-    process.stdout.write(JSON.stringify(entry) + "\n");
+    process.stdout.write(JSON.stringify(safe) + "\n");
   } else {
     // Compact human-readable format for dev.
-    const uid = entry.userId ? ` u=${entry.userId.slice(0, 8)}` : "";
-    const meta = entry.meta ? ` ${JSON.stringify(entry.meta)}` : "";
+    const uid = safe.userId ? ` u=${safe.userId.slice(0, 8)}` : "";
+    const meta = safe.meta ? ` ${JSON.stringify(safe.meta)}` : "";
     console.log(
-      `[${entry.requestId.slice(0, 8)}] ${entry.method} ${entry.path} → ${entry.status} (${entry.durationMs}ms)${uid}${meta}`
+      `[${safe.requestId.slice(0, 8)}] ${safe.method} ${safe.path} → ${safe.status} (${safe.durationMs}ms)${uid}${meta}`
     );
   }
 }

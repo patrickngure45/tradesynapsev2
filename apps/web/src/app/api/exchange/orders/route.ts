@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { logRouteResponse } from "@/lib/routeLog";
@@ -107,8 +108,12 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   try {
-    const activeErr = await requireActiveUser(sql, actingUserId);
+    const activeErr = await requireActiveUser(sql, userId);
     if (activeErr) return apiError(activeErr);
 
     const url = new URL(request.url);
@@ -133,15 +138,19 @@ export async function GET(request: Request) {
           created_at,
           updated_at
         FROM ex_order
-        WHERE user_id = ${actingUserId}
+        WHERE user_id = ${userId}
           AND (${marketId ?? null}::uuid IS NULL OR market_id = ${marketId ?? null}::uuid)
         ORDER BY created_at DESC
         LIMIT 100
       `;
     });
 
-    const response = Response.json({ user_id: actingUserId, orders: rows });
-    logRouteResponse(request, response, { startMs, userId: actingUserId });
+    const response = Response.json({ user_id: userId, orders: rows });
+    logRouteResponse(request, response, {
+      startMs,
+      userId: actingUserId,
+      meta: scopeRes.scope.impersonating ? { impersonate_user_id: userId } : undefined,
+    });
     return response;
   } catch (e) {
     const resp = responseForDbError("exchange.orders.list", e);
@@ -1305,6 +1314,43 @@ export async function POST(request: Request) {
           // ignore
         }
       }
+
+      // Best-effort: surface meaningful placement rejections as notifications.
+      // Avoid notifying on auth/validation errors to prevent spam.
+      try {
+        const rejectable = new Set([
+          "insufficient_balance",
+          "insufficient_liquidity",
+          "post_only_would_take",
+          "fok_insufficient_liquidity",
+          "open_orders_limit",
+          "order_notional_too_large",
+          "exchange_price_out_of_band",
+          "market_halted",
+          "stp_cancel_newest",
+          "stp_cancel_both",
+        ]);
+        if (rejectable.has(err.error)) {
+          const marketId = (body as any)?.market_id ?? null;
+          const side = (body as any)?.side ?? null;
+          const type = (body as any)?.type ?? null;
+          await createNotification(sql as any, {
+            userId: actingUserId,
+            type: "order_rejected",
+            title: "Order Rejected",
+            body: `Your order was rejected (${err.error}).`,
+            metadata: {
+              reason: err.error,
+              market_id: marketId,
+              side,
+              type,
+            },
+          });
+        }
+      } catch {
+        // ignore
+      }
+
       return apiError(err.error, { status: result.status, details: err.details });
     }
 

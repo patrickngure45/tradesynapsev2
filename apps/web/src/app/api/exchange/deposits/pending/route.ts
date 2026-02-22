@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
+import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { apiError } from "@/lib/api/errors";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { getBscProvider } from "@/lib/blockchain/wallet";
@@ -26,11 +27,15 @@ export async function GET(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
+  if (!scopeRes.ok) return apiError(scopeRes.error);
+  const userId = scopeRes.scope.userId;
+
   const confirmationsRequired = clamp(envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
   const limit = clamp(envInt("PENDING_DEPOSITS_LIMIT", 20), 1, 200);
 
   try {
-    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
+    const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, userId));
     if (activeErr) return apiError(activeErr);
 
     const rows = await retryOnceOnTransientDbError(async () => {
@@ -61,7 +66,7 @@ export async function GET(request: Request) {
           a.decimals AS asset_decimals
         FROM ex_chain_deposit_event e
         JOIN ex_asset a ON a.id = e.asset_id
-        WHERE e.user_id = ${actingUserId}::uuid
+        WHERE e.user_id = ${userId}::uuid
           AND e.chain = 'bsc'
           AND e.journal_entry_id IS NULL
         ORDER BY e.block_number DESC, e.id DESC
@@ -102,7 +107,7 @@ export async function GET(request: Request) {
     });
 
     return Response.json({
-      user_id: actingUserId,
+      user_id: userId,
       chain: "bsc",
       tip,
       tip_error,
