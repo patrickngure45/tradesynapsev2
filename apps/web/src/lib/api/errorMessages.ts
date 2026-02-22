@@ -459,6 +459,14 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Duplicate request key",
     message: "This idempotency key was already used for a different order payload. Use a new key and try again.",
   },
+  open_orders_limit: {
+    title: "Too many open orders",
+    message: "You have too many open orders. Cancel an existing order and try again.",
+  },
+  order_notional_too_large: {
+    title: "Order too large",
+    message: "This order exceeds the current maximum order size limit.",
+  },
   market_not_found: {
     title: "Market not found",
     message: "That market was not found.",

@@ -96,6 +96,12 @@ type AdminSystemStatus = {
   };
   stale_expected_services?: string[];
   internal_chain?: { last_tx_at: string | null };
+  heartbeats?: Array<{
+    service: string;
+    status: string;
+    details_json: unknown;
+    last_seen_at: string;
+  }>;
 };
 
 // --- Helpers ---
@@ -817,29 +823,66 @@ export function AdminDashboardClient() {
         </div>
 
         {sysStatus ? (
-          <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-4">
-            <div>
-              DB: {sysStatus.db?.ok ? "ok" : "down"}
-              {typeof sysStatus.db?.latency_ms === "number" ? ` (${sysStatus.db.latency_ms}ms)` : ""}
+          <>
+            <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-4">
+              <div>
+                DB: {sysStatus.db?.ok ? "ok" : "down"}
+                {typeof sysStatus.db?.latency_ms === "number" ? ` (${sysStatus.db.latency_ms}ms)` : ""}
+              </div>
+              <div>
+                Outbox: open {sysStatus.outbox?.open ?? 0}, dead {sysStatus.outbox?.dead ?? 0}, errors {sysStatus.outbox?.with_errors ?? 0}
+              </div>
+              <div>
+                Email: {sysStatus.email?.configured ? "configured" : "demo"}
+                {sysStatus.email?.from ? ` (${sysStatus.email.from})` : ""}
+                {sysStatus.email && !sysStatus.email.configured ? (
+                  <span>
+                    {" "}
+                    — smtp:{sysStatus.email.smtp_host_configured ? "host" : "_"}{sysStatus.email.smtp_user_configured ? "+user" : ""}{sysStatus.email.smtp_pass_configured ? "+pass" : ""}
+                  </span>
+                ) : null}
+                {sysStatus.email?.resend_api_configured ? <span> — resend:api</span> : null}
+              </div>
+              <div>
+                Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
+              </div>
             </div>
-            <div>
-              Outbox: open {sysStatus.outbox?.open ?? 0}, dead {sysStatus.outbox?.dead ?? 0}, errors {sysStatus.outbox?.with_errors ?? 0}
-            </div>
-            <div>
-              Email: {sysStatus.email?.configured ? "configured" : "demo"}
-              {sysStatus.email?.from ? ` (${sysStatus.email.from})` : ""}
-              {sysStatus.email && !sysStatus.email.configured ? (
-                <span>
-                  {" "}
-                  — smtp:{sysStatus.email.smtp_host_configured ? "host" : "_"}{sysStatus.email.smtp_user_configured ? "+user" : ""}{sysStatus.email.smtp_pass_configured ? "+pass" : ""}
-                </span>
-              ) : null}
-              {sysStatus.email?.resend_api_configured ? <span> — resend:api</span> : null}
-            </div>
-            <div>
-              Stale: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
-            </div>
-          </div>
+
+            {Array.isArray(sysStatus.heartbeats) && sysStatus.heartbeats.length > 0 ? (
+              <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Heartbeats</div>
+                  <div className="text-[10px] text-[var(--muted)]">{sysStatus.heartbeats.length}</div>
+                </div>
+                <div className="border-t border-[var(--border)]">
+                  <table className="w-full text-[11px]">
+                    <tbody>
+                      {sysStatus.heartbeats
+                        .slice()
+                        .sort((a, b) => String(a.service).localeCompare(String(b.service)))
+                        .slice(0, 12)
+                        .map((hb) => {
+                          const svc = String(hb.service);
+                          const isCond = svc === "exchange:conditional-orders";
+                          const status = String(hb.status ?? "ok");
+                          const variant = status === "ok" ? "green" : status === "degraded" ? "amber" : "red";
+                          const last = hb.last_seen_at ? new Date(String(hb.last_seen_at)).toLocaleString() : "—";
+                          return (
+                            <tr key={svc} className={(isCond ? "bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] " : "") + "border-b border-[var(--border)] last:border-b-0"}>
+                              <td className="px-3 py-2 font-semibold text-[var(--foreground)]">{svc}</td>
+                              <td className="px-3 py-2 text-right">
+                                <Badge text={status} variant={variant as any} />
+                              </td>
+                              <td className="px-3 py-2 text-right text-[10px] text-[var(--muted)]">{last}</td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="text-[10px] text-[var(--muted)]">{sysStatusError ? `Status error: ${sysStatusError}` : "Checking..."}</div>
         )}

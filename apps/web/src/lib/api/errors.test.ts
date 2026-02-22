@@ -53,6 +53,8 @@ describe("statusForApiError", () => {
     "post_only_would_take",
     "fok_insufficient_liquidity",
     "idempotency_key_conflict",
+    "open_orders_limit",
+    "order_notional_too_large",
   ])("maps %s → 409", (code) => {
     expect(statusForApiError(code)).toBe(409);
   });

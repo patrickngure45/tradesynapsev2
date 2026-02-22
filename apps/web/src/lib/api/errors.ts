@@ -73,6 +73,8 @@ export function statusForApiError(code: string): number {
     case "post_only_would_take":
     case "fok_insufficient_liquidity":
     case "idempotency_key_conflict":
+    case "open_orders_limit":
+    case "order_notional_too_large":
     case "passkey_not_configured":
       return 409;
 

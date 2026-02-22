@@ -73,6 +73,22 @@ function hashIdempotencyPayload(payload: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+function parseEnvInt(name: string): number | null {
+  const raw = String(process.env[name] ?? "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const v = Math.trunc(n);
+  return v > 0 ? v : null;
+}
+
+function parseEnvNumber(name: string): number | null {
+  const raw = String(process.env[name] ?? "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export async function GET(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
@@ -286,6 +302,79 @@ export async function POST(request: Request) {
       if (markets.length === 0) return { status: 404 as const, body: { error: "market_not_found" } };
       const market = markets[0]!;
       if (market.status !== "enabled") return { status: 409 as const, body: { error: "market_disabled" } };
+
+      // --- Basic risk limits (env-gated) ---
+      // Keep these simple and tunable for ops.
+      const maxOpenOrders = parseEnvInt("EXCHANGE_MAX_OPEN_ORDERS_PER_USER");
+      if (maxOpenOrders) {
+        const rows = await txSql<{ n: number }[]>`
+          SELECT count(*)::int AS n
+          FROM ex_order
+          WHERE user_id = ${actingUserId}::uuid
+            AND status IN ('open','partially_filled')
+        `;
+        const n = rows[0]?.n ?? 0;
+        if (n >= maxOpenOrders) {
+          return { status: 409 as const, body: { error: "open_orders_limit" } };
+        }
+      }
+
+      const maxNotional = parseEnvNumber("EXCHANGE_MAX_ORDER_NOTIONAL");
+      if (maxNotional) {
+        // Use limit price when available; for market orders, approximate from last exec or best book.
+        let px: number | null = null;
+        if (input.type === "limit") {
+          const p = Number(input.price);
+          px = Number.isFinite(p) && p > 0 ? p : null;
+        } else {
+          const rows = await txSql<{ last_exec_price: string | null; bid: string | null; ask: string | null }[]>`
+            SELECT
+              (
+                SELECT e.price::text
+                FROM ex_execution e
+                WHERE e.market_id = ${market.id}::uuid
+                ORDER BY e.created_at DESC
+                LIMIT 1
+              ) AS last_exec_price,
+              (
+                SELECT o.price::text
+                FROM ex_order o
+                WHERE o.market_id = ${market.id}::uuid
+                  AND o.side = 'buy'
+                  AND o.status IN ('open','partially_filled')
+                ORDER BY o.price DESC, o.created_at ASC
+                LIMIT 1
+              ) AS bid,
+              (
+                SELECT o.price::text
+                FROM ex_order o
+                WHERE o.market_id = ${market.id}::uuid
+                  AND o.side = 'sell'
+                  AND o.status IN ('open','partially_filled')
+                ORDER BY o.price ASC, o.created_at ASC
+                LIMIT 1
+              ) AS ask
+          `;
+          const r = rows[0];
+          const ask = r?.ask != null ? Number(r.ask) : NaN;
+          const bid = r?.bid != null ? Number(r.bid) : NaN;
+          const last = r?.last_exec_price != null ? Number(r.last_exec_price) : NaN;
+
+          if (input.side === "buy") {
+            px = Number.isFinite(ask) && ask > 0 ? ask : Number.isFinite(last) && last > 0 ? last : Number.isFinite(bid) && bid > 0 ? bid : null;
+          } else {
+            px = Number.isFinite(bid) && bid > 0 ? bid : Number.isFinite(last) && last > 0 ? last : Number.isFinite(ask) && ask > 0 ? ask : null;
+          }
+        }
+
+        const qty = Number(input.quantity);
+        if (px && Number.isFinite(qty) && qty > 0) {
+          const notional = px * qty;
+          if (Number.isFinite(notional) && notional > maxNotional) {
+            return { status: 409 as const, body: { error: "order_notional_too_large", details: { max: maxNotional } } };
+          }
+        }
+      }
 
       const isMarket = input.type === "market";
       const timeInForce = input.type === "limit" ? input.time_in_force : "IOC";
