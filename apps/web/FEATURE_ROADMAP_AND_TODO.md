@@ -317,8 +317,8 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Per-user limits: max order notional, max open orders, and cancel rate limiting.
 - [x] Market-level kill switch (halt new orders; allow cancels).
 - [x] Price-band protection (reject orders too far from reference within a configurable band).
-- [ ] Self-trade prevention (STP modes: cancel newest/oldest/both).
-- [ ] Circuit breakers for extreme volatility (temporary halt + banner).
+- [x] Self-trade prevention (STP modes: cancel newest/oldest/both).
+- [x] Circuit breakers for extreme volatility (temporary halt + banner).
 - [x] “Confirm high-risk action” UX for unusually large trades.
 
 ## C) Market quality + terminal depth
