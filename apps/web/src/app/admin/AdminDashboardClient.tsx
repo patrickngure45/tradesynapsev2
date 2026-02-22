@@ -25,11 +25,13 @@ type ReconciliationReport = {
 type DeadLetter = {
   id: string;
   topic: string;
-  aggregate_type: string;
-  aggregate_id: string;
+  aggregate_type: string | null;
+  aggregate_id: string | null;
   attempts: number;
   last_error: string | null;
   created_at: string;
+  dead_lettered_at?: string | null;
+  payload_json?: unknown;
 };
 
 type KycSubmission = {
@@ -347,6 +349,7 @@ export function AdminDashboardClient() {
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([]);
   const [dlLoading, setDlLoading] = useState(false);
   const [retryLoading, setRetryLoading] = useState<string | null>(null);
+  const [resolveLoading, setResolveLoading] = useState<string | null>(null);
 
   // KYC review state
   const [kycSubmissions, setKycSubmissions] = useState<KycSubmission[]>([]);
@@ -563,13 +566,71 @@ export function AdminDashboardClient() {
       await adminFetch("/api/exchange/admin/outbox/dead-letters", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, action: "retry" }),
       });
       await fetchDeadLetters();
     } catch (e: any) {
       setError(e.message);
     } finally {
       setRetryLoading(null);
+    }
+  };
+
+  const handleResolveDeadLetter = async (id: string) => {
+    if (!confirm("Mark this dead-letter event as resolved (will not retry)?")) return;
+    setResolveLoading(id);
+    setError(null);
+    try {
+      await adminFetch("/api/exchange/admin/outbox/dead-letters", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, action: "resolve" }),
+      });
+      await fetchDeadLetters();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setResolveLoading(null);
+    }
+  };
+
+  const downloadJson = (filename: string, data: unknown) => {
+    const text = JSON.stringify(data, null, 2);
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportDeadLetter = async (dl: DeadLetter) => {
+    try {
+      // If the list payload was pruned in the future, fall back to fetching by id.
+      let payload = dl.payload_json;
+      if (payload === undefined) {
+        const data = await adminFetch<{ dead_letter?: DeadLetter }>(
+          `/api/exchange/admin/outbox/dead-letters?id=${encodeURIComponent(dl.id)}`,
+        );
+        payload = data.dead_letter?.payload_json;
+      }
+
+      downloadJson(`outbox-dead-letter-${dl.id}.json`, {
+        id: dl.id,
+        topic: dl.topic,
+        aggregate_type: dl.aggregate_type,
+        aggregate_id: dl.aggregate_id,
+        attempts: dl.attempts,
+        last_error: dl.last_error,
+        created_at: dl.created_at,
+        dead_lettered_at: dl.dead_lettered_at ?? null,
+        payload_json: payload ?? null,
+      });
+    } catch (e: any) {
+      setError(e?.message ?? "export_failed");
     }
   };
 
@@ -1376,7 +1437,7 @@ export function AdminDashboardClient() {
                       <span className="font-mono text-[11px] text-[var(--muted)]">{dl.id.slice(0, 8)}...</span>
                     </div>
                     <div className="text-[11px] text-[var(--muted)]">
-                      {dl.aggregate_type}:{dl.aggregate_id.slice(0, 8)}... · Attempts: {dl.attempts}
+                      {(dl.aggregate_type ?? "-")}{dl.aggregate_id ? `:${dl.aggregate_id.slice(0, 8)}...` : ""} · Attempts: {dl.attempts}
                     </div>
                     {dl.last_error ? (
                       <div className="mt-1 max-w-md truncate rounded bg-rose-50 px-2 py-1 font-mono text-[10px] text-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
@@ -1388,14 +1449,33 @@ export function AdminDashboardClient() {
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                    disabled={retryLoading === dl.id}
-                    onClick={() => handleRetryDeadLetter(dl.id)}
-                  >
-                    {retryLoading === dl.id ? "..." : "Retry"}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                      onClick={() => handleExportDeadLetter(dl)}
+                    >
+                      Export
+                    </button>
+
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                      disabled={resolveLoading === dl.id}
+                      onClick={() => handleResolveDeadLetter(dl.id)}
+                    >
+                      {resolveLoading === dl.id ? "..." : "Resolve"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                      disabled={retryLoading === dl.id}
+                      onClick={() => handleRetryDeadLetter(dl.id)}
+                    >
+                      {retryLoading === dl.id ? "..." : "Retry"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

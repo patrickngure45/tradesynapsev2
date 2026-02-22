@@ -26,6 +26,7 @@ export type OutboxRow = {
   payload_json: unknown;
   attempts: number;
   last_error: string | null;
+  dead_lettered_at?: string | null;
   visible_at: string;
   locked_at: string | null;
   lock_id: string | null;
@@ -244,10 +245,12 @@ export async function listDeadLetters(
     return sql<OutboxRow[]>`
       SELECT
         id, topic, aggregate_type, aggregate_id, payload_json,
-        attempts, last_error, visible_at, locked_at, lock_id,
+        attempts, last_error, dead_lettered_at, visible_at, locked_at, lock_id,
         created_at, processed_at
       FROM app_outbox_event
-      WHERE dead_lettered_at IS NOT NULL AND topic = ${topic}
+      WHERE dead_lettered_at IS NOT NULL
+        AND processed_at IS NULL
+        AND topic = ${topic}
       ORDER BY dead_lettered_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -256,10 +259,11 @@ export async function listDeadLetters(
   return sql<OutboxRow[]>`
     SELECT
       id, topic, aggregate_type, aggregate_id, payload_json,
-      attempts, last_error, visible_at, locked_at, lock_id,
+      attempts, last_error, dead_lettered_at, visible_at, locked_at, lock_id,
       created_at, processed_at
     FROM app_outbox_event
     WHERE dead_lettered_at IS NOT NULL
+      AND processed_at IS NULL
     ORDER BY dead_lettered_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -274,11 +278,45 @@ export async function countDeadLetters(
   const rows = topic
     ? await sql<{ total: number }[]>`
         SELECT count(*)::int AS total FROM app_outbox_event
-        WHERE dead_lettered_at IS NOT NULL AND topic = ${topic}
+        WHERE dead_lettered_at IS NOT NULL
+          AND processed_at IS NULL
+          AND topic = ${topic}
       `
     : await sql<{ total: number }[]>`
         SELECT count(*)::int AS total FROM app_outbox_event
         WHERE dead_lettered_at IS NOT NULL
+          AND processed_at IS NULL
       `;
   return rows[0]?.total ?? 0;
+}
+
+/** Mark a dead-lettered event as resolved (suppressed) without retrying. */
+export async function resolveDeadLetter(sql: Sql, opts: { id: string }): Promise<boolean> {
+  const rows = await sql<{ id: string }[]>`
+    UPDATE app_outbox_event
+    SET
+      processed_at = now(),
+      locked_at = NULL,
+      lock_id = NULL
+    WHERE id = ${opts.id}::uuid
+      AND dead_lettered_at IS NOT NULL
+      AND processed_at IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+/** Fetch a single dead-lettered event (for export/details). */
+export async function getDeadLetterById(sql: Sql, opts: { id: string }): Promise<OutboxRow | null> {
+  const rows = await sql<OutboxRow[]>`
+    SELECT
+      id, topic, aggregate_type, aggregate_id, payload_json,
+      attempts, last_error, dead_lettered_at, visible_at, locked_at, lock_id,
+      created_at, processed_at
+    FROM app_outbox_event
+    WHERE id = ${opts.id}::uuid
+      AND dead_lettered_at IS NOT NULL
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
 }

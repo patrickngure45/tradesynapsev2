@@ -261,7 +261,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [ ] Participation via points (preferred) or clearly disclosed fee.
 
 ### 5.3 Rare global events calendar
-- [ ] Scheduled “season shifts” with public rules.
+- [x] Scheduled “season shifts” with public rules.
 
 ## 6) AI / knowledge dopamine modules (differentiator)
 ### 6.1 Probabilistic AI responses
@@ -272,7 +272,7 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [ ] Packs reveal analytics templates, education cards, or checklists.
 
 ## 7) Cross-module synergies
-- [ ] “Keys & Gates”: rare keys unlock entry into premium modules.
+- [x] “Keys & Gates”: rare keys unlock entry into premium modules.
 - [ ] Outcome-based unlocks: completing sets unlocks new volatility modes.
 
 ## 8) Safety, compliance, and anti-abuse
@@ -315,23 +315,23 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 
 ## B) Risk limits + market safety
 - [x] Per-user limits: max order notional, max open orders, and cancel rate limiting.
-- [ ] Market-level kill switch (halt new orders; allow cancels).
+- [x] Market-level kill switch (halt new orders; allow cancels).
 - [x] Price-band protection (reject orders too far from reference within a configurable band).
 - [ ] Self-trade prevention (STP modes: cancel newest/oldest/both).
 - [ ] Circuit breakers for extreme volatility (temporary halt + banner).
-- [ ] “Confirm high-risk action” UX for unusually large trades.
+- [x] “Confirm high-risk action” UX for unusually large trades.
 
 ## C) Market quality + terminal depth
-- [ ] Order book depth heatmap + imbalance indicator.
-- [ ] Trades tape with filters (my trades, large trades) and copyable tx/order ids.
-- [ ] Spread/impact estimator for market orders (pre-trade).
+- [x] Order book depth heatmap + imbalance indicator.
+- [x] Trades tape with filters (my trades, large trades) and copyable tx/order ids.
+- [x] Spread/impact estimator for market orders (pre-trade).
 - [x] Saved terminal workspaces (layout presets) and restore on reload.
 - [x] Keyboard shortcuts (submit/cancel, toggle panels).
 
 ## D) Automation + reliability (cron/worker hardening)
 - [ ] Move conditional-order evaluation to a real worker/queue (idempotent jobs + retries).
 - [x] Cron heartbeat endpoint + admin dashboard health widget (last run, last success, lag).
-- [ ] Dead-letter UI actions: re-drive job, mark resolved, export.
+- [x] Dead-letter UI actions: re-drive job, mark resolved, export.
 - [x] Idempotency keys for order placement API (dedupe on retries).
 
 ## E) Wallet + withdrawals (security + UX)
