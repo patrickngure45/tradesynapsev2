@@ -32,6 +32,8 @@ type OrderRow = {
   price: string;
   quantity: string;
   remaining_quantity: string;
+  iceberg_display_quantity?: string | null;
+  iceberg_hidden_remaining?: string;
   status: "open" | "partially_filled" | "filled" | "canceled";
   hold_id: string | null;
   created_at: string;
@@ -124,6 +126,8 @@ export async function GET(request: Request) {
           price::text AS price,
           quantity::text AS quantity,
           remaining_quantity::text AS remaining_quantity,
+          iceberg_display_quantity::text AS iceberg_display_quantity,
+          iceberg_hidden_remaining::text AS iceberg_hidden_remaining,
           status,
           hold_id,
           created_at,
@@ -483,12 +487,12 @@ export async function POST(request: Request) {
       const icebergDisplayQty = input.type === "limit" ? (input as any).iceberg_display_quantity : undefined;
       const icebergDisplayQtySql: string | null = icebergDisplayQty != null ? String(icebergDisplayQty) : null;
       if (icebergDisplayQty != null && input.type !== "limit") {
-        return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_limit_only" } };
+        return { status: 400 as const, body: { error: "iceberg_limit_only" } };
       }
 
       if (icebergDisplayQty != null) {
         if (timeInForce !== "GTC") {
-          return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_gtc_only" } };
+          return { status: 400 as const, body: { error: "iceberg_gtc_only" } };
         }
         if (!isMultipleOfStep3818(String(icebergDisplayQty), market.lot_size)) {
           return {
@@ -500,7 +504,7 @@ export async function POST(request: Request) {
         const disp = toBigInt3818(String(icebergDisplayQty));
         const total = toBigInt3818(String((input as any).quantity));
         if (disp <= 0n || disp >= total) {
-          return { status: 400 as const, body: { error: "invalid_input", details: "iceberg_display_must_be_lt_total" } };
+          return { status: 400 as const, body: { error: "iceberg_display_must_be_lt_total" } };
         }
       }
 

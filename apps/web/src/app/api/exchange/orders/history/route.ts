@@ -59,6 +59,8 @@ export async function GET(req: Request) {
         o.price::text,
         o.quantity::text,
         o.remaining_quantity::text,
+        o.iceberg_display_quantity::text,
+        o.iceberg_hidden_remaining::text,
         o.status,
         o.created_at,
         o.updated_at,

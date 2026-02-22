@@ -43,6 +43,8 @@ type OpenOrderRow = {
   price: string;
   quantity: string;
   remaining_quantity: string;
+  iceberg_display_quantity?: string | null;
+  iceberg_hidden_remaining?: string;
   status: string;
   created_at: string;
 };
@@ -657,7 +659,12 @@ function OpenOrdersPanel({ marketId }: { marketId: string | null }) {
                     {o.side.toUpperCase()}
                   </td>
                   <td className="px-3 py-1 text-[var(--foreground)]">{o.type === "market" ? "MKT" : fmtCompact(o.price, 8)}</td>
-                  <td className="px-3 py-1 text-right text-[var(--muted)]">{fmtCompact(o.remaining_quantity, 8)}</td>
+                  <td className="px-3 py-1 text-right text-[var(--muted)]">
+                    <div>{fmtCompact(o.remaining_quantity, 8)}</div>
+                    {o.iceberg_display_quantity ? (
+                      <div className="text-[10px] text-[var(--muted)]">hid {fmtCompact(String(o.iceberg_hidden_remaining ?? "0"), 8)}</div>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1299,7 +1306,8 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
       setQty("");
     } catch (e: any) {
-      const msg = e?.message ? String(e.message) : "order_failed";
+      const code = e?.code ? String(e.code) : null;
+      const msg = code || (e?.message ? String(e.message) : "order_failed");
       setErr(msg);
     } finally {
       setSubmitting(false);
@@ -1764,6 +1772,14 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
               ? `No available ${String(market.base_symbol ?? "base").toUpperCase()} balance.`
               : err === "no_quote_balance"
                 ? `No available ${String(market.quote_symbol ?? "quote").toUpperCase()} balance.`
+                : err === "iceberg_gtc_only"
+                  ? "Iceberg orders are GTC-only."
+                  : err === "iceberg_display_must_be_lt_total"
+                    ? "Iceberg display quantity must be less than total quantity."
+                    : err === "iceberg_display_not_multiple_of_lot"
+                      ? "Iceberg display quantity must be a multiple of lot size."
+                      : err === "iceberg_limit_only"
+                        ? "Iceberg is supported for limit orders only."
                 : err}
         </div>
       ) : null}

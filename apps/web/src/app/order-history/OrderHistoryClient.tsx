@@ -22,6 +22,8 @@ type Order = {
   price: string;
   quantity: string;
   remaining_quantity: string;
+  iceberg_display_quantity?: string | null;
+  iceberg_hidden_remaining?: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -110,11 +112,12 @@ export function OrderHistoryClient() {
         <div className="space-y-2">
           {orders.map((order) => {
             const isExpanded = expanded.has(order.id);
-            const filledQty =
-              parseFloat(order.quantity) - parseFloat(order.remaining_quantity);
+            const hiddenRem = order.iceberg_display_quantity ? parseFloat(String(order.iceberg_hidden_remaining ?? "0")) : 0;
+            const remainingTotal = parseFloat(order.remaining_quantity) + (Number.isFinite(hiddenRem) ? hiddenRem : 0);
+            const filledQty = parseFloat(order.quantity) - remainingTotal;
             const fillPct =
               parseFloat(order.quantity) > 0
-                ? ((filledQty / parseFloat(order.quantity)) * 100).toFixed(1)
+                ? (((Math.max(0, filledQty) / parseFloat(order.quantity)) * 100)).toFixed(1)
                 : "0";
 
             return (
@@ -128,7 +131,12 @@ export function OrderHistoryClient() {
                 >
                   <div className="min-w-[90px]">
                     <div className="font-mono text-sm font-medium">{order.market_symbol}</div>
-                    <div className="text-xs text-[var(--muted)]">{order.type}</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {order.type}
+                      {order.iceberg_display_quantity ? (
+                        <> · iceberg {order.iceberg_display_quantity} · hid {String(order.iceberg_hidden_remaining ?? "0")}</>
+                      ) : null}
+                    </div>
                   </div>
 
                   <span
