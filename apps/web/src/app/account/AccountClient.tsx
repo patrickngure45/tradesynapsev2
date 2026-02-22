@@ -85,6 +85,8 @@ export function AccountClient() {
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [loadMsg, setLoadMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [copiedUserId, setCopiedUserId] = useState(false);
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false);
+  const [logoutAllMsg, setLogoutAllMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   /* Password change */
   const [currentPw, setCurrentPw] = useState("");
@@ -477,6 +479,26 @@ export function AccountClient() {
     localStorage.removeItem("ts_user_id");
     router.push("/login");
     router.refresh();
+  };
+
+  const handleLogoutAllDevices = async () => {
+    setLogoutAllMsg(null);
+    setLogoutAllLoading(true);
+    try {
+      const res = await fetch("/api/account/sessions/logout-all", fetchOpts({ method: "POST" }));
+      const data = (await res.json().catch(() => ({}))) as unknown;
+      if (!res.ok) {
+        setLogoutAllMsg({ text: msgFrom(data, "Failed to log out all devices"), ok: false });
+        return;
+      }
+      localStorage.removeItem("ts_user_id");
+      router.push("/login");
+      router.refresh();
+    } catch {
+      setLogoutAllMsg({ text: "Network error", ok: false });
+    } finally {
+      setLogoutAllLoading(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -1433,6 +1455,22 @@ export function AccountClient() {
           <StatusRow label="Strong auth enabled" ok={securityChecks.strongAuthEnabled} />
           <StatusRow label="KYC verified" ok={securityChecks.kycVerified} />
         </div>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleLogoutAllDevices}
+            disabled={logoutAllLoading}
+            className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs font-medium text-[var(--foreground)] transition hover:bg-[var(--card-2)] disabled:opacity-60"
+          >
+            {logoutAllLoading ? "Logging out…" : "Log out all devices"}
+          </button>
+          <p className="text-[11px] text-[var(--muted)]">Invalidates all sessions (including this one).</p>
+        </div>
+        {logoutAllMsg && (
+          <div className={`mt-3 rounded-lg border px-4 py-2 text-xs ${logoutAllMsg.ok ? "border-emerald-500/30 text-emerald-500" : "border-rose-500/30 text-rose-500"}`}>
+            {logoutAllMsg.text}
+          </div>
+        )}
       </section>
     </div>
   );

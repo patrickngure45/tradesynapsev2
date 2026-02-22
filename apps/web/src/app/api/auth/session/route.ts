@@ -34,11 +34,11 @@ export async function POST(request: Request) {
 
   const sql = getSql();
 
-  let rows: { id: string; status: string }[];
+  let rows: { id: string; status: string; session_version: number }[];
   try {
     rows = await retryOnceOnTransientDbError(async () => {
-      return await sql<{ id: string; status: string }[]>`
-        SELECT id, status
+      return await sql<{ id: string; status: string; session_version: number }[]>`
+        SELECT id, status, coalesce(session_version, 0) AS session_version
         FROM app_user
         WHERE id = ${input.user_id}
         LIMIT 1
@@ -54,7 +54,12 @@ export async function POST(request: Request) {
   if (rows[0]!.status !== "active") return apiError("user_not_active");
 
   const ttl = input.ttl_seconds ?? 60 * 60 * 24 * 7;
-  const token = createSessionToken({ userId: input.user_id, secret, ttlSeconds: ttl });
+  const token = createSessionToken({
+    userId: input.user_id,
+    secret,
+    ttlSeconds: ttl,
+    sessionVersion: Number(rows[0]!.session_version ?? 0) || 0,
+  });
   const secure = process.env.NODE_ENV === "production";
 
   const res = new Response(JSON.stringify({ ok: true, user_id: input.user_id, ttl_seconds: ttl }) + "\n", {

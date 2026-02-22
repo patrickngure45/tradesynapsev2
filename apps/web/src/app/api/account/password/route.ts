@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/api/errors";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
@@ -24,10 +24,9 @@ const schema = z.object({
  */
 export async function POST(request: Request) {
   const sql = getSql();
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("unauthorized", { status: 401 });
+  const authed = await requireSessionUserId(sql as any, request);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   const body = await request.json().catch(() => ({}));
   const parsed = schema.safeParse(body);
@@ -56,8 +55,9 @@ export async function POST(request: Request) {
 
     const newHash = await hashPassword(newPassword);
     await sql`
-      UPDATE app_user SET password_hash = ${newHash}
-      WHERE id = ${actingUserId}
+      UPDATE app_user
+      SET password_hash = ${newHash}, session_version = coalesce(session_version, 0) + 1, updated_at = now()
+      WHERE id = ${actingUserId}::uuid
     `;
 
     // Audit log (best-effort)

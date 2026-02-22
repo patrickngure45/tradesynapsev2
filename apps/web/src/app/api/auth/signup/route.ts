@@ -78,7 +78,7 @@ export async function POST(request: Request) {
   }
 
   const ttl = 60 * 60 * 24 * 7; // 7 days
-  const token = createSessionToken({ userId: user!.id as string, secret, ttlSeconds: ttl });
+  const token = createSessionToken({ userId: user!.id as string, secret, ttlSeconds: ttl, sessionVersion: 0 });
   const secure = process.env.NODE_ENV === "production";
 
   const response = new NextResponse(

@@ -41,7 +41,8 @@ export async function POST(request: Request) {
   const emailLower = input.email.toLowerCase().trim();
 
   const rows = await sql`
-    SELECT id, password_hash, status, display_name, email, totp_enabled, totp_secret, totp_backup_codes
+    SELECT id, password_hash, status, display_name, email, totp_enabled, totp_secret, totp_backup_codes,
+           coalesce(session_version, 0) AS session_version
     FROM app_user
     WHERE email = ${emailLower}
     LIMIT 1
@@ -173,7 +174,12 @@ export async function POST(request: Request) {
   }
 
   const ttl = 60 * 60 * 24 * 7; // 7 days
-  const token = createSessionToken({ userId: user.id as string, secret, ttlSeconds: ttl });
+  const token = createSessionToken({
+    userId: user.id as string,
+    secret,
+    ttlSeconds: ttl,
+    sessionVersion: Number((user as any).session_version ?? 0) || 0,
+  });
   const secure = process.env.NODE_ENV === "production";
 
   // Audit successful login (best-effort, before returning response)

@@ -1,6 +1,6 @@
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/api/errors";
-import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 
@@ -12,10 +12,9 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const sql = getSql();
-  const actingUserId = getActingUserId(request);
-  const authErr = requireActingUserIdInProd(actingUserId);
-  if (authErr) return apiError(authErr);
-  if (!actingUserId) return apiError("unauthorized", { status: 401 });
+  const authed = await requireSessionUserId(sql as any, request);
+  if (!authed.ok) return authed.response;
+  const actingUserId = authed.userId;
 
   try {
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
@@ -50,3 +49,4 @@ export async function GET(request: Request) {
     throw e;
   }
 }
+

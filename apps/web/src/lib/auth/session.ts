@@ -6,6 +6,7 @@ type SessionPayload = {
   uid: string;
   iat: number;
   exp: number;
+  sv?: number;
 };
 
 function base64UrlEncode(buf: Buffer): string {
@@ -55,6 +56,7 @@ export function getSessionTokenFromRequest(request: Request): string | null {
 export function createSessionToken(opts: {
   userId: string;
   secret: string;
+  sessionVersion?: number;
   ttlSeconds?: number;
   now?: number;
 }): string {
@@ -64,6 +66,9 @@ export function createSessionToken(opts: {
     uid: opts.userId,
     iat: nowSec,
     exp: nowSec + ttl,
+    ...(typeof opts.sessionVersion === "number" && Number.isFinite(opts.sessionVersion)
+      ? { sv: Math.max(0, Math.trunc(opts.sessionVersion)) }
+      : {}),
   };
 
   const payloadB64 = base64UrlEncode(Buffer.from(JSON.stringify(payload), "utf8"));
@@ -104,11 +109,18 @@ export function verifySessionToken(opts: {
     return { ok: false, error: "session_token_invalid" };
   }
 
+  if (payload.sv != null) {
+    const sv = Number(payload.sv);
+    if (!Number.isFinite(sv) || sv < 0) return { ok: false, error: "session_token_invalid" };
+    payload.sv = Math.max(0, Math.trunc(sv));
+  }
+
   const nowSec = Math.floor((opts.now ?? Date.now()) / 1000);
   if (payload.exp <= nowSec) return { ok: false, error: "session_token_expired" };
 
   return { ok: true, payload };
 }
+
 
 export function serializeSessionCookie(opts: {
   token: string;
