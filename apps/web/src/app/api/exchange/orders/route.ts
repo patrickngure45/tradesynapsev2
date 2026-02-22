@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { requireActiveUser } from "@/lib/auth/activeUser";
@@ -41,6 +42,13 @@ const sideSchema = z.enum(["buy", "sell"]);
 
 const timeInForceSchema = z.enum(["GTC", "IOC", "FOK"]);
 
+const idempotencyKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9:_\-\.]+$/);
+
 const placeOrderSchema = z.discriminatedUnion("type", [
   z.object({
     market_id: z.string().uuid(),
@@ -50,14 +58,20 @@ const placeOrderSchema = z.discriminatedUnion("type", [
     quantity: amount3818PositiveSchema,
     time_in_force: timeInForceSchema.optional().default("GTC"),
     post_only: z.boolean().optional().default(false),
+    idempotency_key: idempotencyKeySchema.optional(),
   }),
   z.object({
     market_id: z.string().uuid(),
     side: sideSchema,
     type: z.literal("market"),
     quantity: amount3818PositiveSchema,
+    idempotency_key: idempotencyKeySchema.optional(),
   }),
 ]);
+
+function hashIdempotencyPayload(payload: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
 
 export async function GET(request: Request) {
   const startMs = Date.now();
@@ -130,8 +144,65 @@ export async function POST(request: Request) {
       return apiZodError(e) ?? apiError("invalid_input");
     }
 
+    const idemScope = "exchange.orders.place";
+    const headerKey = request.headers.get("x-idempotency-key")?.trim() || null;
+    const idemKey = headerKey ?? (input as any).idempotency_key ?? null;
+    const idemPayload =
+      input.type === "limit"
+        ? {
+            market_id: input.market_id,
+            side: input.side,
+            type: input.type,
+            price: input.price,
+            quantity: input.quantity,
+            time_in_force: input.time_in_force,
+            post_only: input.post_only,
+          }
+        : {
+            market_id: input.market_id,
+            side: input.side,
+            type: input.type,
+            quantity: input.quantity,
+          };
+    const idemHash = idemKey ? hashIdempotencyPayload(idemPayload) : null;
+
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
+
+      // Idempotency (optional): if x-idempotency-key is provided, ensure safe retries.
+      if (idemKey && idemHash) {
+        const rows = await txSql<
+          {
+            request_hash: string;
+            response_json: unknown;
+            status_code: number | null;
+          }[]
+        >`
+          SELECT request_hash, response_json, status_code
+          FROM app_idempotency_key
+          WHERE user_id = ${actingUserId}::uuid
+            AND scope = ${idemScope}
+            AND idem_key = ${idemKey}
+          LIMIT 1
+          FOR UPDATE
+        `;
+
+        const existing = rows[0] ?? null;
+        if (existing) {
+          if (existing.request_hash !== idemHash) {
+            return { status: 409 as const, body: { error: "idempotency_key_conflict" } };
+          }
+
+          if (existing.status_code != null && existing.response_json != null) {
+            return { status: existing.status_code as any, body: existing.response_json as any };
+          }
+        } else {
+          await txSql`
+            INSERT INTO app_idempotency_key (user_id, scope, idem_key, request_hash)
+            VALUES (${actingUserId}::uuid, ${idemScope}, ${idemKey}, ${idemHash})
+          `;
+        }
+      }
 
       const gasErr = await chargeGasFee(txSql, {
         userId: actingUserId,
@@ -822,11 +893,39 @@ export async function POST(request: Request) {
         },
       });
 
+      // Persist idempotency result (success only) so retries can safely replay.
+      if (idemKey) {
+        await txSql`
+          UPDATE app_idempotency_key
+          SET response_json = ${(txSql as any).json({ order: taker, executions })}::jsonb,
+              status_code = 201,
+              updated_at = now()
+          WHERE user_id = ${actingUserId}::uuid
+            AND scope = ${idemScope}
+            AND idem_key = ${idemKey}
+            AND request_hash = ${idemHash}
+        `;
+      }
+
       return { status: 201 as const, body: { order: taker, executions } };
     });
 
     const err = result.body as { error?: string; details?: unknown };
     if (typeof err.error === "string") {
+      // If we reserved an idempotency key but did not store a success response, release it.
+      if (idemKey) {
+        try {
+          await sql`
+            DELETE FROM app_idempotency_key
+            WHERE user_id = ${actingUserId}::uuid
+              AND scope = ${idemScope}
+              AND idem_key = ${idemKey}
+              AND status_code IS NULL
+          `;
+        } catch {
+          // ignore
+        }
+      }
       return apiError(err.error, { status: result.status, details: err.details });
     }
 

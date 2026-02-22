@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { POST as placeOrder } from "@/app/api/exchange/orders/route";
 import { fromBigInt3818, toBigInt3818 } from "@/lib/exchange/fixed3818";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -311,6 +312,7 @@ export async function POST(request: Request) {
         headers: {
           "content-type": "application/json",
           "x-user-id": c.user_id,
+          "x-idempotency-key": `cond:${c.id}:${triggerLeg}`,
         },
         body: JSON.stringify({
           market_id: c.market_id,
@@ -359,6 +361,16 @@ export async function POST(request: Request) {
           `;
         });
       }
+    }
+
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "exchange:conditional-orders",
+        status: failed > 0 ? "degraded" : "ok",
+        details: { scanned: candidates.length, triggered, attempted, placed, failed },
+      });
+    } catch {
+      // ignore
     }
 
     return Response.json({ ok: true, scanned: candidates.length, triggered, attempted, placed, failed });

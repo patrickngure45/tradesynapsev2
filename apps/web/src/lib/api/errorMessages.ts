@@ -455,6 +455,10 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Fill-or-kill failed",
     message: "There is not enough liquidity to fill the entire order immediately.",
   },
+  idempotency_key_conflict: {
+    title: "Duplicate request key",
+    message: "This idempotency key was already used for a different order payload. Use a new key and try again.",
+  },
   market_not_found: {
     title: "Market not found",
     message: "That market was not found.",

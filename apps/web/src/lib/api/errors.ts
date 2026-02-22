@@ -72,6 +72,7 @@ export function statusForApiError(code: string): number {
     case "p2p_open_orders_limit":
     case "post_only_would_take":
     case "fok_insufficient_liquidity":
+    case "idempotency_key_conflict":
     case "passkey_not_configured":
       return 409;
 
