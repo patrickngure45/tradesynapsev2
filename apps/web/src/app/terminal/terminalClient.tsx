@@ -5,6 +5,8 @@ import Link from "next/link";
 import { fetchJsonOrThrow } from "@/lib/api/client";
 import { buttonClassName } from "@/components/ui/Button";
 import { createChart, type IChartApi, type ISeriesApi } from "lightweight-charts";
+import { toBigInt3818, fromBigInt3818 } from "@/lib/exchange/fixed3818";
+import { quantizeDownToStep3818 } from "@/lib/exchange/steps";
 
 type MarketRow = {
   id: string;
@@ -43,6 +45,11 @@ type OpenOrderRow = {
   remaining_quantity: string;
   status: string;
   created_at: string;
+};
+
+type BalanceRow = {
+  symbol: string;
+  available: string;
 };
 
 type ConditionalOrderRow = {
@@ -745,6 +752,9 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
   const [stops, setStops] = useState<ConditionalOrderRow[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
 
+  const [balances, setBalances] = useState<BalanceRow[]>([]);
+  const [balancesLoading, setBalancesLoading] = useState(false);
+
   useEffect(() => {
     setErr(null);
     setPrice("");
@@ -784,11 +794,40 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     }
   }, [market?.id]);
 
+  const loadBalances = useCallback(async () => {
+    setBalancesLoading(true);
+    try {
+      const data = await fetchJsonOrThrow<{ balances?: any[] }>(
+        "/api/exchange/balances",
+        withDevUserHeader({ cache: "no-store" }),
+      );
+      const rows = Array.isArray(data.balances) ? data.balances : [];
+      setBalances(
+        rows
+          .map((b) => ({
+            symbol: String((b as any).symbol ?? "").toUpperCase(),
+            available: String((b as any).available ?? "0"),
+          }))
+          .filter((b) => !!b.symbol),
+      );
+    } catch {
+      setBalances([]);
+    } finally {
+      setBalancesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadImpactDepth();
     const t = setInterval(() => void loadImpactDepth(), 3000);
     return () => clearInterval(t);
   }, [loadImpactDepth]);
+
+  useEffect(() => {
+    void loadBalances();
+    const t = setInterval(() => void loadBalances(), 12_000);
+    return () => clearInterval(t);
+  }, [loadBalances, market?.id]);
 
   const estimatedNotional = useMemo(() => {
     if (!market) return null;
@@ -889,6 +928,65 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
     const ask = market.book?.ask ? fmtCompact(market.book.ask, 8) : "—";
     return `Bid ${bid} · Ask ${ask} · tick ${market.tick_size} · lot ${market.lot_size}`;
   }, [market]);
+
+  const close100 = async () => {
+    if (!market) return;
+    setErr(null);
+
+    const base = String(market.base_symbol ?? "").trim().toUpperCase();
+    const quote = String(market.quote_symbol ?? "").trim().toUpperCase();
+    const lot = String(market.lot_size ?? "0.00000001");
+
+    const findAvail = (sym: string) => {
+      const row = balances.find((b) => b.symbol === sym);
+      return row?.available ?? "0";
+    };
+
+    const SCALE = 10n ** 18n;
+    const applyBps = (value: string, bps: number): string => {
+      const v = toBigInt3818(value);
+      const out = (v * BigInt(Math.max(0, Math.min(10_000, Math.trunc(bps))))) / 10_000n;
+      return fromBigInt3818(out);
+    };
+    const divDown = (num: string, den: string): string => {
+      const n = toBigInt3818(num);
+      const d = toBigInt3818(den);
+      if (d <= 0n) throw new Error("invalid_price");
+      return fromBigInt3818((n * SCALE) / d);
+    };
+
+    try {
+      let nextQty = "0";
+
+      if (side === "sell") {
+        const availBase = findAvail(base);
+        nextQty = quantizeDownToStep3818(availBase, lot);
+      } else {
+        const availQuote = findAvail(quote);
+        const safeSpend = applyBps(availQuote, 9950); // keep a tiny buffer for fees/rounding
+
+        const px =
+          String(market.book?.ask ?? "").trim() ||
+          String(market.book?.mid ?? "").trim() ||
+          String(market.stats?.last ?? "").trim();
+        if (!px) throw new Error("no_price");
+
+        const estQty = divDown(safeSpend, px);
+        nextQty = quantizeDownToStep3818(estQty, lot);
+      }
+
+      if (toBigInt3818(nextQty) <= 0n) {
+        setErr(side === "sell" ? "no_base_balance" : "no_quote_balance");
+        return;
+      }
+
+      setType("market");
+      setQty(nextQty);
+    } catch (e: any) {
+      const msg = e?.message ? String(e.message) : "close_failed";
+      setErr(msg);
+    }
+  };
 
   const submit = async () => {
     if (!market) return;
@@ -1175,6 +1273,15 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] placeholder:text-[var(--muted)]"
       />
 
+      <button
+        type="button"
+        onClick={close100}
+        disabled={!market || balancesLoading}
+        className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-extrabold tracking-tight text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+      >
+        {balancesLoading ? "Loading balances…" : side === "buy" ? "Close 100% (buy with quote)" : "Close 100% (sell base)"}
+      </button>
+
       {type === "market" ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--muted)]">
           {marketImpact ? (
@@ -1213,7 +1320,13 @@ function OrderEntryPanel({ market }: { market: MarketRow | null }) {
 
       {err ? (
         <div className="text-xs text-[var(--down)]">
-          {err === "confirm_high_risk_required" ? "Please confirm the high-risk order checkbox." : err}
+          {err === "confirm_high_risk_required"
+            ? "Please confirm the high-risk order checkbox."
+            : err === "no_base_balance"
+              ? `No available ${String(market.base_symbol ?? "base").toUpperCase()} balance.`
+              : err === "no_quote_balance"
+                ? `No available ${String(market.quote_symbol ?? "quote").toUpperCase()} balance.`
+                : err}
         </div>
       ) : null}
 
