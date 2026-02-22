@@ -12,16 +12,73 @@ import type { Sql } from "postgres";
 
 // ── BSC RPC Provider ─────────────────────────────────────────────────
 let _provider: ethers.JsonRpcProvider | null = null;
+let _readProvider: ethers.AbstractProvider | null = null;
 let _ethProvider: ethers.JsonRpcProvider | null = null;
+
+function parseRpcUrls(raw: string): string[] {
+  return raw
+    .split(/[\s,\n]+/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((u) => u.startsWith("http://") || u.startsWith("https://"));
+}
+
+function getBscRpcUrls(): string[] {
+  const primary = (process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org").trim();
+  const extraRaw = (process.env.BSC_RPC_URLS ?? process.env.BSC_RPC_FALLBACK_URLS ?? "").trim();
+  const extras = extraRaw ? parseRpcUrls(extraRaw) : [];
+  const out = [primary, ...extras].map((s) => s.trim()).filter(Boolean);
+  // de-dupe
+  const seen = new Set<string>();
+  return out.filter((u) => {
+    const key = u.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 export function getBscProvider(): ethers.JsonRpcProvider {
   if (!_provider) {
-    const rpcUrl = process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org";
+    const rpcUrl = (process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org").trim();
     const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
     const network = ethers.Network.from({ name: "bnb", chainId });
     _provider = new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network });
   }
   return _provider;
+}
+
+/**
+ * Read-only provider with multi-RPC fallback.
+ *
+ * Uses BSC_RPC_URL as primary and BSC_RPC_URLS as comma/newline/space-separated fallbacks.
+ * Quorum is set to 1, so this behaves like a fast failover (not consensus).
+ */
+export function getBscReadProvider(): ethers.AbstractProvider {
+  if (_readProvider) return _readProvider;
+
+  const urls = getBscRpcUrls();
+  const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
+  const network = ethers.Network.from({ name: "bnb", chainId });
+
+  if (urls.length <= 1) {
+    _readProvider = getBscProvider();
+    return _readProvider;
+  }
+
+  const stallTimeout = (() => {
+    const raw = String(process.env.BSC_RPC_STALL_TIMEOUT_MS ?? process.env.RPC_STALL_TIMEOUT_MS ?? "2000").trim();
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(200, Math.min(15_000, Math.trunc(n))) : 2000;
+  })();
+
+  const configs = urls.map((url, idx) => {
+    const provider = new ethers.JsonRpcProvider(url, network, { staticNetwork: network });
+    return { provider, priority: idx + 1, weight: 1, stallTimeout };
+  });
+
+  _readProvider = new ethers.FallbackProvider(configs, network, { quorum: 1 });
+  return _readProvider;
 }
 
 export function getEthProvider(): ethers.JsonRpcProvider {

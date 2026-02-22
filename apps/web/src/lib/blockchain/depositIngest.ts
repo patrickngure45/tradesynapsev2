@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import type { Sql } from "postgres";
 
-import { getBscProvider } from "@/lib/blockchain/wallet";
+import { getBscReadProvider } from "@/lib/blockchain/wallet";
 import { createNotification } from "@/lib/notifications";
 
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
@@ -120,7 +120,7 @@ function isBlockRangeTooLargeError(err: unknown): boolean {
 }
 
 async function getLogsRangeSafe(
-  provider: ethers.JsonRpcProvider,
+  provider: ethers.AbstractProvider,
   filter: Omit<ethers.Filter, "fromBlock" | "toBlock"> & { fromBlock: number; toBlock: number },
   opts?: { maxDepth?: number },
 ): Promise<ethers.Log[]> {
@@ -153,7 +153,7 @@ function coerceTopicsForCompatibility(topics: (string | string[] | null)[]): (st
 }
 
 async function getLogsWithRetry(
-  provider: ethers.JsonRpcProvider,
+  provider: ethers.AbstractProvider,
   args: ethers.Filter,
   opts?: { maxAttempts?: number; baseDelayMs?: number },
 ): Promise<ethers.Log[]> {
@@ -178,7 +178,7 @@ async function getLogsWithRetry(
 }
 
 async function getLogsBatchedOrSplit(
-  provider: ethers.JsonRpcProvider,
+  provider: ethers.AbstractProvider,
   args: {
     addresses: string[];
     fromBlock: number;
@@ -328,7 +328,7 @@ export async function ingestNativeBnbDepositTx(
       details?: any;
     }
 > {
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const chain: "bsc" = args.chain ?? "bsc";
 
   const confirmations = clamp(args.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
@@ -466,7 +466,7 @@ export async function ingestBscTokenDepositTx(
       details?: any;
     }
 > {
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const chain: "bsc" = "bsc";
 
   const confirmations = clamp(args.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
@@ -908,7 +908,7 @@ export async function scanAndCreditBscDeposits(
   stoppedEarly?: boolean;
   stopReason?: "time_budget";
 }> {
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const chain: "bsc" = "bsc";
 
   const cols = await getDepositEventCols(sql);

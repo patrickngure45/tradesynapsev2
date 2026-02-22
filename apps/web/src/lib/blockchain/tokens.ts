@@ -5,7 +5,7 @@
  * for USDT and native BNB.
  */
 import { ethers } from "ethers";
-import { getBscProvider } from "./wallet";
+import { getBscProvider, getBscReadProvider } from "./wallet";
 
 // ── Standard BEP-20 ABI (minimal) ───────────────────────────────────
 const ERC20_ABI = [
@@ -37,7 +37,7 @@ export function getTokenAddress(symbol: string): string | null {
 
 /** Get native BNB balance */
 export async function getBnbBalance(address: string): Promise<string> {
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const bal = await provider.getBalance(address);
   return ethers.formatEther(bal);
 }
@@ -47,7 +47,7 @@ export async function getTokenBalance(
   tokenAddress: string,
   walletAddress: string,
 ): Promise<{ balance: string; decimals: number }> {
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
   const [bal, decimals] = await Promise.all([
     contract.balanceOf(walletAddress) as Promise<bigint>,

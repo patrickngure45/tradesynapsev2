@@ -96,7 +96,7 @@ async function getBnbAssetId(sql: Sql): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
-async function gasCostWeiFromReceipt(provider: ethers.JsonRpcProvider, txHash: string): Promise<bigint | null> {
+async function gasCostWeiFromReceipt(provider: ethers.AbstractProvider, txHash: string): Promise<bigint | null> {
   const receipt = await provider.getTransactionReceipt(txHash);
   if (!receipt) return null;
   const gasUsed = (receipt as any).gasUsed as bigint | undefined;
