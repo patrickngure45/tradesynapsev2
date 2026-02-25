@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
 import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,12 @@ type ExpiredOrder = {
 export async function POST(req: NextRequest) {
 	const authErr = requireCronAuth(req);
 	if (authErr) {
+		const sql = getSql();
+		await upsertServiceHeartbeat(sql as any, {
+			service: "p2p:expire-orders",
+			status: "error",
+			details: { error: authErr },
+		}).catch(() => void 0);
 		const status = authErr === "cron_unauthorized" ? 401 : 500;
 		return NextResponse.json({ error: authErr }, { status });
 	}
@@ -181,9 +188,24 @@ export async function POST(req: NextRequest) {
 			};
 		});
 
+		await upsertServiceHeartbeat(sql as any, {
+			service: "p2p:expire-orders",
+			status: "ok",
+			details: {
+				expiring_soon_count: result.expiringSoonCount,
+				expired_count: result.expiredCount,
+				limit,
+			},
+		}).catch(() => void 0);
+
 		return NextResponse.json({ ok: true, ...result });
 	} catch (err) {
 		console.error("P2P expire-orders cron failed:", err);
+		await upsertServiceHeartbeat(sql as any, {
+			service: "p2p:expire-orders",
+			status: "error",
+			details: { error: err instanceof Error ? err.message : String(err), limit },
+		}).catch(() => void 0);
 		return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
 	}
 }

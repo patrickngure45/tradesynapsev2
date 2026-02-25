@@ -21,6 +21,12 @@ function getExpectedServices(): ServiceExpectation[] {
   const enablePriceAlerts = (process.env.EXCHANGE_ENABLE_PRICE_ALERTS ?? "").trim() === "1";
   if (enablePriceAlerts) expected.push({ service: "cron:price-alerts", staleAfterMs: 15 * 60_000 });
 
+  const enableNotificationsDigest = (process.env.EXCHANGE_ENABLE_NOTIFICATIONS_DIGEST ?? "").trim() === "1";
+  if (enableNotificationsDigest) expected.push({ service: "cron:notifications-digest", staleAfterMs: 30 * 60_000 });
+
+  const expectP2pExpireOrders = (process.env.EXPECT_P2P_EXPIRE_ORDERS ?? "").trim() === "1";
+  if (expectP2pExpireOrders) expected.push({ service: "p2p:expire-orders", staleAfterMs: 10 * 60_000 });
+
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
   const expectSweepDeposits = (process.env.EXPECT_SWEEP_DEPOSITS ?? "").trim() === "1";
   if (expectDepositScan) expected.push({ service: "deposit-scan:bsc", staleAfterMs: 60 * 60_000 });
