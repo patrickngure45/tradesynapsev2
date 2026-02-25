@@ -324,6 +324,8 @@ export default async function proxy(request: NextRequest) {
     // should not be forced through the CSRF double-submit flow.
     // They are authenticated separately (e.g. x-cron-secret) in production.
     const isKnownCronPath =
+      pathname.startsWith("/api/cron/") ||
+      pathname.startsWith("/api/arcade/cron/") ||
       pathname.startsWith("/api/p2p/cron/") ||
       pathname.startsWith("/api/exchange/cron/");
 
