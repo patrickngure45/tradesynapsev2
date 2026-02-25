@@ -280,6 +280,7 @@ export function P2PClient() {
   const [newMethodIdentifier, setNewMethodIdentifier] = useState("mpesa");
   const [newMethodName, setNewMethodName] = useState("M-Pesa");
   const [newMethodDetailsJson, setNewMethodDetailsJson] = useState("{\n  \"phoneNumber\": \"\"\n}");
+  const [newMethodDetailsTouched, setNewMethodDetailsTouched] = useState(false);
 
   const addMethodParsed = useMemo(() => parseJsonSafe(newMethodDetailsJson), [newMethodDetailsJson]);
   const addMethodRules = useMemo(() => paymentMethodRules(newMethodIdentifier), [newMethodIdentifier]);
@@ -294,6 +295,12 @@ export function P2PClient() {
       return typeof value !== "string" || value.trim().length === 0;
     });
   }, [addMethodParsed.error, addMethodParsed.value, addMethodRules.requiredKeys]);
+
+  useEffect(() => {
+    if (newMethodDetailsTouched) return;
+    if (newMethodDetailsJson === addMethodExample.json) return;
+    setNewMethodDetailsJson(addMethodExample.json);
+  }, [addMethodExample.json, newMethodDetailsJson, newMethodDetailsTouched]);
 
   const needsSellerMethod = tab === "SELL";
 
@@ -648,7 +655,10 @@ export function P2PClient() {
                     />
                     <textarea
                       value={newMethodDetailsJson}
-                      onChange={(e) => setNewMethodDetailsJson(e.target.value)}
+                      onChange={(e) => {
+                        setNewMethodDetailsTouched(true);
+                        setNewMethodDetailsJson(e.target.value);
+                      }}
                       placeholder='Details JSON (e.g. {"phoneNumber":"..."})'
                       className="min-h-24 w-full resize-y rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-text)] placeholder:text-[var(--v2-muted)]"
                     />
@@ -676,7 +686,10 @@ export function P2PClient() {
                       <button
                         type="button"
                         className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-2 py-1 text-[11px] font-semibold text-[var(--v2-muted)] hover:bg-[var(--v2-surface)]"
-                        onClick={() => setNewMethodDetailsJson(addMethodExample.json)}
+                        onClick={() => {
+                          setNewMethodDetailsTouched(false);
+                          setNewMethodDetailsJson(addMethodExample.json);
+                        }}
                       >
                         Use {addMethodExample.label} example
                       </button>
