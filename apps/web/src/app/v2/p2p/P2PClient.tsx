@@ -10,6 +10,7 @@ import { V2Input } from "@/components/v2/Input";
 import { V2Sheet } from "@/components/v2/Sheet";
 import { V2Skeleton } from "@/components/v2/Skeleton";
 import { V2Tabs } from "@/components/v2/Tabs";
+import { describeClientError } from "@/lib/api/errorMessages";
 
 type P2PAd = {
   id: string;
@@ -209,6 +210,11 @@ export function P2PClient() {
     ],
     [],
   );
+
+  const errorInfo = useMemo(() => {
+    if (!error) return null;
+    return describeClientError(error);
+  }, [error]);
 
   const [takeSheetOpen, setTakeSheetOpen] = useState(false);
   const [takeAd, setTakeAd] = useState<P2PAd | null>(null);
@@ -427,11 +433,11 @@ export function P2PClient() {
         inputMode="decimal"
       />
 
-      {error && ads.length === 0 ? (
+      {errorInfo && ads.length === 0 ? (
         <V2Card>
-          <V2CardHeader title="Marketplace unavailable" subtitle="Try again in a moment." />
+          <V2CardHeader title={errorInfo.title} subtitle={errorInfo.message} />
           <V2CardBody>
-            <div className="text-sm text-[var(--v2-muted)]">{String(error)}</div>
+            <div className="text-sm text-[var(--v2-muted)]">Error code: {errorInfo.code}</div>
             <div className="mt-3">
               <V2Button variant="primary" fullWidth onClick={() => void load()}>
                 Retry
@@ -454,6 +460,11 @@ export function P2PClient() {
         </V2Card>
       ) : (
         <section className="grid gap-2">
+          {errorInfo ? (
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--v2-down)_45%,var(--v2-border))] bg-[color-mix(in_srgb,var(--v2-down)_10%,transparent)] px-3 py-2 text-xs text-[var(--v2-muted)]">
+              <span className="font-semibold">Refresh warning:</span> {errorInfo.message}
+            </div>
+          ) : null}
           {ads.map((ad) => {
             const maker = String(ad.display_name || ad.email || "Trader");
             const priceText = fmtMoney(ad.fixed_price, fiat);
