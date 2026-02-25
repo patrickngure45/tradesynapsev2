@@ -89,6 +89,11 @@ function getCsrfToken(): string | null {
   return match?.[1] ?? null;
 }
 
+function humanizeActionError(codeOrMessage: string): string {
+  const info = describeClientError(codeOrMessage);
+  return info.message;
+}
+
 export function P2PClient() {
   const router = useRouter();
 
@@ -320,7 +325,8 @@ export function P2PClient() {
       setTakeSheetOpen(false);
       router.push(`/v2/p2p/orders/${encodeURIComponent(orderId)}`);
     } catch (e) {
-      setTakeError(e instanceof Error ? e.message : String(e));
+      const raw = e instanceof Error ? e.message : String(e);
+      setTakeError(humanizeActionError(raw));
     } finally {
       setTaking(false);
     }
@@ -386,7 +392,8 @@ export function P2PClient() {
       setMethods((prev) => [created, ...(prev ?? [])]);
       setSelectedMethodId(created.id);
     } catch (e) {
-      setAddMethodError(e instanceof Error ? e.message : String(e));
+      const raw = e instanceof Error ? e.message : String(e);
+      setAddMethodError(humanizeActionError(raw));
     } finally {
       setAddingMethod(false);
     }
