@@ -114,6 +114,58 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function humanizeActionError(code: string | null): string | null {
+  if (!code) return null;
+  const normalized = String(code).trim().toLowerCase();
+
+  if (normalized === "auth_required" || normalized === "unauthorized" || normalized === "http_401") {
+    return "You are not signed in. Log in and try again.";
+  }
+  if (normalized === "forbidden" || normalized === "http_403") {
+    return "You are not allowed to perform this action for this order.";
+  }
+  if (normalized === "order_not_found" || normalized === "not_found" || normalized === "http_404") {
+    return "This order was not found or you no longer have access.";
+  }
+  if (normalized === "trade_transition_not_allowed" || normalized === "trade_state_conflict" || normalized === "http_409") {
+    return "Order state changed. Refresh and try again.";
+  }
+  if (normalized === "dispute_already_exists") {
+    return "A dispute is already open for this order.";
+  }
+  if (normalized === "trade_not_disputable") {
+    return "This order cannot be disputed in its current status.";
+  }
+  if (normalized === "not_party") {
+    return "Only the buyer or seller can perform this action.";
+  }
+
+  if (normalized.startsWith("http_")) {
+    return `Request failed (${normalized.replace("http_", "HTTP ").toUpperCase()}). Try again.`;
+  }
+
+  return normalized.replaceAll("_", " ");
+}
+
+function statusBadgeClass(status: string): string {
+  if (status === "completed") {
+    return "rounded-full border border-[color-mix(in_srgb,var(--v2-up)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-up)_16%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-up)]";
+  }
+  if (status === "cancelled") {
+    return "rounded-full border border-[color-mix(in_srgb,var(--v2-down)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-down)_14%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-down)]";
+  }
+  if (status === "disputed") {
+    return "rounded-full border border-[color-mix(in_srgb,var(--v2-accent-2)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-accent-2)_16%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-accent-2)]";
+  }
+  if (status === "paid_confirmed") {
+    return "rounded-full border border-[color-mix(in_srgb,var(--v2-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--v2-accent)_18%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-accent)]";
+  }
+  if (status === "created") {
+    return "rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-muted)]";
+  }
+  return "rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-muted)]";
+}
+
 export function P2POrderClient() {
   const params = useParams() as { id: string };
   const id = String(params?.id ?? "");
@@ -516,6 +568,11 @@ export function P2POrderClient() {
 
   const status = String(order.status || "").toLowerCase();
   const canDispute = !!role && status !== "completed" && status !== "cancelled" && status !== "disputed";
+  const actionErrorText = humanizeActionError(actionError);
+
+  const expiresAtMs = order.expires_at ? Date.parse(order.expires_at) : NaN;
+  const expiresInMin = Number.isFinite(expiresAtMs) ? Math.floor((expiresAtMs - Date.now()) / 60_000) : null;
+  const expiresSoon = status === "created" && expiresInMin != null && expiresInMin >= 0 && expiresInMin <= 5;
 
   return (
     <main className="space-y-4">
@@ -525,13 +582,22 @@ export function P2POrderClient() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[12px] font-semibold text-[var(--v2-muted)]">Status</div>
-            <div className="mt-0.5 text-[15px] font-semibold text-[var(--v2-text)]">{status.replaceAll("_", " ") || "—"}</div>
+            <div className="mt-1">
+              <span className={statusBadgeClass(status)}>{status.replaceAll("_", " ") || "—"}</span>
+            </div>
             <div className="mt-2 text-[12px] text-[var(--v2-muted)]">Created {fmtTime(order.created_at)}</div>
           </div>
           <div className="text-right">
             <div className="text-[12px] font-semibold text-[var(--v2-muted)]">You</div>
             <div className="mt-0.5 text-[13px] font-semibold text-[var(--v2-text)]">{role ? role.toUpperCase() : "—"}</div>
           </div>
+        </div>
+
+        <div className="mt-3 grid gap-1 text-[12px] text-[var(--v2-muted)]">
+          {order.expires_at ? <div>Expires: {fmtTime(order.expires_at)}</div> : null}
+          {order.paid_at ? <div>Paid at: {fmtTime(order.paid_at)}</div> : null}
+          {order.completed_at ? <div>Completed at: {fmtTime(order.completed_at)}</div> : null}
+          {order.cancelled_at ? <div>Cancelled at: {fmtTime(order.cancelled_at)}</div> : null}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -551,7 +617,13 @@ export function P2POrderClient() {
           </div>
         </div>
 
-        {actionError ? <div className="mt-3 text-sm text-[var(--v2-down)]">{actionError}</div> : null}
+        {actionErrorText ? <div className="mt-3 text-sm text-[var(--v2-down)]">{actionErrorText}</div> : null}
+
+        {expiresSoon ? (
+          <div className="mt-2 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-muted)]">
+            Payment window is ending soon. Complete payment steps now to avoid cancellation.
+          </div>
+        ) : null}
 
         {status === "disputed" ? (
           <div className="mt-2 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-muted)]">
