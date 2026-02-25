@@ -7,12 +7,21 @@ import { AuthClient } from "@/app/login/AuthClient";
 
 export const dynamic = "force-dynamic";
 
+function sanitizeInternalRedirectPath(input: string | null | undefined, fallback = ""): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) return fallback;
+  if (!raw.startsWith("/")) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (raw.includes("\\")) return fallback;
+  return raw;
+}
+
 export default function SignupPage({
   searchParams,
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const next = typeof searchParams?.next === "string" ? searchParams.next.trim() : "";
+  const next = sanitizeInternalRedirectPath(typeof searchParams?.next === "string" ? searchParams.next : "", "");
   const nextQuery = next ? `?next=${encodeURIComponent(next)}` : "";
 
   return (

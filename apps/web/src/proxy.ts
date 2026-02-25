@@ -105,6 +105,15 @@ function getPublicOriginFromForwardedHeaders(request: NextRequest): string | nul
   return `${xfProto}://${xfHost}`;
 }
 
+function sanitizeInternalRedirectPath(input: string, fallback = "/wallet"): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) return fallback;
+  if (!raw.startsWith("/")) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (raw.includes("\\")) return fallback;
+  return raw;
+}
+
 function attachCsrfCookieIfMissing(request: NextRequest, response: NextResponse) {
   if (request.cookies.get(CSRF_COOKIE)?.value) return response;
 
@@ -486,7 +495,8 @@ export default async function proxy(request: NextRequest) {
 
     if (!authenticated) {
       const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+      const requestedPath = sanitizeInternalRedirectPath(`${pathname}${request.nextUrl.search}`, "/wallet");
+      loginUrl.searchParams.set("next", requestedPath);
       loginUrl.searchParams.set("reason", token ? "session_expired" : "auth_required");
       return NextResponse.redirect(loginUrl);
     }

@@ -12,6 +12,15 @@ import { V2Tabs } from "@/components/v2/Tabs";
 type AuthMode = "login" | "signup";
 type AuthVariant = "tabs" | "page";
 
+function sanitizeInternalRedirectPath(input: string | null | undefined, fallback = "/wallet"): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) return fallback;
+  if (!raw.startsWith("/")) return fallback;
+  if (raw.startsWith("//")) return fallback;
+  if (raw.includes("\\")) return fallback;
+  return raw;
+}
+
 export function AuthClient({
   initialMode = "login",
   variant = "tabs",
@@ -21,8 +30,7 @@ export function AuthClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const rawRedirectTo = (searchParams.get("next") || "/wallet").trim();
-  const redirectTo = rawRedirectTo.startsWith("/") ? rawRedirectTo : "/wallet";
+  const redirectTo = sanitizeInternalRedirectPath(searchParams.get("next"), "/wallet");
   const authReason = (searchParams.get("reason") || "").trim();
   const authNotice =
     authReason === "session_expired"
@@ -147,7 +155,7 @@ export function AuthClient({
   };
 
   const nextQuery = (() => {
-    const next = (searchParams.get("next") ?? "").trim();
+    const next = sanitizeInternalRedirectPath(searchParams.get("next"), "");
     return next ? `?next=${encodeURIComponent(next)}` : "";
   })();
 
