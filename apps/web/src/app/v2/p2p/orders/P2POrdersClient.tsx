@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { V2Button } from "@/components/v2/Button";
 import { V2Card, V2CardBody, V2CardHeader } from "@/components/v2/Card";
 import { V2Skeleton } from "@/components/v2/Skeleton";
+import { describeClientError } from "@/lib/api/errorMessages";
 
 type OrderSummary = {
   id: string;
@@ -75,7 +76,7 @@ export function P2POrdersClient() {
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (seq !== loadSeqRef.current) return;
-      if (!hasLoadedRef.current) setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
@@ -197,6 +198,11 @@ export function P2POrdersClient() {
     return { active, history, missingDetailsCount };
   }, [orders]);
 
+  const errorInfo = useMemo(() => {
+    if (!error) return null;
+    return describeClientError(error);
+  }, [error]);
+
   const statusChip = (status: string) => {
     const s = String(status || "").toLowerCase();
     const tone =
@@ -269,11 +275,11 @@ export function P2POrdersClient() {
         </div>
       ) : null}
 
-      {error && orders.length === 0 ? (
+      {errorInfo && orders.length === 0 ? (
         <V2Card>
-          <V2CardHeader title="Orders unavailable" subtitle="Sign in and try again." />
+          <V2CardHeader title={errorInfo.title} subtitle={errorInfo.message} />
           <V2CardBody>
-            <div className="text-sm text-[var(--v2-muted)]">{String(error)}</div>
+            <div className="text-sm text-[var(--v2-muted)]">Error code: {errorInfo.code}</div>
             <div className="mt-3">
               <V2Button variant="primary" fullWidth onClick={() => void load()}>
                 Retry
@@ -296,6 +302,17 @@ export function P2POrdersClient() {
         </V2Card>
       ) : (
         <div className="space-y-4">
+          {errorInfo ? (
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[color-mix(in_srgb,var(--v2-down)_10%,transparent)] px-3 py-3 text-[12px] text-[var(--v2-text)]">
+              <span className="font-semibold">Refresh warning:</span> {errorInfo.message}
+              <div className="mt-2">
+                <V2Button variant="secondary" size="sm" onClick={() => void load()}>
+                  Retry refresh
+                </V2Button>
+              </div>
+            </div>
+          ) : null}
+
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="text-[13px] font-semibold text-[var(--v2-text)]">Active</div>
