@@ -1,3 +1,0 @@
-module.exports=[482303,a=>{"use strict";var b=a.i(907997);function c({children:a}){return(0,b.jsx)("div",{"data-ui":"v2",className:"min-h-dvh bg-[var(--background)] text-[var(--foreground)]",children:(0,b.jsx)("div",{className:"mx-auto w-full max-w-xl px-4 py-6",children:a})})}a.s(["default",()=>c,"dynamic",0,"force-dynamic"])}];
-
-//# sourceMappingURL=src_app_%28v2shell%29_layout_tsx_d348924a._.js.map

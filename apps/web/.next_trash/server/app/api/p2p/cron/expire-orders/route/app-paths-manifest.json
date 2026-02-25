@@ -1,3 +1,0 @@
-{
-  "/api/p2p/cron/expire-orders/route": "app/api/p2p/cron/expire-orders/route.js"
-}

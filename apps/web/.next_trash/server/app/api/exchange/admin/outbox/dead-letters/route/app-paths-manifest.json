@@ -1,3 +1,0 @@
-{
-  "/api/exchange/admin/outbox/dead-letters/route": "app/api/exchange/admin/outbox/dead-letters/route.js"
-}

@@ -1,3 +1,0 @@
-{
-  "/api/trades/[id]/status/paid-marked/route": "app/api/trades/[id]/status/paid-marked/route.js"
-}

@@ -1,3 +1,0 @@
-{
-  "/api/exchange/cron/scan-deposits/route": "app/api/exchange/cron/scan-deposits/route.js"
-}
