@@ -27,6 +27,9 @@ function getExpectedServices(): ServiceExpectation[] {
   const expectP2pExpireOrders = (process.env.EXPECT_P2P_EXPIRE_ORDERS ?? "").trim() === "1";
   if (expectP2pExpireOrders) expected.push({ service: "p2p:expire-orders", staleAfterMs: 10 * 60_000 });
 
+  const expectArcadeResolveReady = (process.env.EXPECT_ARCADE_RESOLVE_READY ?? "").trim() === "1";
+  if (expectArcadeResolveReady) expected.push({ service: "arcade:resolve-ready", staleAfterMs: 15 * 60_000 });
+
   const expectDepositScan = (process.env.EXPECT_DEPOSIT_SCAN ?? "").trim() === "1";
   const expectSweepDeposits = (process.env.EXPECT_SWEEP_DEPOSITS ?? "").trim() === "1";
   if (expectDepositScan) expected.push({ service: "deposit-scan:bsc", staleAfterMs: 60 * 60_000 });

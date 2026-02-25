@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { responseForDbError } from "@/lib/dbTransient";
 import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,12 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const authErr = requireCronRequestAuth(req);
   if (authErr) {
+    const sql = getSql();
+    await upsertServiceHeartbeat(sql as any, {
+      service: "arcade:resolve-ready",
+      status: "error",
+      details: { error: authErr },
+    }).catch(() => void 0);
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });
   }
@@ -99,10 +106,22 @@ export async function POST(req: NextRequest) {
       return { hinted: hinted.length, moved: moved.length };
     });
 
+    await upsertServiceHeartbeat(sql as any, {
+      service: "arcade:resolve-ready",
+      status: "ok",
+      details: { hinted: result.hinted, moved: result.moved },
+    }).catch(() => void 0);
+
     return NextResponse.json({ ok: true, ...result }, { status: 200 });
   } catch (e) {
     const dep = responseForDbError("arcade_resolve_ready", e);
     if (dep) return dep;
+
+    await upsertServiceHeartbeat(sql as any, {
+      service: "arcade:resolve-ready",
+      status: "error",
+      details: { error: e instanceof Error ? e.message : String(e) },
+    }).catch(() => void 0);
 
     return NextResponse.json({ ok: false, error: "internal_error" }, { status: 500 });
   }

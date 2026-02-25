@@ -114,6 +114,13 @@ Notes:
 - Enable sweeping only when ready:
   - `EXCHANGE_ENABLE_SWEEP_DEPOSITS=1`
 
+Status heartbeat expectation toggles (recommended for `/status`):
+- `EXPECT_OUTBOX_WORKER=1`
+- `EXPECT_DEPOSIT_SCAN=1`
+- `EXPECT_SWEEP_DEPOSITS=1` (only if sweep is enabled)
+- `EXPECT_P2P_EXPIRE_ORDERS=1`
+- `EXPECT_ARCADE_RESOLVE_READY=1` (if arcade cron is enabled)
+
 ## 4.1) Exchange abuse limits (recommended)
 
 These are enabled with conservative defaults when unset, but you can tune them on Railway:
