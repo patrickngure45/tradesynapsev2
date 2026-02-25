@@ -19,7 +19,7 @@ Hard requirements (app will refuse to boot in production if missing/unsafe):
 
 - `DATABASE_URL`
 - `NEXT_PUBLIC_BASE_URL` (must be public **https**, not localhost)
-- `ALLOWED_ORIGIN` (your public origin, e.g. `https://coinwaka.com`)
+- `ALLOWED_ORIGIN` (your public origin, e.g. `https://coinwaka.com`; `ALLOWED_ORIGINS` also supported)
 - `PROOFPACK_SESSION_SECRET` (>= 32 chars, random)
 - `PROOFPACK_SESSION_BOOTSTRAP_KEY` (>= 16 chars, random)
 - `EXCHANGE_ADMIN_KEY` (>= 16 chars, random)

@@ -337,6 +337,9 @@ export default async function proxy(request: NextRequest) {
     const publicOrigin = getPublicOriginFromForwardedHeaders(request);
     if (publicOrigin) allowedOrigins.push(publicOrigin);
     if (process.env.ALLOWED_ORIGIN) allowedOrigins.push(process.env.ALLOWED_ORIGIN);
+    if (process.env.ALLOWED_ORIGINS) {
+      process.env.ALLOWED_ORIGINS.split(",").forEach((value) => allowedOrigins.push(value));
+    }
     
     if (process.env.BACKEND_CORS_ORIGINS) {
       try {

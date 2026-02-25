@@ -58,13 +58,18 @@ function assertProdPreflight(): void {
     }
   }
 
-  const allowedOrigin = String(process.env.ALLOWED_ORIGIN ?? "").trim();
+  const hasAllowedOrigin = Boolean(String(process.env.ALLOWED_ORIGIN ?? "").trim());
+  const hasAllowedOrigins = Boolean(String(process.env.ALLOWED_ORIGINS ?? "").trim());
+  const allowedOriginSource = hasAllowedOrigin ? "ALLOWED_ORIGIN" : hasAllowedOrigins ? "ALLOWED_ORIGINS" : "none";
+  const allowedOriginRaw = String(process.env.ALLOWED_ORIGIN ?? process.env.ALLOWED_ORIGINS ?? "").trim();
+  const allowedOrigin = allowedOriginRaw.split(",").map((value) => value.trim()).find(Boolean) ?? "";
+  console.info(`[preflight] Allowed origin source: ${allowedOriginSource}`);
   if (!allowedOrigin) {
-    problems.push("ALLOWED_ORIGIN should be set in production to your public origin (for CSRF/origin checks)");
+    problems.push("ALLOWED_ORIGIN (or ALLOWED_ORIGINS) should be set in production to your public origin (for CSRF/origin checks)");
   } else {
     const lower = allowedOrigin.toLowerCase();
     if (lower.includes("localhost") || lower.includes("127.0.0.1")) {
-      problems.push("ALLOWED_ORIGIN must not be localhost in production");
+      problems.push("ALLOWED_ORIGIN / ALLOWED_ORIGINS must not contain localhost in production");
     }
   }
 
