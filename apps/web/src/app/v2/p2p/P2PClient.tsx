@@ -89,6 +89,36 @@ function getCsrfToken(): string | null {
   return match?.[1] ?? null;
 }
 
+function parseJsonSafe(raw: string): { value: any | null; error: string | null } {
+  const text = raw.trim();
+  if (!text) return { value: {}, error: null };
+  try {
+    return { value: JSON.parse(text), error: null };
+  } catch {
+    return { value: null, error: "Details JSON is invalid." };
+  }
+}
+
+function paymentMethodRules(identifierRaw: string): { requiredKeys: string[]; tips: string[] } {
+  const identifier = identifierRaw.trim().toLowerCase();
+  if (identifier === "mpesa") {
+    return {
+      requiredKeys: ["phoneNumber"],
+      tips: ["Use a reachable phone number in local format or E.164."],
+    };
+  }
+  if (identifier === "bank_transfer" || identifier === "bank") {
+    return {
+      requiredKeys: ["bankName", "accountName", "accountNumber"],
+      tips: ["Include branchCode or swift when needed for settlement."],
+    };
+  }
+  return {
+    requiredKeys: [],
+    tips: ["Use a JSON object with the fields needed for this payment rail."],
+  };
+}
+
 function humanizeActionError(codeOrMessage: string): string {
   const info = describeClientError(codeOrMessage);
   return info.message;
@@ -236,6 +266,19 @@ export function P2PClient() {
   const [newMethodIdentifier, setNewMethodIdentifier] = useState("mpesa");
   const [newMethodName, setNewMethodName] = useState("M-Pesa");
   const [newMethodDetailsJson, setNewMethodDetailsJson] = useState("{\n  \"phoneNumber\": \"\"\n}");
+
+  const addMethodParsed = useMemo(() => parseJsonSafe(newMethodDetailsJson), [newMethodDetailsJson]);
+  const addMethodRules = useMemo(() => paymentMethodRules(newMethodIdentifier), [newMethodIdentifier]);
+  const addMethodMissingRequired = useMemo(() => {
+    if (addMethodParsed.error || !addMethodParsed.value || typeof addMethodParsed.value !== "object") {
+      return addMethodRules.requiredKeys;
+    }
+    const obj = addMethodParsed.value as Record<string, unknown>;
+    return addMethodRules.requiredKeys.filter((key) => {
+      const value = obj[key];
+      return typeof value !== "string" || value.trim().length === 0;
+    });
+  }, [addMethodParsed.error, addMethodParsed.value, addMethodRules.requiredKeys]);
 
   const needsSellerMethod = tab === "SELL";
 
@@ -595,6 +638,22 @@ export function P2PClient() {
                       className="min-h-24 w-full resize-y rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-text)] placeholder:text-[var(--v2-muted)]"
                     />
 
+                    <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[11px] text-[var(--v2-muted)]">
+                      <div className="font-semibold text-[var(--v2-text)]">Validation hints</div>
+                      {addMethodParsed.error ? <div className="mt-1 text-[var(--v2-down)]">{addMethodParsed.error}</div> : null}
+                      {addMethodRules.requiredKeys.length ? (
+                        <div className="mt-1">
+                          Required keys: <span className="font-mono">{addMethodRules.requiredKeys.join(", ")}</span>
+                        </div>
+                      ) : null}
+                      {addMethodMissingRequired.length ? (
+                        <div className="mt-1 text-[var(--v2-down)]">
+                          Missing: <span className="font-mono">{addMethodMissingRequired.join(", ")}</span>
+                        </div>
+                      ) : null}
+                      {addMethodRules.tips.length ? <div className="mt-1">Tip: {addMethodRules.tips[0]}</div> : null}
+                    </div>
+
                     <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--v2-muted)]">
                       <span>
                         Example (mpesa): <span className="font-mono">{"{\"phoneNumber\":\"0712345678\"}"}</span>
@@ -610,7 +669,12 @@ export function P2PClient() {
 
                     {addMethodError ? <div className="text-sm text-[var(--v2-down)]">{addMethodError}</div> : null}
 
-                    <V2Button variant="secondary" fullWidth disabled={addingMethod} onClick={() => void addPaymentMethod()}>
+                    <V2Button
+                      variant="secondary"
+                      fullWidth
+                      disabled={addingMethod || Boolean(addMethodParsed.error)}
+                      onClick={() => void addPaymentMethod()}
+                    >
                       {addingMethod ? "Adding…" : "Add payout method"}
                     </V2Button>
                   </div>
