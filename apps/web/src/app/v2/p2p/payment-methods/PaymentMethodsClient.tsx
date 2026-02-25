@@ -20,6 +20,36 @@ type PaymentMethod = {
 
 type ApiErr = { error: string; message?: string; details?: any };
 
+function parseJsonSafe(raw: string): { value: any | null; error: string | null } {
+  const text = String(raw ?? "").trim();
+  if (!text) return { value: {}, error: null };
+  try {
+    return { value: JSON.parse(text), error: null };
+  } catch {
+    return { value: null, error: "Details JSON is invalid." };
+  }
+}
+
+function paymentMethodRules(identifier: string): { required: string[]; tips: string[] } {
+  const id = String(identifier ?? "").trim().toLowerCase();
+  if (id === "mpesa") {
+    return {
+      required: ["phoneNumber"],
+      tips: ["Use a receivable phone number.", "Format example: 0712345678 or +254712345678."],
+    };
+  }
+  if (id === "bank_transfer" || id === "bank") {
+    return {
+      required: ["bankName", "accountName", "accountNumber"],
+      tips: ["Use exact account holder name.", "Include branch/swift in optional fields if needed."],
+    };
+  }
+  return {
+    required: [],
+    tips: ["Store only payout details you are comfortable sharing with matched counterparties."],
+  };
+}
+
 function getCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
   const match = document.cookie.match(/(?:^|;\s*)__csrf=([^;]+)/);
@@ -258,6 +288,32 @@ export function PaymentMethodsClient() {
   const createErrText = errText(createErr);
   const editErrText = errText(editErr);
 
+  const createParsed = useMemo(() => parseJsonSafe(newDetailsJson), [newDetailsJson]);
+  const createRules = useMemo(() => paymentMethodRules(newIdentifier), [newIdentifier]);
+  const createMissingRequired = useMemo(() => {
+    if (!createParsed.value || typeof createParsed.value !== "object" || Array.isArray(createParsed.value)) {
+      return createRules.required;
+    }
+    const obj = createParsed.value as Record<string, unknown>;
+    return createRules.required.filter((key) => {
+      const value = obj[key];
+      return !(typeof value === "string" ? value.trim() : value);
+    });
+  }, [createParsed.value, createRules.required]);
+
+  const editParsed = useMemo(() => parseJsonSafe(editDetailsJson), [editDetailsJson]);
+  const editRules = useMemo(() => paymentMethodRules(editMethod?.identifier ?? ""), [editMethod?.identifier]);
+  const editMissingRequired = useMemo(() => {
+    if (!editParsed.value || typeof editParsed.value !== "object" || Array.isArray(editParsed.value)) {
+      return editRules.required;
+    }
+    const obj = editParsed.value as Record<string, unknown>;
+    return editRules.required.filter((key) => {
+      const value = obj[key];
+      return !(typeof value === "string" ? value.trim() : value);
+    });
+  }, [editParsed.value, editRules.required]);
+
   return (
     <main className="space-y-4">
       <header className="space-y-2">
@@ -375,6 +431,27 @@ export function PaymentMethodsClient() {
             className="min-h-28 w-full resize-y rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-text)] placeholder:text-[var(--v2-muted)]"
           />
 
+          <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3 text-[12px] text-[var(--v2-muted)]">
+            <div className="font-semibold text-[var(--v2-text)]">Validation hints</div>
+            <div className="mt-1">Identifier: <span className="font-mono">{String(newIdentifier || "(empty)")}</span></div>
+            {createParsed.error ? <div className="mt-1 text-[var(--v2-down)]">{createParsed.error}</div> : null}
+            {createRules.required.length > 0 ? (
+              <div className="mt-1">
+                Required fields: <span className="font-mono">{createRules.required.join(", ")}</span>
+              </div>
+            ) : null}
+            {createMissingRequired.length > 0 ? (
+              <div className="mt-1 text-[var(--v2-down)]">Missing required: {createMissingRequired.join(", ")}</div>
+            ) : null}
+            {createRules.tips.length > 0 ? (
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                {createRules.tips.map((tip) => (
+                  <li key={tip}>{tip}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
           <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--v2-muted)]">
             <span>
               Example (mpesa): <span className="font-mono">{"{\"phoneNumber\":\"0712345678\"}"}</span>
@@ -402,7 +479,7 @@ export function PaymentMethodsClient() {
             </div>
           ) : null}
 
-          <V2Button variant="primary" fullWidth disabled={creating} onClick={() => void create()}>
+          <V2Button variant="primary" fullWidth disabled={creating || Boolean(createParsed.error)} onClick={() => void create()}>
             {creating ? "Adding…" : "Add"}
           </V2Button>
         </div>
@@ -427,6 +504,27 @@ export function PaymentMethodsClient() {
               className="min-h-28 w-full resize-y rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 text-[12px] text-[var(--v2-text)] placeholder:text-[var(--v2-muted)]"
             />
 
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3 text-[12px] text-[var(--v2-muted)]">
+              <div className="font-semibold text-[var(--v2-text)]">Validation hints</div>
+              <div className="mt-1">Identifier: <span className="font-mono">{String(editMethod.identifier || "(empty)")}</span></div>
+              {editParsed.error ? <div className="mt-1 text-[var(--v2-down)]">{editParsed.error}</div> : null}
+              {editRules.required.length > 0 ? (
+                <div className="mt-1">
+                  Required fields: <span className="font-mono">{editRules.required.join(", ")}</span>
+                </div>
+              ) : null}
+              {editMissingRequired.length > 0 ? (
+                <div className="mt-1 text-[var(--v2-down)]">Missing required: {editMissingRequired.join(", ")}</div>
+              ) : null}
+              {editRules.tips.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {editRules.tips.map((tip) => (
+                    <li key={tip}>{tip}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
             {editErrText ? (
               <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3">
                 <div className="text-[12px] font-semibold text-[var(--v2-text)]">{editErrText.title}</div>
@@ -441,7 +539,7 @@ export function PaymentMethodsClient() {
               </div>
             ) : null}
 
-            <V2Button variant="primary" fullWidth disabled={editing} onClick={() => void saveEdit()}>
+            <V2Button variant="primary" fullWidth disabled={editing || Boolean(editParsed.error)} onClick={() => void saveEdit()}>
               {editing ? "Saving…" : "Save"}
             </V2Button>
           </div>
