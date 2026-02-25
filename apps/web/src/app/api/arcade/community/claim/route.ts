@@ -2,6 +2,7 @@ import { apiError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { enforceArcadeSafety } from "@/lib/arcade/safety";
 import { SHARD_ITEM } from "@/lib/arcade/crafting";
 
@@ -27,6 +28,15 @@ export async function POST(request: Request) {
   if (!actingUserId) return apiError("missing_x_user_id");
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.community.claim",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   const now = new Date();
   const weekStart = weekStartIsoUtc(now);

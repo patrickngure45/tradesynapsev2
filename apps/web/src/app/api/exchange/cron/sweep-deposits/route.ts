@@ -3,20 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { sweepBscDeposits } from "@/lib/blockchain/sweepDeposits";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
+import { tryAcquireJobLock, releaseJobLock } from "@/lib/system/jobLock";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function requireCronAuth(req: NextRequest): string | null {
-  if (process.env.NODE_ENV !== "production") return null;
-
-  const configured = process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET;
-  if (!configured) return "cron_secret_not_configured";
-
-  const provided = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
-  if (!provided || provided !== configured) return "cron_unauthorized";
-  return null;
-}
 
 function requireEnabledInProd(): string | null {
   if (process.env.NODE_ENV !== "production") return null;
@@ -28,7 +19,7 @@ function requireEnabledInProd(): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const authErr = requireCronAuth(req);
+  const authErr = requireCronRequestAuth(req);
   if (authErr) {
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });
@@ -68,6 +59,31 @@ export async function POST(req: NextRequest) {
       ? tokenSymbolsRaw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
       : defaultSymbols;
 
+  const beat = async (details?: Record<string, unknown>, status: "ok" | "degraded" | "error" = "ok") => {
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "sweep-deposits:bsc",
+        status,
+        details: { ...(details ?? {}) },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  // Prevent overlapping sweeps across replicas.
+  const lockKey = "exchange:sweep-deposits:bsc";
+  const holderId = `${process.env.RAILWAY_SERVICE_NAME ?? process.env.SERVICE_NAME ?? "web"}:${crypto.randomUUID()}`;
+  const lockTtlMs = Math.max(10_000, Math.min(10 * 60_000, Number(process.env.EXCHANGE_SWEEP_LOCK_TTL_MS ?? 120_000) || 120_000));
+  const lock = await tryAcquireJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs });
+  if (!lock.acquired) {
+    await beat({ event: "skipped_locked", held_until: lock.held_until, holder_id: lock.holder_id }, "degraded").catch(() => void 0);
+    return NextResponse.json(
+      { ok: false, error: "job_in_progress", held_until: lock.held_until, holder_id: lock.holder_id },
+      { status: 429 },
+    );
+  }
+
   // Cadence gating (optional but recommended): avoid sweeping too frequently.
   const cadenceRaw = String(process.env.SWEEP_CADENCE_MS ?? "").trim();
   const cadenceMs = cadenceRaw ? Math.max(0, Math.min(7 * 24 * 60 * 60_000, Number(cadenceRaw) || 0)) : 0;
@@ -104,14 +120,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    await beat({ event: "start", execute, gas_topups: gasTopups, tokens: scanTokens, symbols: tokenSymbols });
     const result = await sweepBscDeposits(sql as any, {
       execute,
       allowGasTopups: gasTopups,
       tokenSymbols,
     });
+    await beat({ event: "done", ...result, execute, gas_topups: gasTopups, symbols: tokenSymbols });
     return NextResponse.json(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    await beat({ event: "error", message, execute, gas_topups: gasTopups, symbols: tokenSymbols }, "error");
     return NextResponse.json(
       {
         ok: false,
@@ -122,6 +141,12 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 },
     );
+  } finally {
+    try {
+      await releaseJobLock(sql as any, { key: lockKey, holderId });
+    } catch {
+      // ignore
+    }
   }
 }
 

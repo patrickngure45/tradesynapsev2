@@ -4,6 +4,7 @@ import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { isSha256Hex, sha256Hex } from "@/lib/uncertainty/hash";
 import { enforceArcadeSafety } from "@/lib/arcade/safety";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
@@ -50,6 +51,15 @@ export async function POST(request: Request) {
   const promptHash = sha256Hex(prompt);
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.ai.reveal",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const out = await retryOnceOnTransientDbError(async () => {

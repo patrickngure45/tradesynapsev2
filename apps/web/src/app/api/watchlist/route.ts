@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { apiError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { getSql } from "@/lib/db";
@@ -64,6 +65,16 @@ export async function POST(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "watchlist.write",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
+
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
     if (activeErr) return apiError(activeErr);
@@ -101,6 +112,16 @@ export async function DELETE(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "watchlist.write",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

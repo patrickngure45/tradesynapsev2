@@ -1,4 +1,6 @@
 import { assessExchangeWithdrawalRiskV0 } from "@/lib/risk/exchange";
+import { getSql } from "@/lib/db";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +12,17 @@ export const dynamic = "force-dynamic";
  * No auth required — this is a read-only simulation.
  */
 export async function POST(request: Request) {
+  const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "ai.risk_simulate",
+    windowMs: 60_000,
+    max: 30,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
+
   let body: Record<string, unknown>;
   try {
     body = await request.json();

@@ -4,6 +4,7 @@ import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { addArcadeXp } from "@/lib/arcade/progression";
 
 export const runtime = "nodejs";
@@ -32,6 +33,15 @@ export async function POST(request: Request) {
   const optionCode = String(input.option_code).trim();
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.draft.pick",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const out = await retryOnceOnTransientDbError(async () => {

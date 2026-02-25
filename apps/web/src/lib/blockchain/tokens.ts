@@ -6,6 +6,7 @@
  */
 import { ethers } from "ethers";
 import { getBscProvider, getBscReadProvider } from "./wallet";
+import { isLikelyRpcTransportError, markRpcFail, markRpcOk, rankRpcUrls } from "@/lib/blockchain/rpcHealth";
 
 // ── Standard BEP-20 ABI (minimal) ───────────────────────────────────
 const ERC20_ABI = [
@@ -98,15 +99,43 @@ export async function sendToken(
   amount: string,
   decimals: number = 18,
 ): Promise<{ txHash: string }> {
-  const provider = getBscProvider();
-  const signer = new ethers.Wallet(privateKey, provider);
-  const contract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+  // Prefer multi-RPC failover when BSC_RPC_URLS is configured.
+  const urls = rankRpcUrls("bsc");
+  const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
+  const network = ethers.Network.from({ name: "bnb", chainId });
 
   const amountWei = ethers.parseUnits(amount, decimals);
-  const tx = await contract.transfer(to, amountWei) as ethers.TransactionResponse;
-  await tx.wait(1);
+  let lastErr: unknown = null;
 
-  return { txHash: tx.hash };
+  // If only one URL is configured, keep the historical behavior.
+  if (urls.length <= 1) {
+    const provider = getBscProvider();
+    const signer = new ethers.Wallet(privateKey, provider);
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+    const tx = (await contract.transfer(to, amountWei)) as ethers.TransactionResponse;
+    await tx.wait(1);
+    return { txHash: tx.hash };
+  }
+
+  for (const url of urls) {
+    const provider = new ethers.JsonRpcProvider(url, network, { staticNetwork: network });
+    const signer = new ethers.Wallet(privateKey, provider);
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+    const t0 = Date.now();
+    try {
+      const tx = (await contract.transfer(to, amountWei)) as ethers.TransactionResponse;
+      markRpcOk(url, Date.now() - t0);
+      // Waiting can fail due to transport issues even when the tx broadcast succeeded.
+      await tx.wait(1).catch(() => undefined);
+      return { txHash: tx.hash };
+    } catch (e) {
+      markRpcFail(url);
+      lastErr = e;
+      if (!isLikelyRpcTransportError(e)) throw e;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error("bsc_rpc_all_failed");
 }
 
 /** Send native BNB */
@@ -115,14 +144,36 @@ export async function sendBnb(
   to: string,
   amount: string,
 ): Promise<{ txHash: string }> {
-  const provider = getBscProvider();
-  const signer = new ethers.Wallet(privateKey, provider);
+  const urls = rankRpcUrls("bsc");
+  const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
+  const network = ethers.Network.from({ name: "bnb", chainId });
 
-  const tx = await signer.sendTransaction({
-    to,
-    value: ethers.parseEther(amount),
-  });
-  await tx.wait(1);
+  const value = ethers.parseEther(amount);
+  let lastErr: unknown = null;
 
-  return { txHash: tx.hash };
+  if (urls.length <= 1) {
+    const provider = getBscProvider();
+    const signer = new ethers.Wallet(privateKey, provider);
+    const tx = await signer.sendTransaction({ to, value });
+    await tx.wait(1);
+    return { txHash: tx.hash };
+  }
+
+  for (const url of urls) {
+    const provider = new ethers.JsonRpcProvider(url, network, { staticNetwork: network });
+    const signer = new ethers.Wallet(privateKey, provider);
+    const t0 = Date.now();
+    try {
+      const tx = await signer.sendTransaction({ to, value });
+      markRpcOk(url, Date.now() - t0);
+      await tx.wait(1).catch(() => undefined);
+      return { txHash: tx.hash };
+    } catch (e) {
+      markRpcFail(url);
+      lastErr = e;
+      if (!isLikelyRpcTransportError(e)) throw e;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error("bsc_rpc_all_failed");
 }

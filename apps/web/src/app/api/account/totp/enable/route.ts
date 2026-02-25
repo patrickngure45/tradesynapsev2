@@ -5,6 +5,7 @@ import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { sendMail } from "@/lib/email/transport";
 import { securityAlertEmail } from "@/lib/email/templates";
 import { apiError } from "@/lib/api/errors";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,16 @@ export async function POST(request: Request) {
   if (authErr || !actingUserId) {
     return apiError(authErr ?? "unauthorized", { status: 401 });
   }
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.totp.enable",
+    windowMs: 60_000,
+    max: 10,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   let body: { code?: string };
   try {

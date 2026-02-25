@@ -2,6 +2,8 @@
 
 This file is the single source of truth for what we’re building next, why, and in what order.
 
+See also: MASTER_TODO.md for the full end-to-end completion roadmap.
+
 ## Product decisions (locked)
 
 - **Real user** = `email + password` (phone optional; not required).

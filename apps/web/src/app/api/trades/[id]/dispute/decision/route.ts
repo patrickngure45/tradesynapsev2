@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { getSql } from "@/lib/db";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { canResolveFromDispute } from "@/lib/state/trade";
 import { canTransitionDispute, isOpenLikeDisputeStatus } from "@/lib/state/dispute";
 import { apiError, apiZodError } from "@/lib/api/errors";
@@ -35,6 +36,16 @@ export async function POST(
   } catch (e) {
     return apiZodError(e) ?? apiError("invalid_input");
   }
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "trades.dispute.decision",
+    windowMs: 60_000,
+    max: 20,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   const json = await request.json().catch(() => ({}));
   let input: z.infer<typeof postDecisionSchema>;

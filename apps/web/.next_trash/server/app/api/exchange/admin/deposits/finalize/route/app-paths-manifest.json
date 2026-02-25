@@ -1,0 +1,3 @@
+{
+  "/api/exchange/admin/deposits/finalize/route": "app/api/exchange/admin/deposits/finalize/route.js"
+}

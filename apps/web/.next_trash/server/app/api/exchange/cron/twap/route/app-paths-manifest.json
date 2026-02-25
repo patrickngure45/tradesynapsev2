@@ -1,0 +1,3 @@
+{
+  "/api/exchange/cron/twap/route": "app/api/exchange/cron/twap/route.js"
+}

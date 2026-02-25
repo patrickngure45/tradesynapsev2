@@ -1,0 +1,3 @@
+{
+  "/api/exchange/admin/withdrawals/[id]/broadcast/route": "app/api/exchange/admin/withdrawals/[id]/broadcast/route.js"
+}

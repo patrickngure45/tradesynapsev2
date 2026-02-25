@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { v2ButtonClassName } from "@/components/v2/Button";
 
 /* ------------------------------------------------------------------ */
 /*  Reusable Modal — supports confirm, prompt (text input), and info  */
@@ -72,7 +73,7 @@ export function Modal({
   if (!open) return null;
 
   const defaultConfirmClass =
-    "rounded-lg bg-[linear-gradient(135deg,var(--accent),var(--accent-2))] px-4 py-2 text-xs font-semibold text-white shadow-[var(--shadow)] disabled:opacity-60";
+    v2ButtonClassName({ variant: "primary", size: "sm" });
 
   return (
     <div
@@ -85,13 +86,13 @@ export function Modal({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="mx-4 w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-lg">
+      <div className="mx-4 w-full max-w-md rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-6 shadow-[var(--v2-shadow-md)]">
         {/* Title */}
-        <h2 className="text-sm font-semibold text-[var(--foreground)]">{title}</h2>
+        <h2 className="text-[15px] font-semibold text-[var(--v2-text)]">{title}</h2>
 
         {/* Description */}
         {description ? (
-          <p className="mt-2 text-xs text-[var(--muted)]">{description}</p>
+          <p className="mt-2 text-[13px] text-[var(--v2-muted)]">{description}</p>
         ) : null}
 
         {/* Prompt input */}
@@ -99,7 +100,7 @@ export function Modal({
           <input
             ref={inputRef}
             type="text"
-            className="mt-3 w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--accent)]"
+            className="mt-3 h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[14px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none transition placeholder:text-[color-mix(in_srgb,var(--v2-muted)_70%,transparent)] focus:ring-2 focus:ring-[var(--v2-ring)]"
             placeholder={promptPlaceholder}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -115,7 +116,7 @@ export function Modal({
           {variant !== "info" ? (
             <button
               type="button"
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs text-[var(--muted)] transition hover:text-[var(--foreground)] disabled:opacity-60"
+              className={v2ButtonClassName({ variant: "secondary", size: "sm" })}
               disabled={loading}
               onClick={onCancel}
             >

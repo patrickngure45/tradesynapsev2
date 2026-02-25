@@ -1,0 +1,3 @@
+{
+  "/api/exchange/withdrawals/request/route": "app/api/exchange/withdrawals/request/route.js"
+}

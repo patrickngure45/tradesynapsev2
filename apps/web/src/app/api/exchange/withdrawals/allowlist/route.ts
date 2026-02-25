@@ -8,9 +8,24 @@ import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransie
 import { enforceTotpRequired } from "@/lib/auth/requireTotp";
 import { auditContextFromRequest, writeAuditLog } from "@/lib/auditLog";
 import { getStepUpTokenFromRequest, verifyStepUpToken } from "@/lib/auth/stepUp";
+import { createPgRateLimiter, type PgRateLimiter } from "@/lib/rateLimitPg";
+import { logRouteResponse } from "@/lib/routeLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+let allowlistLimiter: PgRateLimiter | null = null;
+function getAllowlistLimiter(sql: ReturnType<typeof getSql>): PgRateLimiter {
+  if (allowlistLimiter) return allowlistLimiter;
+  const raw = Number(String(process.env.EXCHANGE_WITHDRAW_ALLOWLIST_MAX_PER_MIN ?? "4").trim());
+  const max = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 4;
+  allowlistLimiter = createPgRateLimiter(sql as any, {
+    name: "exchange-withdraw-allowlist",
+    windowMs: 60_000,
+    max,
+  });
+  return allowlistLimiter;
+}
 
 const bscAddress = z
   .string()
@@ -25,15 +40,26 @@ const createSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const startMs = Date.now();
   const sql = getSql();
+  let actingUserId: string | null = null;
+
+  const reply = (response: Response, meta?: Record<string, unknown>) => {
+    try {
+      logRouteResponse(request, response, { startMs, userId: actingUserId, meta });
+    } catch {
+      // ignore
+    }
+    return response;
+  };
 
   const authed = await requireSessionUserId(sql as any, request);
-  if (!authed.ok) return authed.response;
-  const actingUserId = authed.userId;
+  if (!authed.ok) return reply(authed.response, { code: "unauthorized" });
+  actingUserId = authed.userId;
 
   try {
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
-    if (activeErr) return apiError(activeErr);
+    if (activeErr) return reply(apiError(activeErr), { code: activeErr });
 
     const rows = await retryOnceOnTransientDbError(async () => {
       return await sql<
@@ -55,31 +81,50 @@ export async function GET(request: Request) {
       `;
     });
 
-    return Response.json({ user_id: actingUserId, addresses: rows });
+    return reply(Response.json({ user_id: actingUserId, addresses: rows }), { ok: true });
   } catch (e) {
     const resp = responseForDbError("exchange.withdrawals.allowlist.list", e);
-    if (resp) return resp;
+    if (resp) return reply(resp, { code: "db_error" });
     throw e;
   }
 }
 
 export async function POST(request: Request) {
+  const startMs = Date.now();
   const sql = getSql();
+  let actingUserId: string | null = null;
+
+  const reply = (response: Response, meta?: Record<string, unknown>) => {
+    try {
+      logRouteResponse(request, response, { startMs, userId: actingUserId, meta });
+    } catch {
+      // ignore
+    }
+    return response;
+  };
 
   const authed = await requireSessionUserId(sql as any, request);
-  if (!authed.ok) return authed.response;
-  const actingUserId = authed.userId;
+  if (!authed.ok) return reply(authed.response, { code: "unauthorized" });
+  actingUserId = authed.userId;
 
   try {
+    // Abuse prevention: rate limit allowlist writes.
+    try {
+      const rl = await getAllowlistLimiter(sql).consume(`u:${actingUserId}`);
+      if (!rl.allowed) return reply(apiError("rate_limit_exceeded", { status: 429 }), { code: "rate_limit_exceeded" });
+    } catch {
+      // If limiter fails, do not block allowlist updates.
+    }
+
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));
-    if (activeErr) return apiError(activeErr);
+    if (activeErr) return reply(apiError(activeErr), { code: activeErr });
 
     const body = await request.json().catch(() => ({}));
     let input: z.infer<typeof createSchema>;
     try {
       input = createSchema.parse(body);
     } catch (e) {
-      return apiZodError(e) ?? apiError("invalid_input");
+      return reply(apiZodError(e) ?? apiError("invalid_input"), { code: "invalid_input" });
     }
 
     // Security gates: email verified + strong auth.
@@ -92,16 +137,16 @@ export async function POST(request: Request) {
       `
     );
     const u = uRows[0];
-    if (!u) return apiError("user_not_found");
+    if (!u) return reply(apiError("user_not_found"), { code: "user_not_found" });
     if (!u.email_verified) {
-      return apiError("email_not_verified", {
+      return reply(apiError("email_not_verified", {
         status: 403,
         details: { message: "Verify your email before modifying withdrawal allowlists." },
-      });
+      }), { code: "email_not_verified" });
     }
 
     const secret = process.env.PROOFPACK_SESSION_SECRET ?? "";
-    if (!secret) return apiError("session_secret_not_configured");
+    if (!secret) return reply(apiError("session_secret_not_configured"), { code: "session_secret_not_configured" });
 
     const stepUpToken = getStepUpTokenFromRequest(request);
     const stepUp =
@@ -113,7 +158,7 @@ export async function POST(request: Request) {
     if (!stepUpOk) {
       if (u.totp_enabled) {
         const totpResp = await enforceTotpRequired(sql, actingUserId, input.totp_code);
-        if (totpResp) return totpResp;
+        if (totpResp) return reply(totpResp, { code: "totp_required" });
       } else {
         const pk = await retryOnceOnTransientDbError(() =>
           sql<{ c: number }[]>`
@@ -123,15 +168,15 @@ export async function POST(request: Request) {
           `
         );
         if ((pk[0]?.c ?? 0) > 0) {
-          return apiError("stepup_required", {
+          return reply(apiError("stepup_required", {
             status: 403,
             details: { message: "Confirm with your passkey to continue." },
-          });
+          }), { code: "stepup_required" });
         }
-        return apiError("totp_setup_required", {
+        return reply(apiError("totp_setup_required", {
           status: 403,
           details: { message: "Set up 2FA or add a passkey before modifying allowlists." },
-        });
+        }), { code: "totp_setup_required" });
       }
     }
 
@@ -174,10 +219,13 @@ export async function POST(request: Request) {
       },
     });
 
-    return Response.json({ address: rows[0] }, { status: 201 });
+    return reply(Response.json({ address: rows[0] }, { status: 201 }), {
+      ok: true,
+      address_id: rows[0]?.id ?? null,
+    });
   } catch (e) {
     const resp = responseForDbError("exchange.withdrawals.allowlist.create", e);
-    if (resp) return resp;
+    if (resp) return reply(resp, { code: "db_error" });
     throw e;
   }
 }

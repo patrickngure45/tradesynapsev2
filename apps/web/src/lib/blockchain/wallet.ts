@@ -10,37 +10,18 @@
 import { ethers } from "ethers";
 import type { Sql } from "postgres";
 
+import { getRpcUrls } from "@/lib/blockchain/rpcHealth";
+
 // ── BSC RPC Provider ─────────────────────────────────────────────────
 let _provider: ethers.JsonRpcProvider | null = null;
 let _readProvider: ethers.AbstractProvider | null = null;
 let _ethProvider: ethers.JsonRpcProvider | null = null;
-
-function parseRpcUrls(raw: string): string[] {
-  return raw
-    .split(/[\s,\n]+/g)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .filter((u) => u.startsWith("http://") || u.startsWith("https://"));
-}
-
-function getBscRpcUrls(): string[] {
-  const primary = (process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org").trim();
-  const extraRaw = (process.env.BSC_RPC_URLS ?? process.env.BSC_RPC_FALLBACK_URLS ?? "").trim();
-  const extras = extraRaw ? parseRpcUrls(extraRaw) : [];
-  const out = [primary, ...extras].map((s) => s.trim()).filter(Boolean);
-  // de-dupe
-  const seen = new Set<string>();
-  return out.filter((u) => {
-    const key = u.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+let _ethReadProvider: ethers.AbstractProvider | null = null;
 
 export function getBscProvider(): ethers.JsonRpcProvider {
   if (!_provider) {
-    const rpcUrl = (process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org").trim();
+    const urls = getRpcUrls("bsc");
+    const rpcUrl = (urls[0] || "https://bsc-dataseed1.binance.org").trim();
     const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
     const network = ethers.Network.from({ name: "bnb", chainId });
     _provider = new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network });
@@ -57,7 +38,7 @@ export function getBscProvider(): ethers.JsonRpcProvider {
 export function getBscReadProvider(): ethers.AbstractProvider {
   if (_readProvider) return _readProvider;
 
-  const urls = getBscRpcUrls();
+  const urls = getRpcUrls("bsc");
   const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
   const network = ethers.Network.from({ name: "bnb", chainId });
 
@@ -83,12 +64,46 @@ export function getBscReadProvider(): ethers.AbstractProvider {
 
 export function getEthProvider(): ethers.JsonRpcProvider {
   if (!_ethProvider) {
-    const rpcUrl = process.env.ETH_RPC_URL || process.env.ETHEREUM_RPC_URL || "https://cloudflare-eth.com";
+    const urls = getRpcUrls("eth");
+    const rpcUrl = urls[0] || "https://cloudflare-eth.com";
     const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 11155111 : 1;
     const network = ethers.Network.from({ name: "ethereum", chainId });
     _ethProvider = new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network });
   }
   return _ethProvider;
+}
+
+/**
+ * Read-only provider with multi-RPC fallback for ETH.
+ *
+ * Uses ETH_RPC_URL as primary and ETH_RPC_URLS as comma/newline/space-separated fallbacks.
+ * Quorum is set to 1, so this behaves like a fast failover (not consensus).
+ */
+export function getEthReadProvider(): ethers.AbstractProvider {
+  if (_ethReadProvider) return _ethReadProvider;
+
+  const urls = getRpcUrls("eth");
+  const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 11155111 : 1;
+  const network = ethers.Network.from({ name: "ethereum", chainId });
+
+  if (urls.length <= 1) {
+    _ethReadProvider = getEthProvider();
+    return _ethReadProvider;
+  }
+
+  const stallTimeout = (() => {
+    const raw = String(process.env.ETH_RPC_STALL_TIMEOUT_MS ?? process.env.RPC_STALL_TIMEOUT_MS ?? "2000").trim();
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(200, Math.min(15_000, Math.trunc(n))) : 2000;
+  })();
+
+  const configs = urls.map((url, idx) => {
+    const provider = new ethers.JsonRpcProvider(url, network, { staticNetwork: network });
+    return { provider, priority: idx + 1, weight: 1, stallTimeout };
+  });
+
+  _ethReadProvider = new ethers.FallbackProvider(configs, network, { quorum: 1 });
+  return _ethReadProvider;
 }
 
 // ── HD Wallet ────────────────────────────────────────────────────────

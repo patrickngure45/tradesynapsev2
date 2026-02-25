@@ -16,9 +16,23 @@ import { add3818, bpsFeeCeil3818, fromBigInt3818, sub3818NonNegative, toBigInt38
 import { createNotification } from "@/lib/notifications";
 import { getStepUpTokenFromRequest, verifyStepUpToken } from "@/lib/auth/stepUp";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
+import { createPgRateLimiter, type PgRateLimiter } from "@/lib/rateLimitPg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+let withdrawalRequestLimiter: PgRateLimiter | null = null;
+function getWithdrawalRequestLimiter(sql: ReturnType<typeof getSql>): PgRateLimiter {
+  if (withdrawalRequestLimiter) return withdrawalRequestLimiter;
+  const raw = Number(String(process.env.EXCHANGE_WITHDRAW_REQUEST_MAX_PER_MIN ?? "6").trim());
+  const max = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 6;
+  withdrawalRequestLimiter = createPgRateLimiter(sql as any, {
+    name: "exchange-withdraw-request",
+    windowMs: 60_000,
+    max,
+  });
+  return withdrawalRequestLimiter;
+}
 
 const bscAddress = z
   .string()
@@ -99,20 +113,38 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
+  let actingUserId: string | null = null;
+  const reply = (response: Response, meta?: Record<string, unknown>) => {
+    try {
+      logRouteResponse(request, response, { startMs, userId: actingUserId, meta });
+    } catch {
+      // ignore
+    }
+    return response;
+  };
+
   const authed = await requireSessionUserId(sql as any, request);
-  if (!authed.ok) return authed.response;
-  const actingUserId = authed.userId;
+  if (!authed.ok) return reply(authed.response, { code: "unauthorized" });
+  actingUserId = authed.userId;
 
   try {
+    // Abuse prevention: rate limit withdrawal requests (even failed attempts can be expensive).
+    try {
+      const rl = await getWithdrawalRequestLimiter(sql).consume(`u:${actingUserId}`);
+      if (!rl.allowed) return reply(apiError("rate_limit_exceeded", { status: 429 }), { code: "rate_limit_exceeded" });
+    } catch {
+      // If limiter fails, do not block withdrawals.
+    }
+
     const activeErr = await requireActiveUser(sql, actingUserId);
-    if (activeErr) return apiError(activeErr);
+    if (activeErr) return reply(apiError(activeErr), { code: activeErr });
 
     const body = await request.json().catch(() => ({}));
     let input: z.infer<typeof requestSchema>;
     try {
       input = requestSchema.parse(body);
     } catch (e) {
-      return apiZodError(e) ?? apiError("invalid_input");
+      return reply(apiZodError(e) ?? apiError("invalid_input"), { code: "invalid_input" });
     }
 
     // Load asset symbol early (outside tx) so we can enforce auth/tier rules.
@@ -122,10 +154,10 @@ export async function POST(request: Request) {
       WHERE id = ${input.asset_id} AND is_enabled = true
       LIMIT 1
     `;
-    if (preAssets.length === 0) return apiError("not_found", { status: 404 });
+    if (preAssets.length === 0) return reply(apiError("not_found", { status: 404 }), { code: "not_found" });
     const preAsset = preAssets[0]!;
     if (preAsset.chain !== "bsc") {
-      return apiError("invalid_input", { status: 400, details: "unsupported_chain" });
+      return reply(apiError("invalid_input", { status: 400, details: "unsupported_chain" }), { code: "unsupported_chain" });
     }
     const sym = String(preAsset.symbol ?? "").toUpperCase();
 
@@ -137,17 +169,17 @@ export async function POST(request: Request) {
       LIMIT 1
     `;
     const u = uRows[0];
-    if (!u) return apiError("user_not_found");
+    if (!u) return reply(apiError("user_not_found"), { code: "user_not_found" });
     if (!u.email_verified) {
-      return apiError("email_not_verified", {
+      return reply(apiError("email_not_verified", {
         status: 403,
         details: { message: "Verify your email before requesting a withdrawal." },
-      });
+      }), { code: "email_not_verified" });
     }
 
     // Strong auth required. For large withdrawals, require passkey step-up if available.
     const secret = process.env.PROOFPACK_SESSION_SECRET ?? "";
-    if (!secret) return apiError("session_secret_not_configured");
+    if (!secret) return reply(apiError("session_secret_not_configured"), { code: "session_secret_not_configured" });
 
     const stepUpToken = getStepUpTokenFromRequest(request);
     const stepUp =
@@ -177,34 +209,34 @@ export async function POST(request: Request) {
     if (!stepUpOk) {
       if (isLargeWithdrawal) {
         if ((await getPasskeyCount()) > 0) {
-          return apiError("stepup_required", {
+          return reply(apiError("stepup_required", {
             status: 403,
             details: { message: "Large withdrawals require passkey confirmation.", required_for: "large_withdrawal" },
-          });
+          }), { code: "stepup_required" });
         }
         if (u.totp_enabled) {
           const totpResp = await enforceTotpRequired(sql, actingUserId, input.totp_code);
-          if (totpResp) return totpResp;
+          if (totpResp) return reply(totpResp, { code: "totp_required" });
         } else {
-          return apiError("totp_setup_required", {
+          return reply(apiError("totp_setup_required", {
             status: 403,
             details: { message: "Set up 2FA before requesting large withdrawals." },
-          });
+          }), { code: "totp_setup_required" });
         }
       } else if (u.totp_enabled) {
         const totpResp = await enforceTotpRequired(sql, actingUserId, input.totp_code);
-        if (totpResp) return totpResp;
+        if (totpResp) return reply(totpResp, { code: "totp_required" });
       } else {
         if ((await getPasskeyCount()) > 0) {
-          return apiError("stepup_required", {
+          return reply(apiError("stepup_required", {
             status: 403,
             details: { message: "Confirm with your passkey to continue." },
-          });
+          }), { code: "stepup_required" });
         }
-        return apiError("totp_setup_required", {
+        return reply(apiError("totp_setup_required", {
           status: 403,
           details: { message: "Set up 2FA or add a passkey before requesting a withdrawal." },
-        });
+        }), { code: "totp_setup_required" });
       }
     }
 
@@ -215,13 +247,15 @@ export async function POST(request: Request) {
     // ── Velocity check (hard limit, outside the transaction) ──────────
     const velocity = await checkWithdrawalVelocity(sql, actingUserId, input.amount);
     if (!velocity.ok) {
-      return Response.json(
-        { error: velocity.code, detail: velocity.detail },
-        { status: 429, headers: { "Retry-After": "60" } },
+      return reply(
+        Response.json(
+          { error: velocity.code, detail: velocity.detail },
+          { status: 429, headers: { "Retry-After": "60" } },
+        ),
+        { code: velocity.code },
       );
     }
 
-    // ── Tier-based withdrawal limits (stable assets only) ───────────
     // These limits operate per-asset so units are meaningful (e.g. USDT).
     // For non-stable assets, require full KYC by default.
     // Override via env if needed.
@@ -234,21 +268,21 @@ export async function POST(request: Request) {
 
     if (kycLevel === "none") {
       if (!noneAllowed.includes(sym)) {
-        return apiError("kyc_required_for_asset", {
+        return reply(apiError("kyc_required_for_asset", {
           status: 403,
           details: { message: `Full verification is required to withdraw ${sym}.`, required_kyc: "full" },
-        });
+        }), { code: "kyc_required_for_asset" });
       }
       if (noneMaxSingle && toBigInt3818(input.amount) > noneMaxSingle) {
-        return apiError("withdrawal_requires_kyc", {
+        return reply(apiError("withdrawal_requires_kyc", {
           status: 403,
           details: { message: "Withdrawal amount exceeds the no-KYC limit.", required_kyc: "basic", limit: process.env.WITHDRAWAL_NO_KYC_MAX_SINGLE ?? "50" },
-        });
+        }), { code: "withdrawal_requires_kyc" });
       }
       if (noneMax24h) {
         const sum24h = await sumWithdrawals24hForAsset(sql, { userId: actingUserId, assetId: preAsset.id });
         if (toBigInt3818(sum24h) + toBigInt3818(input.amount) > noneMax24h) {
-          return apiError("withdrawal_requires_kyc", {
+          return reply(apiError("withdrawal_requires_kyc", {
             status: 403,
             details: {
               message: "Daily withdrawal limit reached for non-verified accounts.",
@@ -256,28 +290,28 @@ export async function POST(request: Request) {
               limit_24h: process.env.WITHDRAWAL_NO_KYC_MAX_24H ?? "100",
               current_24h: sum24h,
             },
-          });
+          }), { code: "withdrawal_requires_kyc" });
         }
       }
     }
 
     if (kycLevel === "basic") {
       if (!basicAllowed.includes(sym)) {
-        return apiError("kyc_required_for_asset", {
+        return reply(apiError("kyc_required_for_asset", {
           status: 403,
           details: { message: `Full verification is required to withdraw ${sym}.`, required_kyc: "full" },
-        });
+        }), { code: "kyc_required_for_asset" });
       }
       if (basicMaxSingle && toBigInt3818(input.amount) > basicMaxSingle) {
-        return apiError("withdrawal_requires_kyc", {
+        return reply(apiError("withdrawal_requires_kyc", {
           status: 403,
           details: { message: "Withdrawal amount exceeds the Basic tier limit.", required_kyc: "full", limit: process.env.WITHDRAWAL_BASIC_MAX_SINGLE ?? "2000" },
-        });
+        }), { code: "withdrawal_requires_kyc" });
       }
       if (basicMax24h) {
         const sum24h = await sumWithdrawals24hForAsset(sql, { userId: actingUserId, assetId: preAsset.id });
         if (toBigInt3818(sum24h) + toBigInt3818(input.amount) > basicMax24h) {
-          return apiError("withdrawal_requires_kyc", {
+          return reply(apiError("withdrawal_requires_kyc", {
             status: 403,
             details: {
               message: "Daily withdrawal limit reached for Basic tier.",
@@ -285,7 +319,7 @@ export async function POST(request: Request) {
               limit_24h: process.env.WITHDRAWAL_BASIC_MAX_24H ?? "5000",
               current_24h: sum24h,
             },
-          });
+          }), { code: "withdrawal_requires_kyc" });
         }
       }
     }
@@ -746,11 +780,12 @@ export async function POST(request: Request) {
 
     const err = result.body as { error?: string; details?: unknown };
     if (typeof err.error === "string") {
-      return apiError(err.error, { status: result.status, details: err.details });
+      return reply(apiError(err.error, { status: result.status, details: err.details }), { code: err.error });
     }
 
-    const response = Response.json(result.body, { status: result.status });
-    logRouteResponse(request, response, { startMs, userId: actingUserId, meta: { withdrawalId: (result.body as any)?.withdrawal?.id } });
+    const response = reply(Response.json(result.body, { status: result.status }), {
+      withdrawalId: (result.body as any)?.withdrawal?.id,
+    });
 
     try {
       const w = (result.body as any)?.withdrawal;
@@ -770,12 +805,12 @@ export async function POST(request: Request) {
     return response;
   } catch (e) {
     const resp = responseForDbError("exchange.withdrawals.request", e);
-    if (resp) return resp;
+    if (resp) return reply(resp, { code: "db_error" });
     console.error("exchange.withdrawals.request failed:", e);
-    return apiError("internal_error", {
+    return reply(apiError("internal_error", {
       details: {
         message: e instanceof Error ? e.message : String(e),
       },
-    });
+    }), { code: "internal_error" });
   }
 }

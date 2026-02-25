@@ -1,10 +1,11 @@
 import { ethers } from "ethers";
 import type { Sql } from "postgres";
 
-import { getBscProvider, getDepositAddressKey } from "@/lib/blockchain/wallet";
+import { getBscReadProvider, getDepositAddressKey } from "@/lib/blockchain/wallet";
 import { getHotWalletAddress, getHotWalletKey } from "@/lib/blockchain/hotWallet";
 import { getTokenBalance, sendBnb, sendToken } from "@/lib/blockchain/tokens";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
+import { isLikelyRpcTransportError, markRpcFail, markRpcOk, rankRpcUrls } from "@/lib/blockchain/rpcHealth";
 
 const SYSTEM_TREASURY_USER_ID = "00000000-0000-0000-0000-000000000001";
 const SYSTEM_BURN_USER_ID = "00000000-0000-0000-0000-000000000003";
@@ -103,6 +104,57 @@ async function gasCostWeiFromReceipt(provider: ethers.AbstractProvider, txHash: 
   const gasPrice = ((receipt as any).effectiveGasPrice ?? (receipt as any).gasPrice) as bigint | undefined;
   if (typeof gasUsed !== "bigint" || typeof gasPrice !== "bigint") return null;
   return gasUsed * gasPrice;
+}
+
+async function sendNativeBnbWithFailover(args: {
+  privateKey: string;
+  to: string;
+  valueWei: bigint;
+  gasLimit: bigint;
+  gasPrice: bigint;
+}): Promise<{ txHash: string }> {
+  const urls = rankRpcUrls("bsc");
+  const chainId = Number(process.env.NEXT_PUBLIC_USE_MAINNET) === 0 ? 97 : 56;
+  const network = ethers.Network.from({ name: "bnb", chainId });
+
+  let lastErr: unknown = null;
+
+  // If only one URL is configured, do the simple thing.
+  if (urls.length <= 1) {
+    const provider = new ethers.JsonRpcProvider(urls[0] || (process.env.BSC_RPC_URL || "https://bsc-dataseed1.binance.org"), network, { staticNetwork: network });
+    const wallet = new ethers.Wallet(args.privateKey, provider);
+    const tx = await wallet.sendTransaction({
+      to: args.to,
+      value: args.valueWei,
+      gasLimit: args.gasLimit,
+      gasPrice: args.gasPrice,
+    });
+    await tx.wait(1);
+    return { txHash: tx.hash };
+  }
+
+  for (const url of urls) {
+    const provider = new ethers.JsonRpcProvider(url, network, { staticNetwork: network });
+    const wallet = new ethers.Wallet(args.privateKey, provider);
+    const t0 = Date.now();
+    try {
+      const tx = await wallet.sendTransaction({
+        to: args.to,
+        value: args.valueWei,
+        gasLimit: args.gasLimit,
+        gasPrice: args.gasPrice,
+      });
+      markRpcOk(url, Date.now() - t0);
+      await tx.wait(1).catch(() => undefined);
+      return { txHash: tx.hash };
+    } catch (e) {
+      markRpcFail(url);
+      lastErr = e;
+      if (!isLikelyRpcTransportError(e)) throw e;
+    }
+  }
+
+  throw lastErr instanceof Error ? lastErr : new Error("bsc_rpc_all_failed");
 }
 
 async function recordGasSpend(
@@ -249,7 +301,7 @@ export async function sweepBscDeposits(
   const TOKEN_CANDIDATES_ONLY = envBool("SWEEP_TOKEN_CANDIDATES_ONLY");
   const TOKEN_LOOKBACK_HOURS = clampInt(envNum("SWEEP_TOKEN_LOOKBACK_HOURS", 24 * 30), 1, 24 * 365);
 
-  const provider = getBscProvider();
+  const provider = getBscReadProvider();
   const hotWallet = getHotWalletAddress();
   if (!ethers.isAddress(hotWallet)) {
     throw new Error("invalid_hot_wallet_address");
@@ -484,19 +536,19 @@ export async function sweepBscDeposits(
         console.log(`  PLAN: sweep ${ethers.formatEther(sweepable)} BNB -> ${hotWallet}`);
       if (EXECUTE) {
         try {
-          const wallet = new ethers.Wallet(privKey, provider);
-          const tx = await wallet.sendTransaction({
+          const tx = await sendNativeBnbWithFailover({
+            privateKey: privKey,
             to: hotWallet,
-            value: sweepable,
+            valueWei: sweepable,
             gasLimit: NATIVE_TRANSFER_GAS,
             gasPrice,
           });
-          console.log(`  ✅ BNB swept: ${tx.hash}`);
+          console.log(`  ✅ BNB swept: ${tx.txHash}`);
           if (ACCOUNT_GAS_IN_LEDGER) {
-            const gasWei = await gasCostWeiFromReceipt(provider, tx.hash).catch(() => null);
+            const gasWei = await gasCostWeiFromReceipt(provider, tx.txHash).catch(() => null);
             if (gasWei) {
               await recordGasSpend(sql, {
-                txHash: tx.hash,
+                txHash: tx.txHash,
                 gasWei,
                 kind: "sweep_native",
                 metadata: { from: address },

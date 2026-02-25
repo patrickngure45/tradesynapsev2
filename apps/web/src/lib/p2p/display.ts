@@ -182,7 +182,7 @@ export function paymentMethodBadge(identifier: string): { label: string; classNa
   const tone = paymentTone(id);
 
   const base =
-    "inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--card-2)] px-2 py-1 text-[10px] font-semibold";
+    "inline-flex items-center gap-1 rounded-md border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-2 py-1 text-[10px] font-semibold";
 
   const dotBase = "before:content-[''] before:inline-block before:h-1.5 before:w-1.5 before:rounded-full";
 
@@ -190,22 +190,22 @@ export function paymentMethodBadge(identifier: string): { label: string; classNa
     case "success":
       return {
         label,
-        className: `${base} ${dotBase} before:bg-[var(--up)] text-[var(--up)]`,
+        className: `${base} ${dotBase} before:bg-[var(--v2-up)] text-[var(--v2-up)]`,
       };
     case "danger":
       return {
         label,
-        className: `${base} ${dotBase} before:bg-[var(--down)] text-[var(--down)]`,
+        className: `${base} ${dotBase} before:bg-[var(--v2-down)] text-[var(--v2-down)]`,
       };
     case "accent":
       return {
         label,
-        className: `${base} ${dotBase} before:bg-[var(--accent)] text-[var(--accent)]`,
+        className: `${base} ${dotBase} before:bg-[var(--v2-accent)] text-[var(--v2-accent)]`,
       };
     default:
       return {
         label,
-        className: `${base} ${dotBase} before:bg-[var(--muted)] text-[var(--foreground)]`,
+        className: `${base} ${dotBase} before:bg-[var(--v2-muted)] text-[var(--v2-text)]`,
       };
   }
 }

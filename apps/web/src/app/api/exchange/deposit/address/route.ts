@@ -23,6 +23,13 @@ const inputSchema = z
   })
   .optional();
 
+function parseCsvSymbols(raw: string): string[] {
+  return String(raw || "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
 export async function POST(request: Request) {
   const startMs = Date.now();
   const userId = getActingUserId(request);
@@ -53,10 +60,29 @@ export async function POST(request: Request) {
 
     const { address, isNew } = await getOrCreateDepositAddress(sql, userId, chain);
 
+    const tokenScanEnabledRaw = String(process.env.DEPOSIT_SCAN_TOKENS ?? "1").trim().toLowerCase();
+    const tokenScanEnabled = !(tokenScanEnabledRaw === "0" || tokenScanEnabledRaw === "false");
+    const allowTokenScanAll = String(process.env.ALLOW_TOKEN_SCAN_ALL ?? "").trim() === "1";
+    const allowlistedSymbols = parseCsvSymbols(String(process.env.DEPOSIT_SCAN_SYMBOLS ?? ""));
+
+    const supported =
+      chain === "bsc"
+        ? {
+            native: ["BNB"],
+            token_mode: !tokenScanEnabled ? "disabled" : allowTokenScanAll ? "all_enabled" : "allowlist",
+            token_symbols: tokenScanEnabled && !allowTokenScanAll ? allowlistedSymbols : ([] as string[]),
+          }
+        : {
+            native: ["ETH"],
+            token_mode: "disabled" as const,
+            token_symbols: [] as string[],
+          };
+
     const response = Response.json({
       address,
       chain,
       is_new: isNew,
+      supported,
     });
 
     logRouteResponse(request, response, { startMs, meta: { userId, isNew, chain } });

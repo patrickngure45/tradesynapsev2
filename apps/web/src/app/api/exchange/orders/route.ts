@@ -18,6 +18,7 @@ import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { createNotification } from "@/lib/notifications";
 import { propagateLeaderOrder } from "@/lib/exchange/copyTrading";
 import { chargeGasFee } from "@/lib/exchange/gas";
+import { createPgRateLimiter } from "@/lib/rateLimitPg";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,21 +104,31 @@ export async function GET(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
+  let actingUserId: string | null = null;
+  const reply = (response: Response, meta?: Record<string, unknown>) => {
+    try {
+      logRouteResponse(request, response, { startMs, userId: actingUserId, meta });
+    } catch {
+      // ignore
+    }
+    return response;
+  };
+
   const authed = await requireSessionUserId(sql as any, request);
-  if (!authed.ok) return authed.response;
-  const actingUserId = authed.userId;
+  if (!authed.ok) return reply(authed.response, { code: "unauthorized" });
+  actingUserId = authed.userId;
 
   const scopeRes = await retryOnceOnTransientDbError(() => resolveReadOnlyUserScope(sql, request, actingUserId));
-  if (!scopeRes.ok) return apiError(scopeRes.error);
+  if (!scopeRes.ok) return reply(apiError(scopeRes.error, { status: 403 }), { code: scopeRes.error });
   const userId = scopeRes.scope.userId;
 
   try {
     const activeErr = await requireActiveUser(sql, userId);
-    if (activeErr) return apiError(activeErr);
+    if (activeErr) return reply(apiError(activeErr), { code: activeErr });
 
     const url = new URL(request.url);
     const marketId = url.searchParams.get("market_id");
-    if (marketId && !z.string().uuid().safeParse(marketId).success) return apiError("invalid_market_id");
+    if (marketId && !z.string().uuid().safeParse(marketId).success) return reply(apiError("invalid_market_id"), { code: "invalid_market_id" });
 
     const rows = await retryOnceOnTransientDbError(async () => {
       return await sql<OrderRow[]>`
@@ -144,16 +155,12 @@ export async function GET(request: Request) {
       `;
     });
 
-    const response = Response.json({ user_id: userId, orders: rows });
-    logRouteResponse(request, response, {
-      startMs,
-      userId: actingUserId,
-      meta: scopeRes.scope.impersonating ? { impersonate_user_id: userId } : undefined,
-    });
-    return response;
+    return reply(Response.json({ user_id: userId, orders: rows }),
+      scopeRes.scope.impersonating ? { impersonate_user_id: userId } : undefined
+    );
   } catch (e) {
     const resp = responseForDbError("exchange.orders.list", e);
-    if (resp) return resp;
+    if (resp) return reply(resp, { code: "db_error" });
     throw e;
   }
 }
@@ -162,20 +169,43 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
+  let actingUserId: string | null = null;
+  const reply = (response: Response, meta?: Record<string, unknown>) => {
+    try {
+      logRouteResponse(request, response, { startMs, userId: actingUserId, meta });
+    } catch {
+      // ignore
+    }
+    return response;
+  };
+
   const authed = await requireSessionUserId(sql as any, request);
-  if (!authed.ok) return authed.response;
-  const actingUserId = authed.userId;
+  if (!authed.ok) return reply(authed.response, { code: "unauthorized" });
+  actingUserId = authed.userId;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
-    if (activeErr) return apiError(activeErr);
+    if (activeErr) return reply(apiError(activeErr), { code: activeErr });
+
+    // Optional per-user place rate limit (prevents automation/spam).
+    // Default is off to avoid breaking high-frequency strategies; enable via env.
+    const placeMax = Number(String(process.env.EXCHANGE_PLACE_MAX_PER_MIN ?? "").trim() || "0");
+    if (Number.isFinite(placeMax) && placeMax > 0) {
+      try {
+        const limiter = createPgRateLimiter(sql as any, { name: "exchange-place", windowMs: 60_000, max: Math.trunc(placeMax) });
+        const rl = await limiter.consume(`u:${actingUserId}`);
+        if (!rl.allowed) return reply(apiError("rate_limit_exceeded", { status: 429 }), { code: "rate_limit_exceeded" });
+      } catch {
+        // If limiter fails, do not block order placement.
+      }
+    }
 
     const body = await request.json().catch(() => ({}));
     let input: z.infer<typeof placeOrderSchema>;
     try {
       input = placeOrderSchema.parse(body);
     } catch (e) {
-      return apiZodError(e) ?? apiError("invalid_input");
+      return reply(apiZodError(e) ?? apiError("invalid_input"), { code: "invalid_input" });
     }
 
     const idemScope = "exchange.orders.place";
@@ -1349,11 +1379,10 @@ export async function POST(request: Request) {
         // ignore
       }
 
-      return apiError(err.error, { status: result.status, details: err.details });
+      return reply(apiError(err.error, { status: result.status, details: err.details }), { code: err.error });
     }
 
-    const response = Response.json(result.body, { status: result.status });
-    logRouteResponse(request, response, { startMs, userId: actingUserId, meta: { orderId: (result.body as any)?.order?.id } });
+    const response = reply(Response.json(result.body, { status: result.status }), { orderId: (result.body as any)?.order?.id });
 
     try {
       const o = (result.body as any)?.order;
@@ -1388,7 +1417,7 @@ export async function POST(request: Request) {
     return response;
   } catch (e) {
     const resp = responseForDbError("exchange.orders.place", e);
-    if (resp) return resp;
+    if (resp) return reply(resp, { code: "db_error" });
     throw e;
   }
 }

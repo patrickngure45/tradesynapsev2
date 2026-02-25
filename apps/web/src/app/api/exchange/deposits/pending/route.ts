@@ -4,7 +4,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
 import { apiError } from "@/lib/api/errors";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
-import { getBscProvider } from "@/lib/blockchain/wallet";
+import { getBscReadProvider } from "@/lib/blockchain/wallet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     let tip: number | null = null;
     let tip_error: string | null = null;
     try {
-      const provider = getBscProvider();
+      const provider = getBscReadProvider();
       tip = await provider.getBlockNumber();
     } catch (e) {
       tip_error = e instanceof Error ? e.message : String(e);

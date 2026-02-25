@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError } from "@/lib/api/errors";
 import { decryptCredential } from "@/lib/auth/credentials";
@@ -20,6 +21,16 @@ export async function POST(request: NextRequest) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "exchange.evacuate",
+    windowMs: 60_000,
+    max: 10,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

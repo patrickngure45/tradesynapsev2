@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
-import { ingestNativeBnbDepositTx, scanAndCreditBscDeposits } from "@/lib/blockchain/depositIngest";
+import {
+  finalizePendingBscDeposits,
+  ingestNativeBnbDepositTx,
+  scanAndCreditBscDeposits,
+} from "@/lib/blockchain/depositIngest";
 import { releaseJobLock, renewJobLock, tryAcquireJobLock } from "@/lib/system/jobLock";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,17 +16,6 @@ export const dynamic = "force-dynamic";
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.trunc(value)));
-}
-
-function requireCronAuth(req: NextRequest): string | null {
-  if (process.env.NODE_ENV !== "production") return null;
-
-  const configured = process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET;
-  if (!configured) return "cron_secret_not_configured";
-
-  const provided = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
-  if (!provided || provided !== configured) return "cron_unauthorized";
-  return null;
 }
 
 function requireEnabledInProd(): string | null {
@@ -34,7 +28,7 @@ function requireEnabledInProd(): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const authErr = requireCronAuth(req);
+  const authErr = requireCronRequestAuth(req);
   if (authErr) {
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });
@@ -110,6 +104,7 @@ export async function POST(req: NextRequest) {
   const tokensRaw = url.searchParams.get("tokens");
   const nativeRaw = url.searchParams.get("native");
   const symbolsRaw = url.searchParams.get("symbols");
+  const finalizeRaw = url.searchParams.get("finalize");
 
   const fromBlock = fromBlockRaw ? Number(fromBlockRaw) : undefined;
   // Hard cap request override values; use env vars for bigger backfills.
@@ -117,6 +112,7 @@ export async function POST(req: NextRequest) {
   const confirmations = confirmationsRaw ? Number(confirmationsRaw) : undefined;
   const blocksPerBatch = blocksPerBatchRaw ? clampInt(Number(blocksPerBatchRaw), 10, 3_000) : undefined;
   const maxMs = maxMsRaw ? clampInt(Number(maxMsRaw), 1_000, 120_000) : undefined;
+  const effectiveConfirmations = Number.isFinite(confirmations as any) ? (confirmations as number) : undefined;
 
   // Cron providers commonly enforce ~30s HTTP timeouts. In production, default to a
   // conservative time budget and small block range unless the caller explicitly overrides.
@@ -124,6 +120,13 @@ export async function POST(req: NextRequest) {
   const effectiveMaxMs = Number.isFinite(maxMs as any) ? (maxMs as number) : isProd ? 25_000 : undefined;
   const effectiveMaxBlocks = Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : isProd ? 80 : undefined;
   const effectiveBlocksPerBatch = Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : isProd ? 40 : undefined;
+
+  // Optional: run a quick finalize pass after scanning (credits any now-confirmed pending events).
+  // Gated by query/env so it can be rolled out safely.
+  const finalizeAfterScan =
+    finalizeRaw == null
+      ? String(process.env.EXCHANGE_FINALIZE_AFTER_SCAN ?? "").trim() === "1"
+      : !(finalizeRaw.trim() === "0" || finalizeRaw.trim().toLowerCase() === "false");
 
   const scanTokensRaw = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
   const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
@@ -157,11 +160,12 @@ export async function POST(req: NextRequest) {
         : false);
 
   try {
+    const startedAtMs = Date.now();
     await beat({ event: "start" });
     if (nativeTx) {
       const out = await ingestNativeBnbDepositTx(sql as any, {
         txHash: nativeTx,
-        confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
+        confirmations: effectiveConfirmations,
       });
       await beat({ event: "native_tx", ok: out.ok, tx_hash: nativeTx });
       const status = out.ok ? 200 : out.error === "tx_not_confirmed" ? 202 : 400;
@@ -171,7 +175,7 @@ export async function POST(req: NextRequest) {
     const result = await scanAndCreditBscDeposits(sql as any, {
       fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
       maxBlocks: effectiveMaxBlocks,
-      confirmations: Number.isFinite(confirmations as any) ? (confirmations as number) : undefined,
+      confirmations: effectiveConfirmations,
       blocksPerBatch: effectiveBlocksPerBatch,
       maxMs: effectiveMaxMs,
       scanTokens,
@@ -179,9 +183,33 @@ export async function POST(req: NextRequest) {
       tokenSymbols: tokenSymbols.length ? tokenSymbols : undefined,
     });
 
-    await beat({ event: "done", ...result });
+    let finalize: Awaited<ReturnType<typeof finalizePendingBscDeposits>> | null = null;
+    if (finalizeAfterScan) {
+      const spentMs = Date.now() - startedAtMs;
+      const timeLeftMs = effectiveMaxMs ? effectiveMaxMs - spentMs : undefined;
+      const finalizeMaxMs =
+        timeLeftMs == null
+          ? clampInt(Number(process.env.BSC_DEPOSIT_FINALIZE_MAX_MS_ON_SCAN ?? 3_000), 250, 60_000)
+          : clampInt(Math.floor(timeLeftMs - 250), 0, 60_000);
 
-    return NextResponse.json(result);
+      // If we're basically out of time, skip finalize to avoid cron timeouts.
+      if (finalizeMaxMs >= 500) {
+        const finalizeMax = clampInt(Number(process.env.BSC_DEPOSIT_FINALIZE_MAX_ON_SCAN ?? 50), 1, 500);
+        try {
+          finalize = await finalizePendingBscDeposits(sql as any, {
+            confirmations: effectiveConfirmations,
+            max: finalizeMax,
+            maxMs: finalizeMaxMs,
+          });
+        } catch {
+          // Don't fail the scan if finalize errors; scan is the more important job.
+        }
+      }
+    }
+
+    await beat({ event: "done", ...result, ...(finalize ? { finalize } : {}) });
+
+    return NextResponse.json({ ...result, ...(finalize ? { finalize } : {}) });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await beat({ event: "error", message });

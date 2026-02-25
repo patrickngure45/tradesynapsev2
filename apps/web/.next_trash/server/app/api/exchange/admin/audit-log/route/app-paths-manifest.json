@@ -1,0 +1,3 @@
+{
+  "/api/exchange/admin/audit-log/route": "app/api/exchange/admin/audit-log/route.js"
+}

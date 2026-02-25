@@ -834,15 +834,15 @@ async function recordDepositEventSeen(
   const outcome = inserted.length > 0 ? "inserted" : "exists";
 
   if (args.cols?.hasStatus) {
-    // Only mark as seen if it hasn't been credited/confirmed yet.
+    // Mark uncredited events as pending confirmations.
     await sql`
       UPDATE ex_chain_deposit_event
-      SET status = 'seen'
+      SET status = 'pending'
       WHERE chain = ${args.chain}
         AND tx_hash = ${args.txHash}
         AND log_index = ${args.logIndex}
         AND journal_entry_id IS NULL
-        AND (status IS NULL OR status <> 'confirmed')
+        AND status <> 'reverted'
     `;
   }
 
@@ -1092,6 +1092,91 @@ export async function scanAndCreditBscDeposits(
     }
   }
 
+  // ── Pending-detection (token transfers) ──────────────────────────
+  // Similar to native pending detection, but uses logs (Transfer event) for a
+  // small recent block window to avoid OOM / huge RPC scans.
+  const pendingTokenLookback = clamp(
+    envInt("BSC_DEPOSIT_PENDING_TOKEN_LOOKBACK_BLOCKS", pendingLookback),
+    0,
+    500,
+  );
+
+  if (scanTokens && tokenAssets.length > 0 && pendingTokenLookback > 0 && safeTip < tip) {
+    const pendingFrom = Math.max(safeTip + 1, tip - pendingTokenLookback + 1);
+    const pendingTo = tip;
+
+    const pendingTransferTopic = ethers.id("Transfer(address,address,uint256)");
+    const pendingToTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
+    const pendingToTopicChunks = chunk(
+      Array.from(addressToUser.keys()).map(encodeTopicAddress),
+      pendingToTopicChunkSize,
+    );
+
+    // Map contract -> asset meta for quick attribution.
+    const contractToAsset = new Map<string, DepositAsset>();
+    for (const asset of tokenAssets) {
+      const contract = normalizeAddress(asset.contract_address);
+      if (!contract) continue;
+      contractToAsset.set(contract, asset);
+    }
+
+    const addressChunkSize = clamp(envInt("BSC_DEPOSIT_LOG_ADDRESS_CHUNK", 25), 5, 250);
+    const contractChunks = chunk(Array.from(contractToAsset.keys()), addressChunkSize);
+
+    for (const contracts of contractChunks) {
+      if (!contracts.length) continue;
+      if (maxMs > 0 && Date.now() - startedAtMs > maxMs) break;
+
+      for (const toTopics of pendingToTopicChunks) {
+        if (!toTopics.length) continue;
+        if (maxMs > 0 && Date.now() - startedAtMs > maxMs) break;
+
+        const logs = await getLogsBatchedOrSplit(provider, {
+          addresses: contracts,
+          fromBlock: pendingFrom,
+          toBlock: pendingTo,
+          topics: [pendingTransferTopic, null, toTopics],
+        });
+
+        for (const log of logs) {
+          if (maxMs > 0 && Date.now() - startedAtMs > maxMs) break;
+
+          const asset = contractToAsset.get(normalizeAddress(String((log as any)?.address ?? "")));
+          if (!asset) continue;
+
+          const to = decodeTopicAddress((log as any)?.topics?.[2] ?? "");
+          if (!to) continue;
+          const userId = addressToUser.get(to);
+          if (!userId) continue;
+
+          const from = decodeTopicAddress((log as any)?.topics?.[1] ?? "") || null;
+          let amountRaw = 0n;
+          try {
+            amountRaw = BigInt(String((log as any)?.data ?? "0x0"));
+          } catch {
+            amountRaw = 0n;
+          }
+          if (amountRaw <= 0n) continue;
+
+          const amount = ethers.formatUnits(amountRaw, asset.decimals);
+          const out = await recordDepositEventSeen(sql as any, {
+            chain,
+            txHash: String((log as any)?.transactionHash ?? ""),
+            logIndex: Number((log as any)?.index ?? 0),
+            blockNumber: Number((log as any)?.blockNumber ?? 0),
+            fromAddress: from,
+            toAddress: to,
+            userId,
+            assetId: asset.id,
+            amount,
+            cols,
+          });
+          if (out === "inserted") pendingSeen += 1;
+        }
+      }
+    }
+  }
+
   const transferTopic = ethers.id("Transfer(address,address,uint256)");
   const toTopicChunkSize = clamp(envInt("BSC_DEPOSIT_TO_TOPIC_CHUNK", 20), 1, 200);
 
@@ -1285,6 +1370,117 @@ export async function scanAndCreditBscDeposits(
     credited,
     duplicates,
     ...(pendingSeen ? { pendingSeen } : {}),
+    ...(stoppedEarly ? { stoppedEarly, stopReason } : {}),
+  };
+}
+
+export async function finalizePendingBscDeposits(
+  sql: Sql,
+  opts?: {
+    confirmations?: number;
+    max?: number;
+    maxMs?: number;
+  },
+): Promise<{
+  ok: true;
+  chain: "bsc";
+  tip: number;
+  safe_tip: number;
+  confirmations_required: number;
+  scanned: number;
+  credited: number;
+  duplicates: number;
+  stoppedEarly?: boolean;
+  stopReason?: "time_budget";
+}> {
+  const provider = getBscReadProvider();
+  const chain: "bsc" = "bsc";
+  const cols = await getDepositEventCols(sql);
+
+  const confirmationsRequired = clamp(opts?.confirmations ?? envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
+  const tip = await provider.getBlockNumber();
+  const safeTip = Math.max(0, tip - confirmationsRequired);
+
+  const max = clamp(opts?.max ?? envInt("BSC_DEPOSIT_FINALIZE_MAX", 250), 1, 2000);
+  const maxMs = clamp(opts?.maxMs ?? envInt("BSC_DEPOSIT_FINALIZE_MAX_MS", 0), 0, 60_000);
+  const startedAtMs = Date.now();
+  const timeExceeded = (): boolean => maxMs > 0 && Date.now() - startedAtMs > maxMs;
+
+  // Select pending, uncredited events that are now within the safe tip.
+  const rows = await sql<
+    Array<{
+      tx_hash: string;
+      log_index: number;
+      block_number: number;
+      from_address: string | null;
+      to_address: string;
+      user_id: string;
+      asset_id: string;
+      asset_symbol: string;
+      amount: string;
+    }>
+  >`
+    SELECT
+      e.tx_hash,
+      e.log_index,
+      e.block_number,
+      e.from_address,
+      e.to_address,
+      e.user_id::text AS user_id,
+      e.asset_id::text AS asset_id,
+      a.symbol AS asset_symbol,
+      e.amount::text AS amount
+    FROM ex_chain_deposit_event e
+    JOIN ex_asset a ON a.id = e.asset_id
+    WHERE e.chain = ${chain}
+      AND e.journal_entry_id IS NULL
+      AND e.status = 'pending'
+      AND e.block_number <= ${safeTip}
+    ORDER BY e.block_number ASC, e.id ASC
+    LIMIT ${max}
+  `;
+
+  let credited = 0;
+  let duplicates = 0;
+  let scanned = 0;
+  let stoppedEarly = false;
+  let stopReason: "time_budget" | undefined;
+
+  for (const r of rows) {
+    if (timeExceeded()) {
+      stoppedEarly = true;
+      stopReason = "time_budget";
+      break;
+    }
+
+    scanned += 1;
+    const outcome = await creditDepositEvent(sql as any, {
+      chain,
+      txHash: String(r.tx_hash),
+      logIndex: Number(r.log_index),
+      blockNumber: Number(r.block_number),
+      fromAddress: r.from_address ? normalizeAddress(String(r.from_address)) : null,
+      toAddress: normalizeAddress(String(r.to_address)),
+      userId: String(r.user_id),
+      assetId: String(r.asset_id),
+      assetSymbol: String(r.asset_symbol),
+      amount: String(r.amount),
+      cols,
+    });
+
+    if (outcome === "credited") credited += 1;
+    else duplicates += 1;
+  }
+
+  return {
+    ok: true,
+    chain,
+    tip,
+    safe_tip: safeTip,
+    confirmations_required: confirmationsRequired,
+    scanned,
+    credited,
+    duplicates,
     ...(stoppedEarly ? { stoppedEarly, stopReason } : {}),
   };
 }

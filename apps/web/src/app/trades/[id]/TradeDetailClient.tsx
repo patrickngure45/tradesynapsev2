@@ -17,6 +17,9 @@ import {
 } from "@/lib/state/actingUser";
 import { copyToClipboard } from "@/lib/ui/copyToClipboard";
 import { Toast, type ToastKind } from "@/components/Toast";
+import { V2Button } from "@/components/v2/Button";
+import { V2Card, V2CardBody, V2CardHeader } from "@/components/v2/Card";
+import { V2Input } from "@/components/v2/Input";
 
 type TradeDetail = {
   id: string;
@@ -530,7 +533,7 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
   }
 
   if (loading) {
-    return <div className="mt-6 text-sm text-zinc-500">Loading…</div>;
+    return <div className="mt-6 text-[13px] text-[var(--v2-muted)]">Loading…</div>;
   }
 
   if (error) {
@@ -538,8 +541,17 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
   }
 
   if (!trade) {
-    return <div className="mt-6 text-sm text-zinc-500">Not found.</div>;
+    return <div className="mt-6 text-[13px] text-[var(--v2-muted)]">Not found.</div>;
   }
+
+  const selectClass =
+    "h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[14px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]";
+  const selectClassSm =
+    "h-9 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[12px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]";
+  const textareaClass =
+    "min-h-20 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-[13px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]";
+  const preClass =
+    "overflow-auto rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 font-mono text-[12px] text-[var(--v2-text)]";
 
   return (
     <div className="mt-6 grid gap-6">
@@ -548,19 +560,24 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
         kind={toastKind}
         onDone={() => setToastMessage(null)}
       />
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">Viewer</h2>
 
-        <div className="mt-3 grid gap-2 text-sm">
-          <div className="text-zinc-500">
-            Auth: use a session cookie (recommended) or send <span className="font-mono">x-user-id</span>.
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-              <span className="text-zinc-500">Auth mode</span>
-              <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-1 text-xs dark:border-zinc-800"
+      <V2Card>
+        <V2CardHeader
+          title="Viewer"
+          subtitle={
+            <span>
+              Auth: use a session cookie (recommended) or send{" "}
+              <span className="font-mono">x-user-id</span>.
+            </span>
+          }
+        />
+        <V2CardBody>
+          <div className="grid gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-[12px] text-[var(--v2-muted)]">
+                <span className="font-semibold">Auth mode</span>
+                <select
+                  className={selectClassSm}
                 value={authMode}
                 onChange={(e) => {
                   const next = e.target.value as typeof authMode;
@@ -583,34 +600,34 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
             </label>
 
             {authMode === "session" ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-                <span className="text-zinc-500">Session</span>
+              <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--v2-muted)]">
+                <span className="font-semibold">Session</span>
                 <span className="font-mono">
                   {sessionUserId ? `${sessionUserId.slice(0, 8)}…` : "(none)"}
                 </span>
-                <button
-                  type="button"
-                  className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                <V2Button
+                  size="sm"
+                  variant="secondary"
                   disabled={!actingUserId || sessionLoading}
                   onClick={() => void signInAs(actingUserId)}
                 >
                   Sign in
-                </button>
-                <button
-                  type="button"
-                  className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                </V2Button>
+                <V2Button
+                  size="sm"
+                  variant="secondary"
                   disabled={sessionLoading}
                   onClick={() => void signOut()}
                 >
                   Sign out
-                </button>
+                </V2Button>
                 <details>
-                  <summary className="cursor-pointer text-[11px] text-zinc-500">prod bootstrap</summary>
+                  <summary className="cursor-pointer text-[11px] font-semibold text-[var(--v2-muted)]">prod bootstrap</summary>
                   <div className="mt-2 grid gap-1">
                     <label className="grid gap-1">
-                      <span className="text-[11px] text-zinc-500">x-session-bootstrap-key</span>
-                      <input
-                        className="rounded border border-zinc-200 bg-transparent px-2 py-1 font-mono text-xs dark:border-zinc-800"
+                      <span className="text-[11px] font-semibold text-[var(--v2-muted)]">x-session-bootstrap-key</span>
+                      <V2Input
+                        className="h-10 font-mono text-[12px]"
                         value={sessionBootstrapKey}
                         type="password"
                         placeholder="(only needed in production)"
@@ -621,14 +638,14 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                 </details>
               </div>
             ) : (
-              <div className="text-xs text-zinc-500">Requests send x-user-id.</div>
+              <div className="text-[12px] text-[var(--v2-muted)]">Requests send x-user-id.</div>
             )}
           </div>
 
-          <label className="grid gap-1 text-sm">
-            <span className="text-zinc-500">Acting user</span>
+          <label className="grid gap-1">
+            <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Acting user</span>
             <select
-              className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+              className={selectClass}
               value={actingUserId}
               onChange={(e) => {
                 const next = e.target.value;
@@ -655,54 +672,58 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               <option value={trade.seller_user_id}>seller {trade.seller_user_id.slice(0, 8)}…</option>
             </select>
           </label>
-        </div>
-      </section>
+          </div>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Trade</h2>
-          <div className="flex items-center gap-3">
-            <a className="underline" href={proofPackHref}>
-              Download Proof Pack
-            </a>
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
-              onClick={async () => {
-                try {
-                  const absolute = new URL(proofPackHref, window.location.origin).toString();
-                  const ok = await copyToClipboard(absolute);
-                  if (ok) {
-                    setToastKind("success");
-                    setToastMessage("Proof pack link copied.");
-                  } else {
+      <V2Card>
+        <V2CardHeader
+          title="Trade"
+          right={
+            <div className="flex items-center gap-2">
+              <a className="text-[13px] font-semibold text-[var(--v2-accent-2)] underline" href={proofPackHref}>
+                Download Proof Pack
+              </a>
+              <V2Button
+                size="sm"
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    const absolute = new URL(proofPackHref, window.location.origin).toString();
+                    const ok = await copyToClipboard(absolute);
+                    if (ok) {
+                      setToastKind("success");
+                      setToastMessage("Proof pack link copied.");
+                    } else {
+                      setToastKind("error");
+                      setToastMessage("Copy failed.");
+                    }
+                  } catch {
                     setToastKind("error");
                     setToastMessage("Copy failed.");
                   }
-                } catch {
-                  setToastKind("error");
-                  setToastMessage("Copy failed.");
-                }
-              }}
-            >
-              Copy link
-            </button>
-          </div>
-        </div>
+                }}
+              >
+                Copy link
+              </V2Button>
+            </div>
+          }
+        />
+        <V2CardBody>
 
         <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-zinc-500">Verify locally</summary>
-          <div className="mt-2 grid gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+          <summary className="cursor-pointer text-[12px] font-semibold text-[var(--v2-muted)]">Verify locally</summary>
+          <div className="mt-2 grid gap-2 text-[12px] text-[var(--v2-muted)]">
             <div>
               Run from <span className="font-mono">apps/web</span> after downloading the ZIP:
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <pre className="overflow-auto rounded bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+              <pre className={preClass}>
                 npm run verify:proofpack -- &lt;path-to-zip&gt;
               </pre>
-              <button
-                type="button"
-                className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+              <V2Button
+                size="sm"
+                variant="secondary"
                 onClick={async () => {
                   const ok = await copyToClipboard("npm run verify:proofpack -- <path-to-zip>");
                   setToastKind(ok ? "success" : "error");
@@ -710,15 +731,15 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                 }}
               >
                 Copy
-              </button>
+              </V2Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <pre className="overflow-auto rounded bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+              <pre className={preClass}>
                 npm run verify:proofpack -- --require-signed &lt;path-to-zip&gt;
               </pre>
-              <button
-                type="button"
-                className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+              <V2Button
+                size="sm"
+                variant="secondary"
                 onClick={async () => {
                   const ok = await copyToClipboard(
                     "npm run verify:proofpack -- --require-signed <path-to-zip>"
@@ -728,44 +749,44 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                 }}
               >
                 Copy
-              </button>
+              </V2Button>
             </div>
           </div>
         </details>
 
         {transitions.length ? (
-          <div className="mt-3 rounded border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mt-3 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3 text-[13px]">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-zinc-500">Latest transition:</span>
+              <span className="text-[var(--v2-muted)]">Latest transition:</span>
               <span className="font-mono">
                 {transitions[transitions.length - 1]!.from_status ?? "∅"} → {transitions[transitions.length - 1]!.to_status}
               </span>
-              <span className="text-zinc-500">@</span>
-              <span className="font-mono text-xs text-zinc-600 dark:text-zinc-300">
+              <span className="text-[var(--v2-muted)]">@</span>
+              <span className="font-mono text-[12px] text-[var(--v2-muted)]">
                 {transitions[transitions.length - 1]!.created_at}
               </span>
             </div>
             {transitions[transitions.length - 1]!.reason_code ? (
-              <div className="mt-1 font-mono text-xs text-zinc-600 dark:text-zinc-300">
+              <div className="mt-1 font-mono text-[12px] text-[var(--v2-muted)]">
                 {transitions[transitions.length - 1]!.reason_code}
               </div>
             ) : null}
           </div>
         ) : null}
 
-        <div className="mt-3 grid gap-2 text-sm">
+        <div className="mt-3 grid gap-2 text-[13px] text-[var(--v2-text)]">
           <div>
-            <span className="text-zinc-500">Status:</span> {trade.status}
+            <span className="text-[var(--v2-muted)]">Status:</span> {trade.status}
           </div>
 
           {actingRole ? (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-zinc-500">You are:</span>
+              <span className="text-[var(--v2-muted)]">You are:</span>
               <span
                 className={
                   actingRole === "buyer"
-                    ? "rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200"
-                    : "rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-800 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-200"
+                    ? "rounded-full border border-[color-mix(in_srgb,var(--v2-up)_35%,var(--v2-border))] bg-[color-mix(in_srgb,var(--v2-up)_10%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-up)]"
+                    : "rounded-full border border-[color-mix(in_srgb,var(--v2-accent-2)_35%,var(--v2-border))] bg-[color-mix(in_srgb,var(--v2-accent-2)_10%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-accent-2)]"
                 }
               >
                 {actingRole}
@@ -774,11 +795,11 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
           ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-zinc-500">Lifecycle:</span>
+            <span className="text-[12px] text-[var(--v2-muted)]">Lifecycle:</span>
 
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+            <V2Button
+              size="sm"
+              variant="secondary"
               disabled={
                 transitioning ||
                 !canTransitionTrade(trade.status, "awaiting_payment")
@@ -787,11 +808,11 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               title={lifecycleTitle("awaiting_payment") || "created → awaiting_payment"}
             >
               Awaiting payment
-            </button>
+            </V2Button>
 
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+            <V2Button
+              size="sm"
+              variant="secondary"
               disabled={
                 transitioning ||
                 !canTransitionTrade(trade.status, "paid_marked") ||
@@ -804,11 +825,11 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               }
             >
               Mark paid (buyer)
-            </button>
+            </V2Button>
 
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+            <V2Button
+              size="sm"
+              variant="secondary"
               disabled={
                 transitioning ||
                 !canTransitionTrade(trade.status, "released") ||
@@ -820,21 +841,21 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               }
             >
               Release (seller)
-            </button>
+            </V2Button>
 
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+            <V2Button
+              size="sm"
+              variant="secondary"
               disabled={transitioning || !canTransitionTrade(trade.status, "resolved")}
               onClick={() => void transitionTrade("resolved")}
               title={lifecycleTitle("resolved") || "Resolve trade"}
             >
               Resolve
-            </button>
+            </V2Button>
 
-            <button
-              type="button"
-              className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/40"
+            <V2Button
+              size="sm"
+              variant="danger"
               disabled={
                 transitioning ||
                 trade.status === "disputed" ||
@@ -844,27 +865,27 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               title={lifecycleTitle("canceled") || "Cancel trade"}
             >
               Cancel
-            </button>
+            </V2Button>
           </div>
 
           <div>
-            <span className="text-zinc-500">Pair:</span> {trade.crypto_asset}/
+            <span className="text-[var(--v2-muted)]">Pair:</span> {trade.crypto_asset}/
             {trade.fiat_currency}
           </div>
           <div className="font-mono">
-            <span className="text-zinc-500 font-sans">Price:</span> {trade.price}
+            <span className="text-[var(--v2-muted)] font-sans">Price:</span> {trade.price}
           </div>
           <div className="font-mono">
-            <span className="text-zinc-500 font-sans">Fair mid:</span> {trade.fair_price_mid ?? "—"}
+            <span className="text-[var(--v2-muted)] font-sans">Fair mid:</span> {trade.fair_price_mid ?? "—"}
           </div>
           <div className="font-mono">
-            <span className="text-zinc-500 font-sans">Deviation pct:</span> {trade.price_deviation_pct ?? "—"}
+            <span className="text-[var(--v2-muted)] font-sans">Deviation pct:</span> {trade.price_deviation_pct ?? "—"}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-mono text-zinc-500">{trade.id}</span>
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+            <span className="font-mono text-[var(--v2-muted)]">{trade.id}</span>
+            <V2Button
+              size="sm"
+              variant="secondary"
               onClick={async () => {
                 const ok = await copyToClipboard(trade.id);
                 setToastKind(ok ? "success" : "error");
@@ -872,10 +893,10 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               }}
             >
               Copy ID
-            </button>
-            <button
-              type="button"
-              className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+            </V2Button>
+            <V2Button
+              size="sm"
+              variant="secondary"
               onClick={async () => {
                 try {
                   const relative = actingUserId
@@ -892,46 +913,49 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               }}
             >
               Copy link
-            </button>
+            </V2Button>
           </div>
         </div>
-      </section>
+      </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Risk</h2>
-          <button
-            className="rounded bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-black"
-            onClick={() => void runRiskAssessment()}
-          >
-            Recompute v0
-          </button>
-        </div>
+      <V2Card>
+        <V2CardHeader
+          title="Risk"
+          right={
+            <V2Button variant="secondary" onClick={() => void runRiskAssessment()}>
+              Recompute v0
+            </V2Button>
+          }
+        />
+        <V2CardBody>
 
         {risk ? (
-          <div className="mt-3 text-sm">
+          <div className="mt-1 text-[13px]">
             <div>
-              <span className="text-zinc-500">Score:</span> {risk.score}
+              <span className="text-[var(--v2-muted)]">Score:</span> {risk.score}
             </div>
             <div>
-              <span className="text-zinc-500">Action:</span> {risk.recommended_action}
+              <span className="text-[var(--v2-muted)]">Action:</span> {risk.recommended_action}
             </div>
             <details className="mt-3">
-              <summary className="cursor-pointer text-zinc-500">Factors JSON</summary>
-              <pre className="mt-2 overflow-auto rounded bg-zinc-50 p-3 text-xs dark:bg-zinc-950">
+              <summary className="cursor-pointer text-[12px] font-semibold text-[var(--v2-muted)]">Factors JSON</summary>
+              <pre className={"mt-2 " + preClass}>
                 {formatJson(risk.factors_json)}
               </pre>
             </details>
           </div>
         ) : (
-          <div className="mt-3 text-sm text-zinc-500">No risk assessment yet.</div>
+          <div className="mt-1 text-[13px] text-[var(--v2-muted)]">No risk assessment yet.</div>
         )}
-      </section>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">Evidence</h2>
+      <V2Card>
+        <V2CardHeader title="Evidence" />
+        <V2CardBody>
 
-        <div className="mt-2 text-sm text-zinc-500">
+        <div className="text-[13px] text-[var(--v2-muted)]">
           Completeness score: <span className="font-mono">{evidenceCompleteness.score}</span>/100
           {evidenceCompleteness.missing_recommendations.length ? (
             <span>
@@ -942,10 +966,10 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
 
         <div className="mt-3 grid gap-3">
           <div className="grid gap-2 md:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Submitted by</span>
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Submitted by</span>
               <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                className={selectClass}
                 value={submittedBy}
                 onChange={(e) => setSubmittedBy(e.target.value)}
               >
@@ -954,10 +978,10 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
               </select>
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Type</span>
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Type</span>
               <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                className={selectClass}
                 value={uploadType}
                 onChange={(e) => setUploadType(e.target.value as typeof uploadType)}
               >
@@ -970,96 +994,95 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
             </label>
           </div>
 
-          <label className="grid gap-1 text-sm">
-            <span className="text-zinc-500">Metadata JSON</span>
+          <label className="grid gap-1">
+            <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Metadata JSON</span>
             <textarea
-              className="min-h-20 rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-xs dark:border-zinc-800"
+              className={textareaClass + " font-mono text-[12px]"}
               value={metadataJson}
               onChange={(e) => setMetadataJson(e.target.value)}
             />
           </label>
 
-          <label className="grid gap-1 text-sm">
-            <span className="text-zinc-500">File</span>
+          <label className="grid gap-1">
+            <span className="text-[12px] font-semibold text-[var(--v2-muted)]">File</span>
             <input
-              className="text-sm"
+              className="text-[13px] text-[var(--v2-text)]"
               type="file"
               onChange={(e) => setFile(e.target.files?.item(0) ?? null)}
             />
           </label>
 
           <div className="flex items-center gap-3">
-            <button
-              className="rounded bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+            <V2Button
+              variant="primary"
               disabled={uploading}
               onClick={() => void uploadEvidence()}
             >
               {uploading ? "Uploading…" : "Upload"}
-            </button>
-            <button
-              className="text-sm underline"
-              onClick={() => void refreshAll()}
-            >
+            </V2Button>
+            <V2Button variant="ghost" onClick={() => void refreshAll()}>
               Refresh
-            </button>
+            </V2Button>
           </div>
 
-          <div className="mt-2 rounded border border-zinc-200 dark:border-zinc-800">
-            <div className="border-b border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+          <div className="mt-2 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+            <div className="border-b border-[var(--v2-border)] px-3 py-2 text-[12px] font-semibold text-[var(--v2-muted)]">
               Evidence objects ({evidence.length})
             </div>
-            <ul className="divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+            <ul className="divide-y divide-[var(--v2-border)] text-[13px]">
               {evidence.map((ev) => (
                 <li key={ev.id} className="px-3 py-2">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-zinc-500">{ev.type}</span> — {ev.sha256.slice(0, 10)}…
+                      <span className="text-[var(--v2-muted)]">{ev.type}</span> — {ev.sha256.slice(0, 10)}…
                     </div>
-                    <div className="text-xs text-zinc-500">{ev.created_at}</div>
+                    <div className="text-[12px] text-[var(--v2-muted)]">{ev.created_at}</div>
                   </div>
-                  <div className="mt-1 font-mono text-xs text-zinc-500">
+                  <div className="mt-1 font-mono text-[12px] text-[var(--v2-muted)]">
                     {ev.storage_uri}
                   </div>
                 </li>
               ))}
               {evidence.length === 0 ? (
-                <li className="px-3 py-3 text-sm text-zinc-500">No evidence yet.</li>
+                <li className="px-3 py-3 text-[13px] text-[var(--v2-muted)]">No evidence yet.</li>
               ) : null}
             </ul>
           </div>
         </div>
-      </section>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">Dispute</h2>
+      <V2Card>
+        <V2CardHeader title="Dispute" />
+        <V2CardBody>
 
         {dispute ? (
-          <div className="mt-3 grid gap-3 text-sm">
+          <div className="grid gap-3 text-[13px]">
             <div>
-              <span className="text-zinc-500">Status:</span> {dispute.status}
+              <span className="text-[var(--v2-muted)]">Status:</span> {dispute.status}
             </div>
             <div>
-              <span className="text-zinc-500">Reason:</span> {dispute.reason_code}
+              <span className="text-[var(--v2-muted)]">Reason:</span> {dispute.reason_code}
             </div>
-            <div className="font-mono text-xs text-zinc-500">
+            <div className="font-mono text-[12px] text-[var(--v2-muted)]">
               opened_by={dispute.opened_by_user_id} opened_at={dispute.opened_at}
             </div>
 
-            <div className="rounded border border-zinc-200 dark:border-zinc-800">
-              <div className="border-b border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+            <div className="rounded-2xl border border-[var(--v2-border)]">
+              <div className="border-b border-[var(--v2-border)] px-3 py-2 text-[12px] font-semibold text-[var(--v2-muted)]">
                 Decisions ({disputeDecisions.length})
               </div>
-              <ul className="divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+              <ul className="divide-y divide-[var(--v2-border)] text-[13px]">
                 {disputeDecisions.map((d) => (
                   <li key={d.id} className="px-3 py-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-zinc-500">{d.decision}</span> — {d.decided_by}
+                        <span className="text-[var(--v2-muted)]">{d.decision}</span> — {d.decided_by}
                       </div>
-                      <div className="text-xs text-zinc-500">{d.created_at}</div>
+                      <div className="text-[12px] text-[var(--v2-muted)]">{d.created_at}</div>
                     </div>
                     {d.rationale ? (
-                      <div className="mt-1 text-xs text-zinc-500">{d.rationale}</div>
+                      <div className="mt-1 text-[12px] text-[var(--v2-muted)]">{d.rationale}</div>
                     ) : null}
                   </li>
                 ))}
@@ -1073,31 +1096,30 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
 
             {dispute.status !== "resolved" ? (
               <div className="mt-2 grid gap-2">
-                <div className="text-sm text-zinc-500">Add decision (demo)</div>
+                <div className="text-[13px] text-[var(--v2-muted)]">Add decision (demo)</div>
 
-                <label className="grid gap-1 text-sm">
-                  <span className="text-zinc-500">Decided by</span>
-                  <input
-                    className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                <label className="grid gap-1">
+                  <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Decided by</span>
+                  <V2Input
                     value={decisionBy}
                     onChange={(e) => setDecisionBy(e.target.value)}
                   />
                 </label>
 
-                <label className="grid gap-1 text-sm">
-                  <span className="text-zinc-500">Reviewer key (optional)</span>
-                  <input
-                    className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-xs dark:border-zinc-800"
+                <label className="grid gap-1">
+                  <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Reviewer key (optional)</span>
+                  <V2Input
+                    className="font-mono text-[12px]"
                     placeholder="PROOFPACK_REVIEWER_KEY"
                     value={reviewerKey}
                     onChange={(e) => setReviewerKey(e.target.value)}
                   />
                 </label>
 
-                <label className="grid gap-1 text-sm">
-                  <span className="text-zinc-500">Decision</span>
+                <label className="grid gap-1">
+                  <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Decision</span>
                   <select
-                    className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                    className={selectClass}
                     value={decisionType}
                     onChange={(e) => setDecisionType(e.target.value as typeof decisionType)}
                   >
@@ -1108,41 +1130,41 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                   </select>
                 </label>
 
-                <label className="grid gap-1 text-sm">
-                  <span className="text-zinc-500">Rationale</span>
+                <label className="grid gap-1">
+                  <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Rationale</span>
                   <textarea
-                    className="min-h-20 rounded border border-zinc-200 bg-transparent px-2 py-2 text-sm dark:border-zinc-800"
+                    className={textareaClass}
                     value={decisionRationale}
                     onChange={(e) => setDecisionRationale(e.target.value)}
                   />
                 </label>
 
                 <div className="flex items-center gap-3">
-                  <button
-                    className="rounded bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+                  <V2Button
+                    variant="primary"
                     disabled={submittingDecision}
                     onClick={() => void submitDecision()}
                   >
                     {submittingDecision ? "Submitting…" : "Submit decision"}
-                  </button>
-                  <button className="text-sm underline" onClick={() => void refreshAll()}>
+                  </V2Button>
+                  <V2Button variant="ghost" onClick={() => void refreshAll()}>
                     Refresh
-                  </button>
+                  </V2Button>
                 </div>
               </div>
             ) : (
-              <div className="mt-2 text-sm text-zinc-500">Resolved at {dispute.resolved_at ?? "—"}</div>
+              <div className="mt-2 text-[13px] text-[var(--v2-muted)]">Resolved at {dispute.resolved_at ?? "—"}</div>
             )}
           </div>
         ) : (
           <div className="mt-3 grid gap-3">
-            <div className="text-sm text-zinc-500">No dispute yet.</div>
+            <div className="text-[13px] text-[var(--v2-muted)]">No dispute yet.</div>
 
             <div className="grid gap-2 md:grid-cols-2">
-              <label className="grid gap-1 text-sm">
-                <span className="text-zinc-500">Opened by</span>
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Opened by</span>
                 <select
-                  className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                  className={selectClass}
                   value={disputeOpenedBy}
                   onChange={(e) => setDisputeOpenedBy(e.target.value)}
                 >
@@ -1151,10 +1173,10 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                 </select>
               </label>
 
-              <label className="grid gap-1 text-sm">
-                <span className="text-zinc-500">Reason</span>
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Reason</span>
                 <select
-                  className="rounded border border-zinc-200 bg-transparent px-2 py-2 dark:border-zinc-800"
+                  className={selectClass}
                   value={disputeReason}
                   onChange={(e) => setDisputeReason(e.target.value as typeof disputeReason)}
                 >
@@ -1167,36 +1189,39 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
             </div>
 
             <div className="flex items-center gap-3">
-              <button
-                className="rounded bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+              <V2Button
+                variant="primary"
                 disabled={openingDispute}
                 onClick={() => void openDispute()}
               >
                 {openingDispute ? "Opening…" : "Open dispute"}
-              </button>
-              <button className="text-sm underline" onClick={() => void refreshAll()}>
+              </V2Button>
+              <V2Button variant="ghost" onClick={() => void refreshAll()}>
                 Refresh
-              </button>
+              </V2Button>
             </div>
           </div>
         )}
-      </section>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">Transitions</h2>
-        <ul className="mt-3 divide-y divide-zinc-200 text-sm dark:divide-zinc-800">
+      <V2Card>
+        <V2CardHeader title="Transitions" />
+        <V2CardBody>
+        <ul className="divide-y divide-[var(--v2-border)] text-[13px]">
           {transitions.map((t) => (
             <li key={t.id} className="py-2">
               <div>
-                <span className="text-zinc-500">{t.created_at}</span> — {t.from_status ?? "∅"} → {t.to_status}
+                <span className="text-[var(--v2-muted)]">{t.created_at}</span> — {t.from_status ?? "∅"} → {t.to_status}
               </div>
-              <div className="text-xs text-zinc-500 font-mono">
+              <div className="text-[12px] text-[var(--v2-muted)] font-mono">
                 {t.reason_code ?? ""}
               </div>
             </li>
           ))}
         </ul>
-      </section>
+        </V2CardBody>
+      </V2Card>
     </div>
   );
 }

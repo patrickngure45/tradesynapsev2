@@ -4,7 +4,8 @@ import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/api/errors";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { retryOnceOnTransientDbError } from "@/lib/dbTransient";
-import { getBscProvider } from "@/lib/blockchain/wallet";
+import { ethers } from "ethers";
+import { getBscReadProvider } from "@/lib/blockchain/wallet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,21 @@ function normalizeAddress(addr: string): string {
 function isHexTxHash(v: string): boolean {
   const s = String(v || "").trim();
   return /^0x[0-9a-fA-F]{64}$/.test(s);
+}
+
+const TRANSFER_TOPIC0 = ethers.id("Transfer(address,address,uint256)");
+const transferIface = new ethers.Interface(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
+
+async function bestEffortIsContract(provider: ethers.Provider, address: string | null | undefined): Promise<boolean | null> {
+  const addr = String(address ?? "").trim();
+  if (!addr) return null;
+  try {
+    const code = await provider.getCode(addr);
+    if (!code) return null;
+    return String(code).toLowerCase() !== "0x";
+  } catch {
+    return null;
+  }
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -89,7 +105,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const provider = getBscProvider();
+    const provider = getBscReadProvider();
 
     const confirmationsRequired = clampInt(envInt("BSC_DEPOSIT_CONFIRMATIONS", 2), 0, 200);
 
@@ -121,6 +137,7 @@ export async function GET(request: Request) {
           from: tx?.from ? normalizeAddress(tx.from) : null,
           to: to || null,
           value_wei: value.toString(),
+          receipt,
         };
       })(),
     ]);
@@ -128,6 +145,11 @@ export async function GET(request: Request) {
     const resolvedToAddress = normalizeAddress(
       address || (onChain && onChain.found && onChain.to ? onChain.to : ""),
     );
+
+    const txToIsContract =
+      onChain && (onChain as any).found && (onChain as any).to
+        ? await bestEffortIsContract(provider, String((onChain as any).to))
+        : null;
 
     const safeTip = Math.max(0, tip - confirmationsRequired);
     const cursorLast = cursorRow ? Number(cursorRow.last_scanned_block ?? 0) : 0;
@@ -219,6 +241,130 @@ export async function GET(request: Request) {
 
     const credited = events.some((e) => Boolean(e.journal_entry_id));
 
+    // Best-effort matches for admin visibility.
+    const resolvedDepositAddress = depositAddress ? normalizeAddress(depositAddress.address) : resolvedToAddress;
+    const nativeMatch = Boolean(
+      onChain && (onChain as any).found && (onChain as any).to && normalizeAddress(String((onChain as any).to)) === resolvedDepositAddress &&
+        BigInt(String((onChain as any).value_wei ?? "0")) > 0n,
+    );
+
+    const tokenMatches: Array<{ contract: string; value_wei: string; log_index: number | null }> = [];
+    try {
+      const receipt = (onChain as any)?.receipt as any;
+      if (receipt && Array.isArray(receipt.logs) && resolvedDepositAddress) {
+        for (const log of receipt.logs as Array<any>) {
+          const topic0 = String(log?.topics?.[0] ?? "");
+          if (topic0 !== TRANSFER_TOPIC0) continue;
+          try {
+            const decoded = transferIface.decodeEventLog("Transfer", log.data, log.topics);
+            const to = decoded?.to ? normalizeAddress(String(decoded.to)) : "";
+            if (!to || to !== resolvedDepositAddress) continue;
+            const value = typeof decoded?.value === "bigint" ? (decoded.value as bigint) : 0n;
+            if (value <= 0n) continue;
+            tokenMatches.push({
+              contract: normalizeAddress(String(log.address ?? "")),
+              value_wei: value.toString(),
+              log_index: typeof log?.logIndex === "number" ? log.logIndex : null,
+            });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const tokenContracts = Array.from(new Set(tokenMatches.map((m) => m.contract).filter(Boolean)));
+    const tokenAssets = tokenContracts.length
+      ? await retryOnceOnTransientDbError(async () => {
+          return await sql<{ symbol: string; decimals: number; contract_address: string }[]>`
+            SELECT symbol, decimals, contract_address
+            FROM ex_asset
+            WHERE chain = 'bsc'
+              AND contract_address IS NOT NULL
+              AND lower(contract_address) = ANY(${tokenContracts})
+          `;
+        })
+      : ([] as Array<{ symbol: string; decimals: number; contract_address: string }>);
+
+    const assetByContract = new Map<string, { symbol: string; decimals: number }>();
+    for (const a of tokenAssets) assetByContract.set(normalizeAddress(a.contract_address), { symbol: a.symbol, decimals: a.decimals });
+
+    const tokenTransfers = tokenMatches.map((m) => {
+      const meta = assetByContract.get(m.contract);
+      const decimals = meta?.decimals ?? 18;
+      const amount = ethers.formatUnits(BigInt(m.value_wei), decimals);
+      return {
+        kind: "token" as const,
+        asset_symbol: meta?.symbol ?? "UNKNOWN",
+        contract: m.contract,
+        amount,
+        log_index: m.log_index,
+      };
+    });
+
+    const nativeTransfers = nativeMatch
+      ? [{
+          kind: "native" as const,
+          asset_symbol: "BNB",
+          amount: (() => {
+            try {
+              const v = BigInt(String((onChain as any)?.value_wei ?? "0"));
+              return ethers.formatEther(v);
+            } catch {
+              return "0";
+            }
+          })(),
+          log_index: null as number | null,
+        }]
+      : [];
+
+    const isOurs = Boolean(resolvedDepositAddress) && (nativeTransfers.length > 0 || tokenTransfers.length > 0 || events.length > 0);
+    const verdict: "not_ours" | "pending" | "seen" | "credited" = !isOurs
+      ? "not_ours"
+      : credited
+        ? "credited"
+        : events.length > 0
+          ? "seen"
+          : "pending";
+
+    const receiptStatus = typeof (onChain as any)?.status === "number" ? ((onChain as any).status as number) : null;
+    const diagnostic = (() => {
+      if (receiptStatus === 0) {
+        return {
+          kind: "reverted_tx",
+          message: "This transaction reverted on-chain (status=0), so it did not complete.",
+        };
+      }
+      if (verdict !== "not_ours") return null;
+
+      const receipt = (onChain as any)?.receipt as any;
+      if (!receipt) return null;
+      if (nativeTransfers.length > 0 || tokenTransfers.length > 0 || events.length > 0) return null;
+
+      if (!(onChain as any)?.to) {
+        return {
+          kind: "contract_creation_or_missing_to",
+          message: "This transaction has no 'to' address (contract creation). It does not look like a direct deposit to this address.",
+        };
+      }
+
+      if (txToIsContract === true) {
+        return {
+          kind: "contract_interaction_no_transfer_logs",
+          tx_to_is_contract: true,
+          message:
+            "Tx interacts with a contract and has no Transfer logs to the deposit address. Internal transfers may not be detectable without trace APIs.",
+        };
+      }
+
+      return {
+        kind: "no_matching_transfers",
+        message: "No native transfer or token Transfer logs were found to the resolved deposit address in this tx.",
+      };
+    })();
+
     const uncreditedForAddress = resolvedToAddress
       ? await retryOnceOnTransientDbError(async () => {
           const rows = await sql<{ count: number }[]>`
@@ -238,6 +384,7 @@ export async function GET(request: Request) {
       tip,
       confirmations_required: confirmationsRequired,
       safe_tip: safeTip,
+      verdict,
       cursor: {
         last_scanned_block: cursorLast,
         lag_blocks: cursorLagBlocks,
@@ -256,10 +403,16 @@ export async function GET(request: Request) {
           }
         : { found: false },
       onchain: onChain,
+      matches: {
+        native: nativeTransfers,
+        token: tokenTransfers,
+      },
       events,
       credited,
       uncredited_for_address: uncreditedForAddress,
       journal_lines: journalLines,
+      ...(txToIsContract != null ? { tx_to_is_contract: txToIsContract } : {}),
+      ...(diagnostic ? { diagnostic } : {}),
     });
   } catch (e) {
     // Keep errors consistent with other admin APIs.

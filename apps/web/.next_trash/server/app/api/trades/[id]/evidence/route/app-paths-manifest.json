@@ -1,0 +1,3 @@
+{
+  "/api/trades/[id]/evidence/route": "app/api/trades/[id]/evidence/route.js"
+}

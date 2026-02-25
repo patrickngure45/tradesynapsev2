@@ -1,0 +1,3 @@
+{
+  "/api/exchange/marketdata/stats/route": "app/api/exchange/marketdata/stats/route.js"
+}

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { getActingUserId } from "@/lib/auth/party";
+import { apiError } from "@/lib/api/errors";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { chargeGasFee } from "@/lib/exchange/gas";
 import {
   subscribe,
@@ -38,8 +40,19 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const userId = getActingUserId(req);
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError("unauthorized", { status: 401 });
   }
+
+  const sql = getSql();
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request: req,
+    limiterName: "exchange.copy_trading.subscriptions.post",
+    windowMs: 60_000,
+    max: 12,
+    userId,
+  });
+  if (rl) return rl;
 
   try {
     const body = await req.json();
@@ -47,7 +60,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "leaderId required" }, { status: 400 });
     }
 
-    const sql = getSql();
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
 
@@ -82,8 +94,19 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const userId = getActingUserId(req);
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError("unauthorized", { status: 401 });
   }
+
+  const sql = getSql();
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request: req,
+    limiterName: "exchange.copy_trading.subscriptions.patch",
+    windowMs: 60_000,
+    max: 16,
+    userId,
+  });
+  if (rl) return rl;
 
   try {
     const body = await req.json();
@@ -91,7 +114,6 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "subscriptionId required" }, { status: 400 });
     }
 
-    const sql = getSql();
     const result = await sql.begin(async (tx) => {
       const txSql = tx as unknown as typeof sql;
 

@@ -1,0 +1,3 @@
+{
+  "/api/exchange/marketdata/trades/route": "app/api/exchange/marketdata/trades/route.js"
+}

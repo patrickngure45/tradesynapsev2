@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { buttonClassName } from "@/components/ui/Button";
+import { v2ButtonClassName } from "@/components/v2/Button";
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
 
 type InventoryItem = {
@@ -1417,26 +1417,26 @@ export function ArcadeClient() {
 
   return (
     <div className="grid gap-6">
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 28%, var(--ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 28%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Progression</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Progression</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
             <button
-              className={buttonClassName({ variant: "ghost", size: "xs" })}
+              className={v2ButtonClassName({ variant: "ghost", size: "xs" })}
               onClick={refreshProgression}
               disabled={progLoading}
             >
@@ -1445,27 +1445,27 @@ export function ArcadeClient() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">XP</div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">XP</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">
                 {progression ? progression.xp : "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">
-                Next tier at <span className="font-mono text-[var(--foreground)]">{progression?.next_tier_xp ?? "—"}</span>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">
+                Next tier at <span className="font-mono text-[var(--v2-text)]">{progression?.next_tier_xp ?? "—"}</span>
               </div>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Tier</div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Tier</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">
                 {progression ? progression.tier : "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Tier-ups can grant a small bounded bonus XP.</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Tier-ups can grant a small bounded bonus XP.</div>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Prestige</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Prestige</div>
                 <button
-                  className={buttonClassName({ variant: "secondary", size: "xs" })}
+                  className={v2ButtonClassName({ variant: "secondary", size: "xs" })}
                   onClick={doPrestigeReset}
                   disabled={prestigeLoading || (progression ? progression.tier < 3 : true)}
                   title={progression && progression.tier < 3 ? "Reach Tier 3 to prestige" : ""}
@@ -1473,57 +1473,57 @@ export function ArcadeClient() {
                   {prestigeLoading ? "Resetting…" : "Prestige"}
                 </button>
               </div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">
                 {progression ? progression.prestige : "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Optional reset for long-term cosmetics.</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Optional reset for long-term cosmetics.</div>
             </div>
           </div>
 
           {progError ? (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{progError}</span>
             </div>
           ) : null}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 16% 26%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 16% 26%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">AI Oracle</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">AI Oracle</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Tiered answers</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Same prompt → different tiers · rare tiers become collectible templates</div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
-                Cost: <span className="font-mono text-[var(--foreground)]">5</span> shards · Not financial advice
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Tiered answers</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Same prompt → different tiers · rare tiers become collectible templates</div>
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
+                Cost: <span className="font-mono text-[var(--v2-text)]">5</span> shards · Not financial advice
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={oracleProfile}
                   onChange={(e) => setOracleProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Oracle volatility profile"
                 >
                   <option value="low">Low</option>
@@ -1534,13 +1534,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{invLoading ? "…" : invShards}</span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={askOracle}
                 disabled={oracleLoading || invLoading || invShards < 5 || String(oraclePrompt ?? "").trim().length < 10}
               >
@@ -1549,60 +1549,60 @@ export function ArcadeClient() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Prompt</div>
+          <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Prompt</div>
             <textarea
               value={oraclePrompt}
               onChange={(e) => setOraclePrompt(e.target.value)}
               rows={4}
               placeholder="Ask a question (e.g. 'How do I verify a token contract and avoid scams?')"
-              className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              className="mt-2 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-sm text-[var(--v2-text)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
             />
-            <div className="mt-2 text-xs text-[var(--muted)]">Tip: be specific; avoid sharing private keys or sensitive data.</div>
+            <div className="mt-2 text-xs text-[var(--v2-muted)]">Tip: be specific; avoid sharing private keys or sensitive data.</div>
           </div>
 
           {oracleError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{oracleError}</span>
             </div>
           )}
 
           {oracleLast?.response_text ? (
             <div className="mt-4 grid gap-3">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Oracle response</div>
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{String(oracleLast?.tier ?? "common")}</div>
+                  <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">Oracle response</div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{String(oracleLast?.tier ?? "common")}</div>
                 </div>
-                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--foreground)]">{String(oracleLast.response_text)}</pre>
+                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--v2-text)]">{String(oracleLast.response_text)}</pre>
 
                 {oracleLast?.collectible?.code ? (
-                  <div className="mt-3 text-xs text-[var(--muted)]">
-                    Collected template: <span className="font-mono text-[var(--foreground)]">{oracleLast.collectible.code}</span>
+                  <div className="mt-3 text-xs text-[var(--v2-muted)]">
+                    Collected template: <span className="font-mono text-[var(--v2-text)]">{oracleLast.collectible.code}</span>
                   </div>
                 ) : null}
               </div>
 
               {oracleLast?.audit ? (
-                <details className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--muted)]">
+                <details className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--v2-muted)]">
                     Fairness proof
                   </summary>
-                  <div className="mt-3 grid gap-2 text-xs text-[var(--muted)]">
+                  <div className="mt-3 grid gap-2 text-xs text-[var(--v2-muted)]">
                     <div>
-                      client_commit_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.client_commit_hash}</span>
+                      client_commit_hash: <span className="font-mono text-[var(--v2-text)]">{oracleLast.audit.client_commit_hash}</span>
                     </div>
                     <div>
-                      server_commit_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.server_commit_hash}</span>
+                      server_commit_hash: <span className="font-mono text-[var(--v2-text)]">{oracleLast.audit.server_commit_hash}</span>
                     </div>
                     <div>
-                      server_seed_b64: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.server_seed_b64}</span>
+                      server_seed_b64: <span className="font-mono text-[var(--v2-text)]">{oracleLast.audit.server_seed_b64}</span>
                     </div>
                     <div>
-                      random_hash: <span className="font-mono text-[var(--foreground)]">{oracleLast.audit.random_hash}</span>
+                      random_hash: <span className="font-mono text-[var(--v2-text)]">{oracleLast.audit.random_hash}</span>
                     </div>
                     <div>
-                      roll: <span className="font-semibold text-[var(--foreground)]">{oracleLast.audit.roll}</span> / {oracleLast.audit.total}
+                      roll: <span className="font-semibold text-[var(--v2-text)]">{oracleLast.audit.roll}</span> / {oracleLast.audit.total}
                     </div>
                   </div>
                 </details>
@@ -1612,47 +1612,47 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Shared pool</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
-            <button className={buttonClassName({ variant: "ghost", size: "xs" })} onClick={refreshSharedPool} disabled={sharedPoolLoading}>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Shared pool</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
+            <button className={v2ButtonClassName({ variant: "ghost", size: "xs" })} onClick={refreshSharedPool} disabled={sharedPoolLoading}>
               {sharedPoolLoading ? "Refreshing…" : "Refresh"}
             </button>
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly pool claim</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Everyone gets a baseline badge. Some get a boosted cosmetic or a key.</div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Weekly pool claim</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Everyone gets a baseline badge. Some get a boosted cosmetic or a key.</div>
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
                 Week start: <span className="font-mono">{sharedPoolStatus?.week_start ?? "…"}</span>
-                <span className="mx-2 text-[var(--border)]">•</span>
-                Cost: <span className="font-mono text-[var(--foreground)]">10</span> shards
+                <span className="mx-2 text-[var(--v2-border)]">•</span>
+                Cost: <span className="font-mono text-[var(--v2-text)]">10</span> shards
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={sharedPoolProfile}
                   onChange={(e) => setSharedPoolProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Shared pool volatility profile"
                 >
                   <option value="low">Low</option>
@@ -1663,7 +1663,7 @@ export function ArcadeClient() {
 
               {sharedPoolStatus?.participated && sharedPoolStatus?.action_status === "committed" && sharedPoolStatus?.action_id ? (
                 <button
-                  className={buttonClassName({ variant: "primary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                   onClick={() => revealSharedPoolPending(sharedPoolStatus.action_id!)}
                   disabled={sharedPoolLoading}
                 >
@@ -1671,7 +1671,7 @@ export function ArcadeClient() {
                 </button>
               ) : (
                 <button
-                  className={buttonClassName({ variant: "primary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                   onClick={joinSharedPool}
                   disabled={sharedPoolLoading || Boolean(sharedPoolStatus?.participated)}
                 >
@@ -1682,74 +1682,74 @@ export function ArcadeClient() {
           </div>
 
           {sharedPoolError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{sharedPoolError}</span>
             </div>
           )}
 
           {sharedPoolLast?.outcome ? (
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Baseline</div>
-                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{sharedPoolLast.outcome.baseline?.label ?? "—"}</div>
-                <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {sharedPoolLast.outcome.baseline?.rarity ?? "—"}</div>
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Baseline</div>
+                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{sharedPoolLast.outcome.baseline?.label ?? "—"}</div>
+                <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {sharedPoolLast.outcome.baseline?.rarity ?? "—"}</div>
               </div>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Boost</div>
-                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Boost</div>
+                <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                   {sharedPoolLast.outcome.boost?.label ?? "No boost"}
                 </div>
-                <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {sharedPoolLast.outcome.boost?.rarity ?? "—"}</div>
+                <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {sharedPoolLast.outcome.boost?.rarity ?? "—"}</div>
               </div>
             </div>
           ) : null}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 14% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 14% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Badge pools</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Badge pools</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Seasonal badge drops</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Seasonal badge drops</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">
                 One claim per day · seasonal pool rotates weekly · complete sets to unlock keys
               </div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
-                Pool: <span className="font-semibold text-[var(--foreground)]">{badgePoolsStatus?.pool?.label ?? "—"}</span>
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
+                Pool: <span className="font-semibold text-[var(--v2-text)]">{badgePoolsStatus?.pool?.label ?? "—"}</span>
                 {badgePoolsStatus?.season?.key ? (
                   <>
-                    <span className="mx-2 text-[var(--border)]">•</span>
-                    Season: <span className="font-mono text-[var(--foreground)]">{badgePoolsStatus.season.key}</span>
+                    <span className="mx-2 text-[var(--v2-border)]">•</span>
+                    Season: <span className="font-mono text-[var(--v2-text)]">{badgePoolsStatus.season.key}</span>
                   </>
                 ) : null}
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={badgePoolsProfile}
                   onChange={(e) => setBadgePoolsProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Volatility profile"
                 >
                   <option value="low">Low</option>
@@ -1758,13 +1758,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <button className={buttonClassName({ variant: "primary", size: "sm" })} onClick={claimBadgePool} disabled={badgePoolsLoading}>
+              <button className={v2ButtonClassName({ variant: "primary", size: "sm" })} onClick={claimBadgePool} disabled={badgePoolsLoading}>
                 {badgePoolsLoading ? "Claiming…" : "Claim"}
               </button>
 
               <button
                 onClick={() => refreshBadgePoolsStatus()}
-                className={buttonClassName({ variant: "ghost", size: "xs" })}
+                className={v2ButtonClassName({ variant: "ghost", size: "xs" })}
                 disabled={badgePoolsLoading}
               >
                 Refresh
@@ -1772,29 +1772,29 @@ export function ArcadeClient() {
             </div>
           </div>
 
-          <div className="mt-3 text-xs text-[var(--muted)]">{badgePoolsProfile === "high" ? "High variance: rarer seasonal badges are more likely." : badgePoolsProfile === "medium" ? "Medium variance: balanced seasonal drops." : "Low variance: mostly common seasonal badges."}</div>
+          <div className="mt-3 text-xs text-[var(--v2-muted)]">{badgePoolsProfile === "high" ? "High variance: rarer seasonal badges are more likely." : badgePoolsProfile === "medium" ? "Medium variance: balanced seasonal drops." : "Low variance: mostly common seasonal badges."}</div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {(badgePoolsStatus?.sets ?? []).map((s) => {
               const done = (s.have ?? 0) >= (s.required ?? 0) && (s.required ?? 0) > 0;
               return (
-                <div key={s.id} className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                <div key={s.id} className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{s.label}</div>
+                    <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{s.label}</div>
                     <div
                       className={
                         "text-[11px] font-bold uppercase tracking-widest " +
-                        (s.unlocked ? "text-[var(--up)]" : done ? "text-[var(--warn)]" : "text-[var(--muted)]")
+                        (s.unlocked ? "text-[var(--v2-up)]" : done ? "text-[var(--v2-warn)]" : "text-[var(--v2-muted)]")
                       }
                     >
                       {s.unlocked ? "Unlocked" : done ? "Ready" : "In progress"}
                     </div>
                   </div>
-                  <div className="mt-2 text-xs text-[var(--muted)]">
-                    Progress: <span className="font-semibold text-[var(--foreground)]">{s.have}</span> / {s.required}
+                  <div className="mt-2 text-xs text-[var(--v2-muted)]">
+                    Progress: <span className="font-semibold text-[var(--v2-text)]">{s.have}</span> / {s.required}
                   </div>
-                  <div className="mt-2 text-xs text-[var(--muted)]">
-                    Unlock key: <span className="font-mono text-[var(--foreground)]">{s.unlock_key?.code ?? "—"}</span>
+                  <div className="mt-2 text-xs text-[var(--v2-muted)]">
+                    Unlock key: <span className="font-mono text-[var(--v2-text)]">{s.unlock_key?.code ?? "—"}</span>
                   </div>
                 </div>
               );
@@ -1802,21 +1802,21 @@ export function ArcadeClient() {
           </div>
 
           {badgePoolsError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{badgePoolsError}</span>
             </div>
           )}
 
           {badgePoolsLast && (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Last drop</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Last drop</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                 {badgePoolsLast?.outcome?.label ?? "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {badgePoolsLast?.outcome?.rarity ?? "—"}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {badgePoolsLast?.outcome?.rarity ?? "—"}</div>
               {Array.isArray(badgePoolsLast?.unlocks?.keys) && badgePoolsLast.unlocks.keys.length ? (
-                <div className="mt-2 text-xs text-[var(--muted)]">
-                  Unlocks: <span className="font-semibold text-[var(--foreground)]">{badgePoolsLast.unlocks.keys.length}</span> key(s)
+                <div className="mt-2 text-xs text-[var(--v2-muted)]">
+                  Unlocks: <span className="font-semibold text-[var(--v2-text)]">{badgePoolsLast.unlocks.keys.length}</span> key(s)
                 </div>
               ) : null}
             </div>
@@ -1824,52 +1824,52 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 16% 26%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 16% 26%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 86% 76%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Community event</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
-            <button className={buttonClassName({ variant: "ghost", size: "xs" })} onClick={refreshCommunity} disabled={communityLoading}>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Community event</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
+            <button className={v2ButtonClassName({ variant: "ghost", size: "xs" })} onClick={refreshCommunity} disabled={communityLoading}>
               {communityLoading ? "Refreshing…" : "Refresh"}
             </button>
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly unlock</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Global arcade actions unlock a one-time claim for everyone.</div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Weekly unlock</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Global arcade actions unlock a one-time claim for everyone.</div>
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
                 Week start: <span className="font-mono">{communityStatus?.week_start ?? "…"}</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Progress</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Progress</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">
                   {typeof communityStatus?.progress === "number" ? communityStatus.progress : "…"}
                 </span>
-                <span className="text-xs text-[var(--muted)]">/</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">
+                <span className="text-xs text-[var(--v2-muted)]">/</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">
                   {typeof communityStatus?.threshold === "number" ? communityStatus.threshold : "…"}
                 </span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={claimCommunity}
                 disabled={communityClaiming || communityLoading || !communityStatus?.unlocked || Boolean(communityStatus?.claimed)}
               >
@@ -1879,52 +1879,52 @@ export function ArcadeClient() {
           </div>
 
           {communityError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{communityError}</span>
             </div>
           )}
 
           {communityStatus?.unlocked ? (
-            <div className="mt-4 text-xs text-[var(--muted)]">Unlocked: yes · Claim is per-user (tracked in your arcade state).</div>
+            <div className="mt-4 text-xs text-[var(--v2-muted)]">Unlocked: yes · Claim is per-user (tracked in your arcade state).</div>
           ) : (
-            <div className="mt-4 text-xs text-[var(--muted)]">Unlocked: no · Keep playing any arcade module to advance progress.</div>
+            <div className="mt-4 text-xs text-[var(--v2-muted)]">Unlocked: no · Keep playing any arcade module to advance progress.</div>
           )}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 84% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blind insight packs</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Blind insight packs</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Open a blind pack</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Reveals a checklist, playbook, or reusable template · not financial advice</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Open a blind pack</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Reveals a checklist, playbook, or reusable template · not financial advice</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={insightProfile}
                   onChange={(e) => setInsightProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Insight pack volatility profile"
                 >
                   <option value="low">Low</option>
@@ -1935,13 +1935,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{invLoading ? "…" : invShards}</span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={openInsightPack}
                 disabled={insightLoading || invLoading || invShards < 20}
               >
@@ -1951,96 +1951,96 @@ export function ArcadeClient() {
           </div>
 
           {insightError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{insightError}</span>
             </div>
           )}
 
           {insightLast?.outcome ? (
-            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+            <div className="mt-5 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{insightLast.outcome.label}</div>
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{insightLast.outcome.rarity}</div>
+                <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{insightLast.outcome.label}</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{insightLast.outcome.rarity}</div>
               </div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
                 {insightLast.outcome.metadata?.kind ? (
                   <>
-                    Type: <span className="font-semibold text-[var(--foreground)]">{String(insightLast.outcome.metadata.kind)}</span>
-                    <span className="mx-2 text-[var(--border)]">•</span>
+                    Type: <span className="font-semibold text-[var(--v2-text)]">{String(insightLast.outcome.metadata.kind)}</span>
+                    <span className="mx-2 text-[var(--v2-border)]">•</span>
                   </>
                 ) : null}
                 {insightLast.outcome.metadata?.text ?? ""}
               </div>
 
               {String(insightLast.outcome.metadata?.content_md ?? "").trim() ? (
-                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--foreground)]">
+                <pre className="mt-3 whitespace-pre-wrap text-xs text-[var(--v2-text)]">
                   {String(insightLast.outcome.metadata.content_md)}
                 </pre>
               ) : null}
 
-              <div className="mt-3 text-[11px] text-[var(--muted)]">{insightLast.outcome.metadata?.disclaimer ?? ""}</div>
+              <div className="mt-3 text-[11px] text-[var(--v2-muted)]">{insightLast.outcome.metadata?.disclaimer ?? ""}</div>
             </div>
           ) : null}
 
           <div className="mt-4 grid gap-2 md:grid-cols-2">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Keys & Gates</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">Gate Key</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">
-                In inventory: <span className="font-mono text-[var(--foreground)]">{invLoading ? "…" : gateKeyQty}</span>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Keys & Gates</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">Gate Key</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">
+                In inventory: <span className="font-mono text-[var(--v2-text)]">{invLoading ? "…" : gateKeyQty}</span>
               </div>
-              <div className="mt-2 text-xs text-[var(--muted)]">
+              <div className="mt-2 text-xs text-[var(--v2-muted)]">
                 High volatility Insight Packs require a Gate Key or a Seasonal Set Key.
               </div>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Season</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{season?.key ?? "—"}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Season</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{season?.key ?? "—"}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">
                 Next shift: {season?.next_shift_at ? new Date(season.next_shift_at).toUTCString() : "—"}
               </div>
               {Array.isArray(season?.rules) && season!.rules.length ? (
-                <div className="mt-2 text-xs text-[var(--muted)]">{season!.rules[0]}</div>
+                <div className="mt-2 text-xs text-[var(--v2-muted)]">{season!.rules[0]}</div>
               ) : null}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 25%, var(--ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 20% 25%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blind creation</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Blind creation</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Forge now · reveal later</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Costs 25 shards now · reveals ~30 minutes later · commit→reveal proof</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Forge now · reveal later</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Costs 25 shards now · reveals ~30 minutes later · commit→reveal proof</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={createProfile}
                   onChange={(e) => setCreateProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Blind creation volatility profile"
                 >
                   <option value="low">Low</option>
@@ -2049,13 +2049,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{invLoading ? "…" : invShards}</span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={createBlindCreation}
                 disabled={createLoading || invLoading || invShards < 25}
               >
@@ -2065,46 +2065,46 @@ export function ArcadeClient() {
           </div>
 
           {createError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{createError}</span>
             </div>
           )}
 
           {createRevealError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Reveal error: <span className="font-semibold">{createRevealError}</span>
             </div>
           )}
 
           {createActions.length > 0 ? (
             <div className="mt-5 grid gap-3">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Recent forges</div>
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Recent forges</div>
                 <div className="mt-3 grid gap-2">
                   {createActions.slice(0, 8).map((a) => {
                     const canReveal = a.status === "ready";
                     const outcomeLabel = a.outcome_json?.outcome?.label ?? null;
                     return (
-                      <div key={a.id} className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div key={a.id} className="flex flex-col gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-[var(--foreground)]">{a.id.slice(0, 8)}…</span>
-                            <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{a.status}</span>
+                            <span className="text-xs font-bold text-[var(--v2-text)]">{a.id.slice(0, 8)}…</span>
+                            <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{a.status}</span>
                           </div>
                           {a.resolves_at ? (
-                            <div className="mt-1 text-xs text-[var(--muted)]">Resolves at: <span className="font-mono">{String(a.resolves_at)}</span></div>
+                            <div className="mt-1 text-xs text-[var(--v2-muted)]">Resolves at: <span className="font-mono">{String(a.resolves_at)}</span></div>
                           ) : null}
                           {outcomeLabel ? (
-                            <div className="mt-1 text-xs text-[var(--muted)]">Outcome: <span className="font-semibold text-[var(--foreground)]">{outcomeLabel}</span></div>
+                            <div className="mt-1 text-xs text-[var(--v2-muted)]">Outcome: <span className="font-semibold text-[var(--v2-text)]">{outcomeLabel}</span></div>
                           ) : null}
                         </div>
 
                         <div className="shrink-0">
                           {a.status === "resolved" ? (
-                            <span className="text-xs font-semibold text-[var(--muted)]">Revealed</span>
+                            <span className="text-xs font-semibold text-[var(--v2-muted)]">Revealed</span>
                           ) : (
                             <button
-                              className={buttonClassName({ variant: "secondary", size: "sm" })}
+                              className={v2ButtonClassName({ variant: "secondary", size: "sm" })}
                               onClick={() => revealBlindCreation(a.id)}
                               disabled={!canReveal || createRevealLoadingId === a.id}
                             >
@@ -2119,10 +2119,10 @@ export function ArcadeClient() {
               </div>
 
               {createLastReveal?.outcome ? (
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Latest reveal</div>
-                  <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{createLastReveal.outcome.label}</div>
-                  <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {createLastReveal.outcome.rarity}</div>
+                <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Latest reveal</div>
+                  <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{createLastReveal.outcome.label}</div>
+                  <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {createLastReveal.outcome.rarity}</div>
                 </div>
               ) : null}
             </div>
@@ -2130,39 +2130,39 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 14% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 90% 72%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 14% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 90% 72%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Mutation</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Mutation</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Transform one cosmetic</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Costs 15 shards · commit→reveal proof · bounded upgrade chance</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Transform one cosmetic</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Costs 15 shards · commit→reveal proof · bounded upgrade chance</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Item</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Item</span>
                 <select
                   value={mutationKey}
                   onChange={(e) => setMutationKey(e.target.value)}
-                  className="max-w-[260px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="max-w-[260px] rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Mutation item"
                 >
                   {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
@@ -2174,12 +2174,12 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={mutationProfile}
                   onChange={(e) => setMutationProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Mutation volatility profile"
                 >
                   <option value="low">Low</option>
@@ -2189,7 +2189,7 @@ export function ArcadeClient() {
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={runMutation}
                 disabled={mutationLoading || invLoading || invShards < 15 || cosmeticItems.length === 0 || !mutationKey}
               >
@@ -2199,54 +2199,54 @@ export function ArcadeClient() {
           </div>
 
           {mutationError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{mutationError}</span>
             </div>
           )}
 
           {mutationLast?.outcome ? (
-            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{mutationLast.outcome.label}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {mutationLast.outcome.rarity}</div>
+            <div className="mt-5 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{mutationLast.outcome.label}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {mutationLast.outcome.rarity}</div>
             </div>
           ) : null}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 28%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 78%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 28%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 86% 78%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Fusion</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Fusion</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Combine two cosmetics</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Costs 25 shards · commit→reveal proof · bounded upgrade chance</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Combine two cosmetics</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Costs 25 shards · commit→reveal proof · bounded upgrade chance</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">A</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">A</span>
                 <select
                   value={fusionKeyA}
                   onChange={(e) => setFusionKeyA(e.target.value)}
-                  className="max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="max-w-[220px] rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Fusion item A"
                 >
                   {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
@@ -2258,12 +2258,12 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">B</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">B</span>
                 <select
                   value={fusionKeyB}
                   onChange={(e) => setFusionKeyB(e.target.value)}
-                  className="max-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="max-w-[220px] rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Fusion item B"
                 >
                   {cosmeticItems.length === 0 ? <option value="">No cosmetics</option> : null}
@@ -2275,12 +2275,12 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={fusionProfile}
                   onChange={(e) => setFusionProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Fusion volatility profile"
                 >
                   <option value="low">Low</option>
@@ -2290,7 +2290,7 @@ export function ArcadeClient() {
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={runFusion}
                 disabled={fusionLoading || invLoading || invShards < 25 || cosmeticItems.length < 2 || !fusionKeyA || !fusionKeyB}
               >
@@ -2300,70 +2300,70 @@ export function ArcadeClient() {
           </div>
 
           {fusionError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{fusionError}</span>
             </div>
           )}
 
           {fusionLast?.outcome ? (
-            <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{fusionLast.outcome.label}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {fusionLast.outcome.rarity}</div>
+            <div className="mt-5 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{fusionLast.outcome.label}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {fusionLast.outcome.rarity}</div>
             </div>
           ) : null}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 20%, var(--ring) 0, transparent 55%), radial-gradient(circle at 80% 78%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 20% 20%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 80% 78%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Crafting</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
-            <button className={buttonClassName({ variant: "ghost", size: "xs" })} onClick={refreshInventory} disabled={invLoading}>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Crafting</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
+            <button className={v2ButtonClassName({ variant: "ghost", size: "xs" })} onClick={refreshInventory} disabled={invLoading}>
               {invLoading ? "Refreshing…" : "Refresh"}
             </button>
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Shards</div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">{invShards}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Deterministic currency earned by salvaging inventory.</div>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Shards</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">{invShards}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Deterministic currency earned by salvaging inventory.</div>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4 md:col-span-2">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Craft</div>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4 md:col-span-2">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Craft</div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 <button
-                  className={buttonClassName({ variant: "secondary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "secondary", size: "sm" })}
                   onClick={() => craft("craft_fee_5bps_24h")}
                   disabled={craftLoading !== null || invShards < 60}
                 >
                   {craftLoading === "craft_fee_5bps_24h" ? "Crafting…" : "Fee -5bps (60)"}
                 </button>
                 <button
-                  className={buttonClassName({ variant: "secondary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "secondary", size: "sm" })}
                   onClick={() => craft("craft_p2p_highlight_1")}
                   disabled={craftLoading !== null || invShards < 75}
                 >
                   {craftLoading === "craft_p2p_highlight_1" ? "Crafting…" : "P2P Highlight (75)"}
                 </button>
                 <button
-                  className={buttonClassName({ variant: "secondary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "secondary", size: "sm" })}
                   onClick={() => craft("craft_fee_10bps_48h")}
                   disabled={craftLoading !== null || invShards < 180}
                 >
@@ -2373,18 +2373,18 @@ export function ArcadeClient() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+          <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Salvage</div>
-                <div className="mt-1 text-sm text-[var(--muted)]">Convert badges/boosts into shards (fixed rate by rarity).</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Salvage</div>
+                <div className="mt-1 text-sm text-[var(--v2-muted)]">Convert badges/boosts into shards (fixed rate by rarity).</div>
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <select
                   value={salvageKey}
                   onChange={(e) => setSalvageKey(e.target.value)}
-                  className="min-w-[240px] rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--foreground)]"
+                  className="min-w-[240px] rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Select item to salvage"
                 >
                   <option value="" disabled>
@@ -2406,10 +2406,10 @@ export function ArcadeClient() {
                   min={1}
                   value={salvageQty}
                   onChange={(e) => setSalvageQty(Math.max(1, Number(e.target.value || 1)))}
-                  className="w-24 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs font-semibold text-[var(--foreground)]"
+                  className="w-24 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs font-semibold text-[var(--v2-text)]"
                 />
                 <button
-                  className={buttonClassName({ variant: "primary", size: "sm" })}
+                  className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                   onClick={salvageSelected}
                   disabled={salvageLoading || !salvageKey}
                 >
@@ -2419,31 +2419,31 @@ export function ArcadeClient() {
             </div>
 
             {invError && (
-              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              <div className="mt-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
                 Error: <span className="font-semibold">{invError}</span>
               </div>
             )}
 
             <div className="mt-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Inventory</div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Inventory</div>
               <div className="mt-2 grid gap-2">
                 {invItems.filter((i) => i.kind !== "shard").length === 0 ? (
-                  <div className="text-xs text-[var(--muted)]">No items yet. Claim Arcade drops to get started.</div>
+                  <div className="text-xs text-[var(--v2-muted)]">No items yet. Claim Arcade drops to get started.</div>
                 ) : (
                   invItems
                     .filter((i) => i.kind !== "shard")
                     .slice(0, 12)
                     .map((i) => (
-                      <div key={`${i.kind}:${i.code}:${i.rarity}`} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                      <div key={`${i.kind}:${i.code}:${i.rarity}`} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2">
                         <div className="min-w-0">
-                          <div className="truncate text-xs font-semibold text-[var(--foreground)]">
+                          <div className="truncate text-xs font-semibold text-[var(--v2-text)]">
                             {String(i.metadata_json?.label ?? i.code)}
                           </div>
-                          <div className="mt-0.5 text-[10px] uppercase tracking-widest text-[var(--muted)]">
+                          <div className="mt-0.5 text-[10px] uppercase tracking-widest text-[var(--v2-muted)]">
                             {i.kind} · {i.rarity}
                           </div>
                         </div>
-                        <div className="shrink-0 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs font-bold text-[var(--foreground)]">
+                        <div className="shrink-0 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] px-2 py-1 text-xs font-bold text-[var(--v2-text)]">
                           ×{i.quantity}
                         </div>
                       </div>
@@ -2455,26 +2455,26 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 15% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 15% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 85% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Flash missions</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Flash missions</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
             <button
-              className={buttonClassName({ variant: "ghost", size: "xs" })}
+              className={v2ButtonClassName({ variant: "ghost", size: "xs" })}
               onClick={refreshMissions}
               disabled={missionsLoading}
             >
@@ -2484,17 +2484,17 @@ export function ArcadeClient() {
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Do healthy actions · claim rewards</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Daily mission rotation · commit→reveal rewards · small, bounded utility.</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Do healthy actions · claim rewards</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Daily mission rotation · commit→reveal rewards · small, bounded utility.</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={missionsProfile}
                   onChange={(e) => setMissionsProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Missions profile"
                 >
                   <option value="low">Low</option>
@@ -2503,15 +2503,15 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Today</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{missionsStatus?.today ?? "—"}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Today</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{missionsStatus?.today ?? "—"}</span>
               </div>
             </div>
           </div>
 
           {missionsError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{missionsError}</span>
             </div>
           )}
@@ -2522,23 +2522,23 @@ export function ArcadeClient() {
                 const canClaim = Boolean(m.claimable) && missionClaiming === null;
                 const busy = missionClaiming === m.code;
                 return (
-                  <div key={m.code} className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
+                  <div key={m.code} className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{m.title}</div>
-                        <div className="mt-1 text-xs text-[var(--muted)]">{m.description}</div>
+                        <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{m.title}</div>
+                        <div className="mt-1 text-xs text-[var(--v2-muted)]">{m.description}</div>
                       </div>
-                      <div className="shrink-0 text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                      <div className="shrink-0 text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">
                         {m.claimed ? "Claimed" : m.completed ? "Complete" : "Pending"}
                       </div>
                     </div>
 
                     <div className="mt-3 flex items-center justify-between gap-3">
-                      <div className="text-xs text-[var(--muted)]">
+                      <div className="text-xs text-[var(--v2-muted)]">
                         {m.completed ? "Eligible" : "Complete the action to unlock claim."}
                       </div>
                       <button
-                        className={buttonClassName({ variant: canClaim ? "primary" : "secondary", size: "xs" })}
+                        className={v2ButtonClassName({ variant: canClaim ? "primary" : "secondary", size: "xs" })}
                         disabled={!m.claimable || busy}
                         onClick={() => claimMission(m.code)}
                       >
@@ -2550,15 +2550,15 @@ export function ArcadeClient() {
               })}
             </div>
           ) : (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-6 text-center text-sm text-[var(--v2-muted)]">
               {missionsLoading ? "Loading missions…" : "No missions available."}
             </div>
           )}
 
           {missionLast?.reward ? (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Last reward</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Last reward</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                 {missionLast.reward.label ?? "—"}
               </div>
             </div>
@@ -2566,39 +2566,39 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 25%, var(--ring) 0, transparent 55%), radial-gradient(circle at 80% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 20% 25%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 80% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Streak protector</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Streak protector</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Weekly protector roll</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">If you miss exactly one day on Calendar Daily, a protector is auto-consumed to preserve your streak.</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Weekly protector roll</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">If you miss exactly one day on Calendar Daily, a protector is auto-consumed to preserve your streak.</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={streakProfile}
                   onChange={(e) => setStreakProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Streak protector profile"
                 >
                   <option value="low">Low</option>
@@ -2607,13 +2607,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">In inventory</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : streakProtectorQty}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">In inventory</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{invLoading ? "…" : streakProtectorQty}</span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={claimStreakProtector}
                 disabled={streakLoading}
               >
@@ -2623,56 +2623,56 @@ export function ArcadeClient() {
           </div>
 
           {streakError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{streakError}</span>
             </div>
           )}
 
           {streakLast?.outcome ? (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                 {streakLast?.outcome?.label ?? "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Quantity: {streakLast?.outcome?.quantity ?? 1}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Quantity: {streakLast?.outcome?.quantity ?? 1}</div>
             </div>
           ) : null}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 18%, var(--ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 18%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 82% 72%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Rarity wheel</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Rarity wheel</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Spin for cosmetics</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Costs 10 shards · commit→reveal fairness proof</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Spin for cosmetics</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Costs 10 shards · commit→reveal fairness proof</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={wheelProfile}
                   onChange={(e) => setWheelProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Wheel volatility profile"
                 >
                   <option value="low">Low</option>
@@ -2681,13 +2681,13 @@ export function ArcadeClient() {
                 </select>
               </div>
 
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Shards</span>
-                <span className="font-mono text-xs font-semibold text-[var(--foreground)]">{invLoading ? "…" : invShards}</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Shards</span>
+                <span className="font-mono text-xs font-semibold text-[var(--v2-text)]">{invLoading ? "…" : invShards}</span>
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={spinWheel}
                 disabled={wheelLoading || invLoading || invShards < 10}
               >
@@ -2696,51 +2696,51 @@ export function ArcadeClient() {
             </div>
           </div>
 
-          <div className="mt-2 text-xs text-[var(--muted)]">Pity: after 10 non-rare spins, the wheel guarantees at least a Rare cosmetic.</div>
+          <div className="mt-2 text-xs text-[var(--v2-muted)]">Pity: after 10 non-rare spins, the wheel guarantees at least a Rare cosmetic.</div>
 
           {wheelError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{wheelError}</span>
             </div>
           )}
 
           {wheelLast?.outcome ? (
             <div className="mt-5 grid gap-3">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{wheelLast.outcome.label}</div>
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{wheelLast.outcome.rarity}</div>
+                  <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{wheelLast.outcome.label}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{wheelLast.outcome.rarity}</div>
                 </div>
-                <div className="mt-2 text-xs text-[var(--muted)]">Code: <span className="font-mono">{wheelLast.outcome.code}</span></div>
+                <div className="mt-2 text-xs text-[var(--v2-muted)]">Code: <span className="font-mono">{wheelLast.outcome.code}</span></div>
               </div>
 
               {wheelLast?.audit ? (
-                <details className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--muted)]">Fairness proof</summary>
-                  <div className="mt-3 grid gap-2 text-xs text-[var(--muted)]">
+                <details className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                  <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--v2-muted)]">Fairness proof</summary>
+                  <div className="mt-3 grid gap-2 text-xs text-[var(--v2-muted)]">
                     {wheelLast.audit.client_commit_hash ? (
                       <div>
-                        client_commit_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.client_commit_hash}</span>
+                        client_commit_hash: <span className="font-mono text-[var(--v2-text)]">{wheelLast.audit.client_commit_hash}</span>
                       </div>
                     ) : null}
                     {wheelLast.audit.server_commit_hash ? (
                       <div>
-                        server_commit_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.server_commit_hash}</span>
+                        server_commit_hash: <span className="font-mono text-[var(--v2-text)]">{wheelLast.audit.server_commit_hash}</span>
                       </div>
                     ) : null}
                     {wheelLast.audit.server_seed_b64 ? (
                       <div>
-                        server_seed_b64: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.server_seed_b64}</span>
+                        server_seed_b64: <span className="font-mono text-[var(--v2-text)]">{wheelLast.audit.server_seed_b64}</span>
                       </div>
                     ) : null}
                     {wheelLast.audit.random_hash ? (
                       <div>
-                        random_hash: <span className="font-mono text-[var(--foreground)]">{wheelLast.audit.random_hash}</span>
+                        random_hash: <span className="font-mono text-[var(--v2-text)]">{wheelLast.audit.random_hash}</span>
                       </div>
                     ) : null}
                     {typeof wheelLast.audit.rarity_roll === "number" && typeof wheelLast.audit.rarity_total === "number" ? (
                       <div>
-                        rarity_roll: <span className="font-semibold text-[var(--foreground)]">{wheelLast.audit.rarity_roll}</span> / {wheelLast.audit.rarity_total}
+                        rarity_roll: <span className="font-semibold text-[var(--v2-text)]">{wheelLast.audit.rarity_roll}</span> / {wheelLast.audit.rarity_total}
                       </div>
                     ) : null}
                   </div>
@@ -2751,39 +2751,39 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 12% 30%, var(--ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 12% 30%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Boost draft</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Boost draft</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Reveal 3 · pick 1</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Agency-first: you choose the boost you want.</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Reveal 3 · pick 1</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Agency-first: you choose the boost you want.</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={draftProfile}
                   onChange={(e) => setDraftProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -2792,7 +2792,7 @@ export function ArcadeClient() {
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={startDraft}
                 disabled={draftLoading}
               >
@@ -2802,16 +2802,16 @@ export function ArcadeClient() {
           </div>
 
           {draftError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{draftError}</span>
             </div>
           )}
 
           {draftPicked && (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Selected</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">{draftPicked.label ?? "Boost"}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {draftPicked.rarity ?? "—"}</div>
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Selected</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{draftPicked.label ?? "Boost"}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {draftPicked.rarity ?? "—"}</div>
             </div>
           )}
 
@@ -2822,15 +2822,15 @@ export function ArcadeClient() {
                   key={o.code}
                   onClick={() => pickDraft(o.code)}
                   disabled={draftPicking !== null}
-                  className="text-left rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4 shadow-sm transition hover:bg-[var(--card-2)]"
+                  className="text-left rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4 shadow-sm transition hover:bg-[var(--v2-surface-2)]"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">{o.label}</div>
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]">{o.rarity}</div>
+                    <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">{o.label}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{o.rarity}</div>
                   </div>
-                  <div className="mt-2 text-xs text-[var(--muted)]">{o.code}</div>
+                  <div className="mt-2 text-xs text-[var(--v2-muted)]">{o.code}</div>
                   <div className="mt-3">
-                    <span className={buttonClassName({ variant: "secondary", size: "xs" })}>
+                    <span className={v2ButtonClassName({ variant: "secondary", size: "xs" })}>
                       {draftPicking === o.code ? "Picking…" : "Pick"}
                     </span>
                   </div>
@@ -2841,41 +2841,41 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 18% 20%, var(--ring) 0, transparent 55%), radial-gradient(circle at 86% 72%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 18% 20%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 86% 72%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--up)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--up-bg)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-up)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-up-bg)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Calendar</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Calendar</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Daily claim</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Daily claim</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">
                 Streaks + pity (rare) · one claim per day
               </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={calProfile}
                   onChange={(e) => setCalProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -2884,7 +2884,7 @@ export function ArcadeClient() {
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={claimCalendarDaily}
                 disabled={calLoading || Boolean(calStatus?.claimed_today)}
               >
@@ -2894,27 +2894,27 @@ export function ArcadeClient() {
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Streak</div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">{calStatus?.streak.count ?? 0}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Best: {calStatus?.streak.best ?? 0}</div>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Streak</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">{calStatus?.streak.count ?? 0}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Best: {calStatus?.streak.best ?? 0}</div>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Pity (rare)</div>
-              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--foreground)]">{calStatus?.pity.rare ?? 0}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Resets on rare+</div>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Pity (rare)</div>
+              <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">{calStatus?.pity.rare ?? 0}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Resets on rare+</div>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Today</div>
-              <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">{calStatus?.today ?? "—"}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">UTC day boundary</div>
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Today</div>
+              <div className="mt-2 text-sm font-semibold text-[var(--v2-text)]">{calStatus?.today ?? "—"}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">UTC day boundary</div>
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+          <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Last 7 days</div>
-              <button onClick={refreshCalendarStatus} className={buttonClassName({ variant: "ghost", size: "xs" })}>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Last 7 days</div>
+              <button onClick={refreshCalendarStatus} className={v2ButtonClassName({ variant: "ghost", size: "xs" })}>
                 Refresh
               </button>
             </div>
@@ -2928,8 +2928,8 @@ export function ArcadeClient() {
                   <div
                     key={iso}
                     className={
-                      "rounded-xl border border-[var(--border)] px-2 py-2 text-center text-[11px] font-bold " +
-                      (claimed ? "bg-[var(--up-bg)] text-[var(--up)]" : "bg-[var(--bg)] text-[var(--muted)]")
+                      "rounded-xl border border-[var(--v2-border)] px-2 py-2 text-center text-[11px] font-bold " +
+                      (claimed ? "bg-[var(--v2-up-bg)] text-[var(--v2-up)]" : "bg-[var(--v2-bg)] text-[var(--v2-muted)]")
                     }
                     title={iso}
                   >
@@ -2941,56 +2941,56 @@ export function ArcadeClient() {
           </div>
 
           {calError && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{calError}</span>
             </div>
           )}
 
           {calLast && (
-            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Result</div>
-              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+            <div className="mt-4 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Result</div>
+              <div className="mt-2 text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                 {calLast?.outcome?.label ?? "—"}
               </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">Rarity: {calLast?.outcome?.rarity ?? "—"}</div>
+              <div className="mt-1 text-xs text-[var(--v2-muted)]">Rarity: {calLast?.outcome?.rarity ?? "—"}</div>
             </div>
           )}
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 12% 30%, var(--ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 12% 30%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Daily drop</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Daily drop</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Claim a badge</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">One claim per day · commit→reveal fairness proof</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Claim a badge</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">One claim per day · commit→reveal fairness proof</div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--muted)]">Volatility</span>
+              <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--v2-muted)]">Volatility</span>
                 <select
                   value={profile}
                   onChange={(e) => setProfile(e.target.value as any)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-xs font-semibold text-[var(--foreground)]"
+                  className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-1 text-xs font-semibold text-[var(--v2-text)]"
                   aria-label="Volatility profile"
                 >
                   <option value="low">Low</option>
@@ -3000,7 +3000,7 @@ export function ArcadeClient() {
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={claimDaily}
                 disabled={loading}
               >
@@ -3009,47 +3009,47 @@ export function ArcadeClient() {
             </div>
           </div>
 
-          <div className="mt-3 text-xs text-[var(--muted)]">{volatilityHelp}</div>
+          <div className="mt-3 text-xs text-[var(--v2-muted)]">{volatilityHelp}</div>
 
           {error && (
-            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+            <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
               Error: <span className="font-semibold">{error}</span>
             </div>
           )}
 
           {result && (
             <div className="mt-5 grid gap-3">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
+              <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">
+                  <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">
                     {result.outcome.label}
                   </div>
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">{result.outcome.rarity}</div>
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">{result.outcome.rarity}</div>
                 </div>
-                <div className="mt-2 text-xs text-[var(--muted)]">
+                <div className="mt-2 text-xs text-[var(--v2-muted)]">
                   Code: <span className="font-mono">{result.outcome.code}</span>
                 </div>
               </div>
 
-              <details className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--muted)]">
+              <details className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-widest text-[var(--v2-muted)]">
                   Fairness proof
                 </summary>
-                <div className="mt-3 grid gap-2 text-xs text-[var(--muted)]">
+                <div className="mt-3 grid gap-2 text-xs text-[var(--v2-muted)]">
                   <div>
-                    client_commit_hash: <span className="font-mono text-[var(--foreground)]">{result.audit.client_commit_hash}</span>
+                    client_commit_hash: <span className="font-mono text-[var(--v2-text)]">{result.audit.client_commit_hash}</span>
                   </div>
                   <div>
-                    server_commit_hash: <span className="font-mono text-[var(--foreground)]">{result.audit.server_commit_hash}</span>
+                    server_commit_hash: <span className="font-mono text-[var(--v2-text)]">{result.audit.server_commit_hash}</span>
                   </div>
                   <div>
-                    server_seed_b64: <span className="font-mono text-[var(--foreground)]">{result.audit.server_seed_b64}</span>
+                    server_seed_b64: <span className="font-mono text-[var(--v2-text)]">{result.audit.server_seed_b64}</span>
                   </div>
                   <div>
-                    random_hash: <span className="font-mono text-[var(--foreground)]">{result.audit.random_hash}</span>
+                    random_hash: <span className="font-mono text-[var(--v2-text)]">{result.audit.random_hash}</span>
                   </div>
                   <div>
-                    roll: <span className="font-semibold text-[var(--foreground)]">{result.audit.roll}</span> / {result.audit.total}
+                    roll: <span className="font-semibold text-[var(--v2-text)]">{result.audit.roll}</span> / {result.audit.total}
                   </div>
                 </div>
               </details>
@@ -3058,39 +3058,39 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
         <div
           className="pointer-events-none absolute inset-0 opacity-60"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 14% 22%, var(--ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--ring) 0, transparent 55%)",
+              "radial-gradient(circle at 14% 22%, var(--v2-ring) 0, transparent 55%), radial-gradient(circle at 88% 70%, var(--v2-ring) 0, transparent 55%)",
           }}
         />
 
         <div className="relative p-5 md:p-6">
           <div className="flex items-center gap-3">
             <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--accent-2)]" />
-              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--ring)]" />
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[var(--v2-accent-2)]" />
+              <span className="absolute inline-flex h-4.5 w-4.5 rounded-full bg-[var(--v2-ring)]" />
             </span>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Time vault</div>
-            <div className="h-px flex-1 bg-[var(--border)]" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Time vault</div>
+            <div className="h-px flex-1 bg-[var(--v2-border)]" />
           </div>
 
           <div className="mt-4 flex flex-col gap-4">
             <div>
-              <div className="text-xl font-extrabold tracking-tight text-[var(--foreground)]">Lock funds · unlock a bonus</div>
-              <div className="mt-1 text-sm text-[var(--muted)]">Funds are held until unlock. Bonus is a bounded utility boost.</div>
+              <div className="text-xl font-extrabold tracking-tight text-[var(--v2-text)]">Lock funds · unlock a bonus</div>
+              <div className="mt-1 text-sm text-[var(--v2-muted)]">Funds are held until unlock. Bonus is a bounded utility boost.</div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-12">
               <div className="md:col-span-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Asset</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Asset</div>
                 <select
                   value={vaultAssetId}
                   onChange={(e) => setVaultAssetId(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]"
+                  className="mt-1 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-sm font-semibold text-[var(--v2-text)]"
                 >
                   {assets.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -3101,22 +3101,22 @@ export function ArcadeClient() {
               </div>
 
               <div className="md:col-span-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Amount</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Amount</div>
                 <input
                   value={vaultAmount}
                   onChange={(e) => setVaultAmount(e.target.value)}
                   placeholder="0.00"
                   inputMode="decimal"
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]"
+                  className="mt-1 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-sm font-semibold text-[var(--v2-text)]"
                 />
               </div>
 
               <div className="md:col-span-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Duration</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Duration</div>
                 <select
                   value={vaultDurationHours}
                   onChange={(e) => setVaultDurationHours(Number(e.target.value))}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]"
+                  className="mt-1 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-sm font-semibold text-[var(--v2-text)]"
                 >
                   <option value={24}>24h</option>
                   <option value={72}>3d</option>
@@ -3125,11 +3125,11 @@ export function ArcadeClient() {
               </div>
 
               <div className="md:col-span-2">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Volatility</div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Volatility</div>
                 <select
                   value={vaultProfile}
                   onChange={(e) => setVaultProfile(e.target.value as any)}
-                  className="mt-1 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]"
+                  className="mt-1 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-sm font-semibold text-[var(--v2-text)]"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -3139,12 +3139,12 @@ export function ArcadeClient() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-[var(--muted)]">
+              <div className="text-xs text-[var(--v2-muted)]">
                 A client seed is saved locally to reveal later. Don’t clear storage before unlock.
               </div>
 
               <button
-                className={buttonClassName({ variant: "primary", size: "sm" })}
+                className={v2ButtonClassName({ variant: "primary", size: "sm" })}
                 onClick={createVault}
                 disabled={vaultLoading || !vaultAssetId || !vaultAmount.trim()}
               >
@@ -3153,7 +3153,7 @@ export function ArcadeClient() {
             </div>
 
             {vaultError && (
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
                 Error: <span className="font-semibold">{vaultError}</span>
               </div>
             )}
@@ -3161,52 +3161,52 @@ export function ArcadeClient() {
 
           <div className="mt-6">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">My vaults</div>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">My vaults</div>
               <button
                 onClick={refreshVaultActions}
-                className={buttonClassName({ variant: "secondary", size: "xs" })}
+                className={v2ButtonClassName({ variant: "secondary", size: "xs" })}
               >
                 Refresh
               </button>
             </div>
 
             {vaultRevealError && (
-              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              <div className="mt-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
                 Reveal error: <span className="font-semibold">{vaultRevealError}</span>
               </div>
             )}
 
             {vaultHintError && (
-              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+              <div className="mt-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
                 Hint error: <span className="font-semibold">{vaultHintError}</span>
               </div>
             )}
 
             {vaultLastHint && (
-              <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Hint</div>
-                <div className="mt-1 text-sm font-semibold text-[var(--foreground)]">
+              <div className="mt-3 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Hint</div>
+                <div className="mt-1 text-sm font-semibold text-[var(--v2-text)]">
                   {vaultLastHint?.hint?.tier ? String(vaultLastHint.hint.tier).toUpperCase() : "—"}
                 </div>
-                <div className="mt-1 text-xs text-[var(--muted)]">{vaultLastHint?.hint?.message ?? ""}</div>
+                <div className="mt-1 text-xs text-[var(--v2-muted)]">{vaultLastHint?.hint?.message ?? ""}</div>
               </div>
             )}
 
             {vaultLastReveal && (
-              <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--card-2)] p-4">
-                <div className="text-sm font-extrabold tracking-tight text-[var(--foreground)]">Unlocked</div>
-                <div className="mt-1 text-xs text-[var(--muted)]">
-                  Bonus: <span className="font-semibold text-[var(--foreground)]">{vaultLastReveal?.outcome?.label ?? "—"}</span>
+              <div className="mt-3 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-4">
+                <div className="text-sm font-extrabold tracking-tight text-[var(--v2-text)]">Unlocked</div>
+                <div className="mt-1 text-xs text-[var(--v2-muted)]">
+                  Bonus: <span className="font-semibold text-[var(--v2-text)]">{vaultLastReveal?.outcome?.label ?? "—"}</span>
                 </div>
               </div>
             )}
 
             {vaultActions.length === 0 ? (
-              <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+              <div className="mt-3 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] px-4 py-6 text-center text-sm text-[var(--v2-muted)]">
                 No vaults yet.
               </div>
             ) : (
-              <div className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg)]">
+              <div className="mt-3 divide-y divide-[var(--v2-border)] overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)]">
                 {vaultActions.map((a) => {
                   const isReady = a.status === "ready";
                   const isHintReady = a.status === "hint_ready";
@@ -3219,25 +3219,25 @@ export function ArcadeClient() {
                   return (
                     <div key={a.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-[var(--foreground)]">
+                        <div className="text-sm font-semibold text-[var(--v2-text)]">
                           {asset} · {amount || "—"} · {dur ? `${dur}h` : "—"}
                         </div>
-                        <div className="mt-1 text-xs text-[var(--muted)]">
-                          Status: <span className="font-semibold text-[var(--foreground)]">{a.status}</span>
+                        <div className="mt-1 text-xs text-[var(--v2-muted)]">
+                          Status: <span className="font-semibold text-[var(--v2-text)]">{a.status}</span>
                           {a.resolves_at ? <span> · unlocks {new Date(a.resolves_at).toLocaleString()}</span> : null}
                         </div>
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
                         <button
-                          className={buttonClassName({ variant: isHintReady ? "secondary" : "ghost", size: "xs" })}
+                          className={v2ButtonClassName({ variant: isHintReady ? "secondary" : "ghost", size: "xs" })}
                           onClick={() => hintVault(a.id)}
                           disabled={!isHintReady || vaultHintLoadingId === a.id}
                         >
                           {vaultHintLoadingId === a.id ? "Hint…" : "Hint"}
                         </button>
                         <button
-                          className={buttonClassName({ variant: canReveal ? "primary" : "secondary", size: "xs" })}
+                          className={v2ButtonClassName({ variant: canReveal ? "primary" : "secondary", size: "xs" })}
                           onClick={() => revealVault(a.id)}
                           disabled={!canReveal || vaultRevealLoadingId === a.id || a.status === "resolved"}
                         >
@@ -3253,29 +3253,29 @@ export function ArcadeClient() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Next</div>
-        <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">More modules will plug into the same engine</div>
-        <div className="mt-1 text-xs text-[var(--muted)]">
+      <section className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 shadow-[var(--v2-shadow-md)]">
+        <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Next</div>
+        <div className="mt-2 text-sm font-semibold text-[var(--v2-text)]">More modules will plug into the same engine</div>
+        <div className="mt-1 text-xs text-[var(--v2-muted)]">
           Time vaults, multi-stage reveals, crafting, progression tiers, community events, and AI packs will reuse the same
           action log, fairness proof, and inventory system.
         </div>
         <div className="mt-4">
-          <a href="/arcade/transparency" className="text-xs font-semibold text-[var(--accent)] hover:underline">
+          <a href="/arcade/transparency" className="text-xs font-semibold text-[var(--v2-accent)] hover:underline">
             View transparency dashboard →
           </a>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+      <section className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-5 shadow-[var(--v2-shadow-md)]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Safety & export</div>
-            <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">Control your arcade usage</div>
-            <div className="mt-1 text-xs text-[var(--muted)]">Self-exclusion and daily limits are enforced server-side.</div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Safety & export</div>
+            <div className="mt-2 text-sm font-semibold text-[var(--v2-text)]">Control your arcade usage</div>
+            <div className="mt-1 text-xs text-[var(--v2-muted)]">Self-exclusion and daily limits are enforced server-side.</div>
           </div>
           <a
-            className={buttonClassName({ variant: "secondary", size: "xs" })}
+            className={v2ButtonClassName({ variant: "secondary", size: "xs" })}
             href="/api/arcade/export"
             target="_blank"
             rel="noreferrer"
@@ -3285,29 +3285,29 @@ export function ArcadeClient() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Self-exclusion</div>
-            <div className="mt-2 text-xs text-[var(--muted)]">
-              Current: <span className="font-mono text-[var(--foreground)]">{safety?.self_excluded_until ?? "off"}</span>
+          <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Self-exclusion</div>
+            <div className="mt-2 text-xs text-[var(--v2-muted)]">
+              Current: <span className="font-mono text-[var(--v2-text)]">{safety?.self_excluded_until ?? "off"}</span>
             </div>
             <div className="mt-3 flex items-center gap-2">
               <input
-                className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+                className="w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-text)]"
                 type="number"
                 min={0}
                 max={24 * 365}
                 value={selfExcludeHours}
                 onChange={(e) => setSelfExcludeHours(Math.max(0, Math.floor(Number(e.target.value || 0))))}
               />
-              <span className="text-xs text-[var(--muted)]">hours</span>
+              <span className="text-xs text-[var(--v2-muted)]">hours</span>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Daily actions</div>
-            <div className="mt-2 text-xs text-[var(--muted)]">0 or blank disables.</div>
+          <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Daily actions</div>
+            <div className="mt-2 text-xs text-[var(--v2-muted)]">0 or blank disables.</div>
             <input
-              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+              className="mt-3 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-text)]"
               inputMode="numeric"
               value={dailyActionLimit}
               onChange={(e) => setDailyActionLimit(e.target.value.replace(/[^0-9]/g, ""))}
@@ -3315,11 +3315,11 @@ export function ArcadeClient() {
             />
           </div>
 
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-4">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Daily shard spend</div>
-            <div className="mt-2 text-xs text-[var(--muted)]">0 or blank disables.</div>
+          <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--v2-muted)]">Daily shard spend</div>
+            <div className="mt-2 text-xs text-[var(--v2-muted)]">0 or blank disables.</div>
             <input
-              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--foreground)]"
+              className="mt-3 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-xs text-[var(--v2-text)]"
               inputMode="numeric"
               value={dailyShardSpendLimit}
               onChange={(e) => setDailyShardSpendLimit(e.target.value.replace(/[^0-9]/g, ""))}
@@ -3329,21 +3329,21 @@ export function ArcadeClient() {
         </div>
 
         {safetyError ? (
-          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--warn-bg)] px-4 py-3 text-xs text-[var(--foreground)]">
+          <div className="mt-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-xs text-[var(--v2-text)]">
             Error: <span className="font-semibold">{safetyError}</span>
           </div>
         ) : null}
 
         <div className="mt-4 flex items-center justify-end gap-2">
           <button
-            className={buttonClassName({ variant: "ghost", size: "xs" })}
+            className={v2ButtonClassName({ variant: "ghost", size: "xs" })}
             onClick={refreshSafety}
             disabled={safetyLoading}
           >
             {safetyLoading ? "…" : "Reload"}
           </button>
           <button
-            className={buttonClassName({ variant: "primary", size: "xs" })}
+            className={v2ButtonClassName({ variant: "primary", size: "xs" })}
             onClick={saveSafety}
             disabled={safetyLoading}
           >

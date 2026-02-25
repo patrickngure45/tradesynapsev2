@@ -219,7 +219,14 @@ export async function propagateLeaderOrder(
   const subs = await getActiveSubscriptionsForLeader(sql, params.leaderUserId);
   if (subs.length === 0) return; // No one to copy
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000");
+  if (!baseUrl) {
+    console.error("[copy-trading] NEXT_PUBLIC_BASE_URL is not set — cannot propagate orders safely");
+    return;
+  }
   const serviceSecret = process.env.INTERNAL_SERVICE_SECRET;
   if (!serviceSecret) {
     console.error("[copy-trading] INTERNAL_SERVICE_SECRET not set — cannot propagate orders");

@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, fetchJsonOrThrow } from "@/lib/api/client";
+import { V2Button } from "@/components/v2/Button";
+import { V2Card, V2CardBody, V2CardHeader } from "@/components/v2/Card";
+import { V2Skeleton } from "@/components/v2/Skeleton";
 
 type MarketRow = {
   id: string;
@@ -68,43 +71,55 @@ export function AdminMarketsClient() {
 
   if (loading) {
     return (
-      <div className="h-40 w-full animate-pulse rounded-3xl border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_55%,transparent)]" />
+      <V2Skeleton className="h-40" />
     );
   }
 
   return (
     <div className="grid gap-4">
       {error ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--warn-bg)] px-5 py-4 text-sm text-[var(--foreground)]">
-          Error: <span className="font-semibold">{error}</span>
+        <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-warn-bg)] px-4 py-3 text-[13px] font-semibold text-[var(--v2-text)]">
+          Error: <span className="font-extrabold">{error}</span>
         </div>
       ) : null}
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Summary</div>
-            <div className="mt-1 text-xs text-[var(--muted)]">Enabled {enabledCount} · Disabled {disabledCount}</div>
+      <V2Card>
+        <V2CardHeader
+          title="Summary"
+          subtitle={`Enabled ${enabledCount} · Disabled ${disabledCount}`}
+          right={
+            <V2Button size="sm" variant="ghost" onClick={() => void refresh()}>
+              Refresh
+            </V2Button>
+          }
+        />
+        <V2CardBody>
+          <div className="grid gap-2 text-[13px]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[var(--v2-muted)]">Total markets</div>
+              <div className="font-semibold text-[var(--v2-text)]">{markets.length}</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[var(--v2-muted)]">Enabled</div>
+              <div className="font-semibold text-[var(--v2-text)]">{enabledCount}</div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[var(--v2-muted)]">Disabled</div>
+              <div className="font-semibold text-[var(--v2-text)]">{disabledCount}</div>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            className="text-xs font-semibold text-[var(--accent)] hover:underline"
-          >
-            Refresh
-          </button>
-        </div>
-      </section>
+        </V2CardBody>
+      </V2Card>
 
       {markets.length === 0 ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-6 py-10 text-center text-sm text-[var(--muted)]">
+        <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-6 py-10 text-center text-[13px] text-[var(--v2-muted)] shadow-[var(--v2-shadow-sm)]">
           No markets.
         </div>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow)]">
-          <table className="w-full text-sm">
-            <thead className="bg-[var(--card-2)]">
-              <tr className="text-left text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+        <section className="overflow-hidden rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-md)]">
+          <table className="w-full text-[13px]">
+            <thead className="bg-[var(--v2-surface-2)]">
+              <tr className="text-left text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">
                 <th className="px-4 py-3">Market</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Fees</th>
@@ -116,45 +131,45 @@ export function AdminMarketsClient() {
                 const isEnabled = m.status === "enabled";
                 const busy = savingId === m.id;
                 return (
-                  <tr key={m.id} className="border-t border-[var(--border)]">
+                  <tr key={m.id} className="border-t border-[var(--v2-border)]">
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-[var(--foreground)]">{m.symbol}</div>
-                      <div className="mt-0.5 font-mono text-[10px] text-[var(--muted)]">{m.id}</div>
+                      <div className="font-semibold text-[var(--v2-text)]">{m.symbol}</div>
+                      <div className="mt-0.5 font-mono text-[11px] text-[var(--v2-muted)]">{m.id}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={
                           "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold " +
                           (isEnabled
-                            ? "border-[color-mix(in_srgb,var(--up)_40%,var(--border))] text-[var(--up)]"
-                            : "border-[color-mix(in_srgb,var(--warn)_40%,var(--border))] text-[var(--warn)]")
+                            ? "border-[color-mix(in_srgb,var(--v2-up)_40%,var(--v2-border))] text-[var(--v2-up)]"
+                            : "border-[color-mix(in_srgb,var(--v2-warn)_40%,var(--v2-border))] text-[var(--v2-warn)]")
                         }
                       >
                         {isEnabled ? "enabled" : "disabled"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[11px] text-[var(--muted)]">
+                    <td className="px-4 py-3 text-[12px] text-[var(--v2-muted)]">
                       maker {m.maker_fee_bps}bps · taker {m.taker_fee_bps}bps
                     </td>
                     <td className="px-4 py-3 text-right">
                       {isEnabled ? (
-                        <button
-                          type="button"
+                        <V2Button
+                          size="sm"
+                          variant="secondary"
                           disabled={busy}
                           onClick={() => void setStatus(m.id, "disabled")}
-                          className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)]"
                         >
                           {busy ? "…" : "Disable"}
-                        </button>
+                        </V2Button>
                       ) : (
-                        <button
-                          type="button"
+                        <V2Button
+                          size="sm"
+                          variant="primary"
                           disabled={busy}
                           onClick={() => void setStatus(m.id, "enabled")}
-                          className="rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)]"
                         >
                           {busy ? "…" : "Enable"}
-                        </button>
+                        </V2Button>
                       )}
                     </td>
                   </tr>

@@ -1,0 +1,69 @@
+/* Coinwaka v2 UI tokens (isolated to /v2 via data-ui="v2"). */
+
+[data-ui="v2"] {
+  --v2-radius-sm: 12px;
+  --v2-radius-md: 16px;
+  --v2-radius-lg: 22px;
+
+  --v2-shadow-sm: 0 1px 2px rgba(11, 18, 32, 0.06), 0 10px 24px rgba(11, 18, 32, 0.08);
+  --v2-shadow-md: 0 10px 24px rgba(11, 18, 32, 0.12), 0 24px 72px rgba(11, 18, 32, 0.18);
+
+  --v2-bg: var(--background);
+
+  --v2-surface: var(--card);
+  --v2-surface-2: color-mix(in srgb, var(--card-2) 86%, transparent);
+
+  --v2-text: var(--foreground);
+  --v2-muted: var(--muted);
+  --v2-border: var(--border);
+
+  --v2-accent: var(--accent);
+  --v2-accent-2: var(--accent-2);
+  --v2-ring: var(--ring);
+
+  --v2-warn: var(--warn);
+  --v2-warn-bg: var(--warn-bg);
+
+  --v2-up: var(--up);
+  --v2-up-bg: var(--up-bg);
+  --v2-down: var(--down);
+  --v2-down-bg: var(--down-bg);
+
+  /* CoinWaka identity: wealth → waka (spread).
+     Uses existing theme primitives only (accent/ring). */
+  --v2-ember-1: color-mix(in srgb, var(--v2-accent) 22%, transparent);
+  --v2-ember-2: color-mix(in srgb, var(--v2-accent-2) 18%, transparent);
+  --v2-ember-3: color-mix(in srgb, var(--v2-ring) 14%, transparent);
+}
+
+/* Optional background layer for v2 shells.
+   Activated by setting <html data-v2-ember="1"> (done client-side per-route). */
+html[data-v2-ember="1"] [data-ui="v2"] {
+  background-image:
+    radial-gradient(circle at 14% 18%, var(--v2-ember-1) 0, transparent 56%),
+    radial-gradient(circle at 86% 22%, var(--v2-ember-2) 0, transparent 52%),
+    radial-gradient(circle at 60% 92%, var(--v2-ember-3) 0, transparent 58%);
+  background-attachment: fixed;
+}
+
+[data-ui="v2"] body {
+  /* No-op: body is outside this subtree. */
+}
+
+/* Mobile-first defaults inside v2 */
+[data-ui="v2"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-ui="v2"] a {
+  text-decoration-thickness: 1px;
+}
+
+/* Reduce motion by default; allow subtle motion only where needed */
+@media (prefers-reduced-motion: reduce) {
+  [data-ui="v2"] * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

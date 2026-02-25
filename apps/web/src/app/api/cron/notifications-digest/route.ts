@@ -3,17 +3,10 @@ import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { createNotification } from "@/lib/notifications";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function cronAuthed(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
-  if (!expected) return false;
-  const url = new URL(request.url);
-  const provided = String(request.headers.get("x-cron-secret") ?? url.searchParams.get("secret") ?? "").trim();
-  return !!provided && provided === expected;
-}
 
 function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = typeof v === "number" ? v : Number(String(v ?? ""));
@@ -43,7 +36,8 @@ function isInQuietHours(schedule: {
 }
 
 export async function POST(request: Request) {
-  if (!cronAuthed(request)) return apiError("unauthorized", { status: 401 });
+  const authErr = requireCronRequestAuth(request);
+  if (authErr) return apiError("unauthorized", { status: authErr === "cron_unauthorized" ? 401 : 500 });
   const sql = getSql();
   const startMs = Date.now();
 

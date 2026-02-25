@@ -4,6 +4,7 @@ import { requireSessionUserId } from "@/lib/auth/sessionGuard";
 import { serializeClearSessionCookie } from "@/lib/auth/session";
 import { auditContextFromRequest, writeAuditLog } from "@/lib/auditLog";
 import { responseForDbError } from "@/lib/dbTransient";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,16 @@ export async function POST(request: Request) {
   const sql = getSql();
   const authed = await requireSessionUserId(sql as any, request);
   if (!authed.ok) return authed.response;
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.sessions.logout_all",
+    windowMs: 60_000,
+    max: 10,
+    userId: authed.userId,
+  });
+  if (rl) return rl;
 
   try {
     await sql`

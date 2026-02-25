@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { createVerificationToken, consumeVerificationToken } from "@/lib/auth/emailVerification";
 import { createNotification } from "@/lib/notifications";
 import { responseForDbError } from "@/lib/dbTransient";
@@ -28,6 +29,16 @@ export async function POST(request: Request) {
   // ── Mode 1: Consume token ──
   const tokenParsed = verifySchema.safeParse(body);
   if (tokenParsed.success) {
+    const rl = await enforceAccountSecurityRateLimit({
+      sql: sql as any,
+      request,
+      limiterName: "account.verify_email.consume",
+      windowMs: 60_000,
+      max: 30,
+      includeIp: true,
+    });
+    if (rl) return rl;
+
     try {
       const result = await consumeVerificationToken(sql, tokenParsed.data.token);
       if (!result) {
@@ -64,6 +75,17 @@ export async function POST(request: Request) {
     const authErr = requireActingUserIdInProd(actingUserId);
     if (authErr) return apiError(authErr);
     if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+    const rl = await enforceAccountSecurityRateLimit({
+      sql: sql as any,
+      request,
+      limiterName: "account.verify_email.resend",
+      windowMs: 60_000,
+      max: 10,
+      userId: actingUserId,
+      includeIp: true,
+    });
+    if (rl) return rl;
 
     try {
       // Check if already verified

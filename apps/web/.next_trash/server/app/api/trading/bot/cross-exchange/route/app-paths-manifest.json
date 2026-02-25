@@ -1,0 +1,3 @@
+{
+  "/api/trading/bot/cross-exchange/route": "app/api/trading/bot/cross-exchange/route.js"
+}

@@ -7,6 +7,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { responseForDbError } from "@/lib/dbTransient";
 import { verifyAuthentication } from "@/lib/auth/webauthn";
 import { createStepUpToken, serializeStepUpCookie } from "@/lib/auth/stepUp";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,16 @@ export async function POST(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.passkeys.authenticate.verify",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   const json = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(json);

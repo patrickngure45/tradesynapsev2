@@ -10,6 +10,7 @@ import { logRouteResponse } from "@/lib/routeLog";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
 import { requestUserTransfer } from "@/lib/exchange/userTransfer";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,16 @@ export async function POST(request: Request) {
   const authed = await requireSessionUserId(sql as any, request);
   if (!authed.ok) return authed.response;
   const actingUserId = authed.userId;
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.transfers.request",
+    windowMs: 60_000,
+    max: 16,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

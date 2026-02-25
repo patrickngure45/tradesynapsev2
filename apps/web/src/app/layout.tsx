@@ -1,23 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { getPublicBaseUrl, getPublicBaseUrlOrigin } from "@/lib/seo/publicBaseUrl";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b0e14",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fcfcfd" },
+    { media: "(prefers-color-scheme: dark)", color: "#070a11" },
+  ],
 };
 
 const BRAND_NAME = (process.env.NEXT_PUBLIC_BRAND_NAME ?? "Coinwaka").trim() || "Coinwaka";
@@ -34,7 +26,7 @@ export const metadata: Metadata = {
     template: `%s | ${BRAND_NAME}`,
   },
   description:
-    "Wallet rails and P2P escrow settlement with transparent, predictable flows.",
+    "Mobile-first wallet rails and P2P escrow settlement with transparent, predictable flows.",
   keywords: [
     "USDT",
     "BNB",
@@ -49,12 +41,12 @@ export const metadata: Metadata = {
     url: BASE_ORIGIN,
     title: DEFAULT_TITLE,
     description:
-      "Wallet rails and P2P escrow settlement with transparent, predictable flows.",
+      "Mobile-first wallet rails and P2P escrow settlement with transparent, predictable flows.",
   },
   twitter: {
     card: "summary_large_image",
     title: DEFAULT_TITLE,
-    description: "Wallet rails and P2P escrow settlement.",
+    description: "Mobile-first wallet rails and P2P escrow settlement.",
   },
   robots: {
     index: true,
@@ -103,7 +95,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className="antialiased"
       >
         <ThemeProvider>{children}</ThemeProvider>
       </body>

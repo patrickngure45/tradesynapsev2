@@ -1,0 +1,3 @@
+{
+  "/api/exchange/deposits/pending/route": "app/api/exchange/deposits/pending/route.js"
+}

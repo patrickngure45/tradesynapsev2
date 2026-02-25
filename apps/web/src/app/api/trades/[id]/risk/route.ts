@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { getSql } from "@/lib/db";
 import { getActingUserId, isParty, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
@@ -33,6 +34,16 @@ export async function POST(
   if (authErr) {
     return apiError(authErr);
   }
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "trades.risk.assess",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const activeErr = await retryOnceOnTransientDbError(() =>

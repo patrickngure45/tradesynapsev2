@@ -8,17 +8,10 @@ import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransie
 import { upsertServiceHeartbeat, listServiceHeartbeats } from "@/lib/system/heartbeat";
 import { sendMail, isEmailConfigured } from "@/lib/email/transport";
 import { opsAlertEmail } from "@/lib/email/templates";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function cronAuthed(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
-  if (!expected) return false;
-  const url = new URL(request.url);
-  const provided = String(request.headers.get("x-cron-secret") ?? url.searchParams.get("secret") ?? "").trim();
-  return !!provided && provided === expected;
-}
 
 function csvEnv(name: string, fallbackCsv = ""): string[] {
   const raw = String(process.env[name] ?? fallbackCsv).trim();
@@ -74,7 +67,8 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const sql = getSql();
 
-  if (!cronAuthed(request)) return apiError("unauthorized", { status: 401 });
+  const authErr = requireCronRequestAuth(request);
+  if (authErr) return apiError("unauthorized", { status: authErr === "cron_unauthorized" ? 401 : 500 });
 
   const url = new URL(request.url);
   let q: z.infer<typeof querySchema>;
@@ -108,6 +102,7 @@ export async function POST(request: Request) {
   const outboxOpenThreshold = envInt("OPS_OUTBOX_OPEN_THRESHOLD", 5000, { min: 0, max: 1_000_000 });
   const emailOutboxPendingThreshold = envInt("OPS_EMAIL_OUTBOX_PENDING_THRESHOLD", 200, { min: 0, max: 1_000_000 });
   const emailOutboxAgeMinutes = envInt("OPS_EMAIL_OUTBOX_AGE_MINUTES", 20, { min: 0, max: 24 * 60 });
+  const jobLockStaleAfterMinutes = envInt("OPS_JOB_LOCK_STALE_AFTER_MINUTES", 10, { min: 1, max: 7 * 24 * 60 });
 
   try {
     const result = await retryOnceOnTransientDbError(async () => {
@@ -153,6 +148,26 @@ export async function POST(request: Request) {
         if (!row.lastSeenAtMs || now - row.lastSeenAtMs > exp.staleAfterMs) staleExpectedServices.push(exp.service);
       }
 
+      const staleLocks = await sql<
+        {
+          key: string;
+          holder_id: string;
+          held_until: string;
+          updated_at: string;
+        }[]
+      >`
+        SELECT
+          key,
+          holder_id,
+          held_until::text AS held_until,
+          updated_at::text AS updated_at
+        FROM ex_job_lock
+        WHERE held_until > now()
+          AND updated_at < now() - make_interval(mins => ${jobLockStaleAfterMinutes})
+        ORDER BY updated_at ASC
+        LIMIT 25
+      `;
+
       const oldestPendingMs = oldestPendingAt ? Date.parse(oldestPendingAt) : NaN;
       const emailOldestAgeMin = Number.isFinite(oldestPendingMs) ? Math.max(0, Math.floor((now - oldestPendingMs) / 60_000)) : null;
 
@@ -182,8 +197,31 @@ export async function POST(request: Request) {
         issues.push(`stale services: ${staleExpectedServices.join(", ")}`);
       }
 
+      if (staleLocks.length > 0) {
+        const sample = staleLocks
+          .slice(0, 10)
+          .map((l) => `${l.key} (holder ${l.holder_id})`)
+          .join(", ");
+        issues.push(
+          `stale job locks: ${staleLocks.length} (>${jobLockStaleAfterMinutes}m since update). ${sample}`,
+        );
+      }
+
       const degraded = issues.length > 0;
-      const fingerprint = sha256(JSON.stringify({ issues, outboxOpen, outboxDead, outboxWithErrors, emailPending, emailFailed, oldestPendingAt, staleExpectedServices }));
+      const fingerprint = sha256(
+        JSON.stringify({
+          issues,
+          outboxOpen,
+          outboxDead,
+          outboxWithErrors,
+          emailPending,
+          emailFailed,
+          oldestPendingAt,
+          staleExpectedServices,
+          staleLocks,
+          jobLockStaleAfterMinutes,
+        }),
+      );
 
       // Dedupe: only send when fingerprint changes OR minimum interval passed.
       const stateKey = "ops:degraded";
@@ -208,6 +246,7 @@ export async function POST(request: Request) {
         minutesSince,
         expectedServices,
         staleExpectedServices,
+        staleLocks,
         metrics: {
           outbox: { open: outboxOpen, dead: outboxDead, with_errors: outboxWithErrors },
           email_outbox: { pending: emailPending, failed: emailFailed, oldest_pending_at: oldestPendingAt, oldest_age_min: emailOldestAgeMin },

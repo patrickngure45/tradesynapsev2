@@ -1,0 +1,3 @@
+{
+  "/api/exchange/marketdata/top/route": "app/api/exchange/marketdata/top/route.js"
+}

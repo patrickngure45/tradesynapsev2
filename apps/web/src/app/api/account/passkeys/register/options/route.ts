@@ -6,6 +6,7 @@ import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { responseForDbError } from "@/lib/dbTransient";
 import { createRegistrationOptions } from "@/lib/auth/webauthn";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,16 @@ export async function POST(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.passkeys.register.options",
+    windowMs: 60_000,
+    max: 12,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   const json = await request.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(json);

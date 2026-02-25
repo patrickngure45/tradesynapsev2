@@ -48,6 +48,34 @@ function assertProdPreflight(): void {
 
   const problems: string[] = [];
 
+  const baseUrl = String(process.env.NEXT_PUBLIC_BASE_URL ?? "").trim();
+  if (!baseUrl) {
+    problems.push("NEXT_PUBLIC_BASE_URL must be set in production (e.g. https://coinwaka.com)");
+  } else {
+    const lower = baseUrl.toLowerCase();
+    if (lower.includes("localhost") || lower.includes("127.0.0.1") || lower.startsWith("http://")) {
+      problems.push("NEXT_PUBLIC_BASE_URL must be a public https URL (not localhost/http)");
+    }
+  }
+
+  const allowedOrigin = String(process.env.ALLOWED_ORIGIN ?? "").trim();
+  if (!allowedOrigin) {
+    problems.push("ALLOWED_ORIGIN should be set in production to your public origin (for CSRF/origin checks)");
+  } else {
+    const lower = allowedOrigin.toLowerCase();
+    if (lower.includes("localhost") || lower.includes("127.0.0.1")) {
+      problems.push("ALLOWED_ORIGIN must not be localhost in production");
+    }
+  }
+
+  const evidenceStorage = String(process.env.EVIDENCE_STORAGE ?? "local").trim().toLowerCase();
+  const allowLocalEvidence = String(process.env.ALLOW_LOCAL_EVIDENCE_STORAGE_IN_PROD ?? "").trim() === "1";
+  if (evidenceStorage === "local" && !allowLocalEvidence) {
+    problems.push(
+      "EVIDENCE_STORAGE=local is unsafe in production (ephemeral disk). Set EVIDENCE_STORAGE=s3 or set ALLOW_LOCAL_EVIDENCE_STORAGE_IN_PROD=1 to override.",
+    );
+  }
+
   const sessionSecret = String(process.env.PROOFPACK_SESSION_SECRET ?? "").trim();
   if (isPlaceholderSecret(sessionSecret) || sessionSecret.length < 32) {
     problems.push("PROOFPACK_SESSION_SECRET must be set to a strong random value (>= 32 chars)");

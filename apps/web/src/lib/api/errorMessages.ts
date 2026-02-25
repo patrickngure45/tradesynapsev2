@@ -198,6 +198,40 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     message: "P2P is not available in your country yet.",
   },
 
+  // P2P Ads
+  ad_limit_reached: {
+    title: "Ad limit reached",
+    message: "You already have the maximum number of online ads. Pause one, then try again.",
+  },
+  fx_unavailable: {
+    title: "Rates unavailable",
+    message: "We couldn’t fetch the reference rate needed for limits. Try again shortly.",
+  },
+  min_limit_too_low: {
+    title: "Min limit too low",
+    message: "Your minimum trade amount is below the allowed minimum.",
+  },
+  max_limit_too_high: {
+    title: "Max limit too high",
+    message: "Your maximum trade amount is above the allowed maximum.",
+  },
+  ad_liquidity_too_low: {
+    title: "Ad liquidity too low",
+    message: "This ad is too small. Increase the total amount.",
+  },
+  p2p_ad_max_limit_exceeds_liquidity: {
+    title: "Max exceeds liquidity",
+    message: "Your max trade limit can’t exceed the remaining liquidity of the ad.",
+  },
+  p2p_ad_inventory_missing: {
+    title: "Escrow inventory missing",
+    message: "This SELL ad can’t be resumed because its escrow inventory hold is missing or inactive.",
+  },
+  p2p_ad_closed: {
+    title: "Ad closed",
+    message: "This ad is closed and can’t be changed.",
+  },
+
   p2p_open_orders_limit: {
     title: "Too many open trades",
     message: "You already have too many open P2P orders awaiting payment. Finish or cancel an existing order and try again.",

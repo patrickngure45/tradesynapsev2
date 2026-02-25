@@ -1,0 +1,10 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/exchange/twap/route.js")
+R.c("server/chunks/[root-of-the-server]__61fdcc84._.js")
+R.c("server/chunks/src_lib_db_ts_86d9618b._.js")
+R.c("server/chunks/node_modules_next_dist_esm_build_templates_app-route_f9a9e4a7.js")
+R.c("server/chunks/node_modules_zod_v4_classic_errors_6231ecd5.js")
+R.c("server/chunks/[root-of-the-server]__8f5ebbc3._.js")
+R.c("server/chunks/node_modules_zod_v4_classic_external_fa90cebf.js")
+R.c("server/chunks/_next-internal_server_app_api_exchange_twap_route_actions_1c7441a1.js")
+R.m(246219)
+module.exports=R.m(246219).exports

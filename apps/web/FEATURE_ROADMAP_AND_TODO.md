@@ -338,8 +338,8 @@ The TODOs are grouped to allow staged releases. Every module must implement:
 - [x] Withdrawal address book + labeling.
 - [x] Withdrawal allowlist (approve addresses; cooldown before first use).
 - [x] Per-user withdrawal limits + optional 2FA re-prompt for large amounts.
-- [ ] Multi-RPC fallback lists per chain + health scoring.
-- [ ] Auto-sweep thresholds and configurable sweep cadence.
+- [x] Multi-RPC fallback lists per chain + health scoring.
+- [x] Auto-sweep thresholds and configurable sweep cadence.
 
 ## F) Notifications + retention
 - [x] Order lifecycle notifications: placed, partial fill, filled, canceled, rejected.

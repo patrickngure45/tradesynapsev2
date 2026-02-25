@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { hashPassword } from "@/lib/auth/password";
 import { createSessionToken, serializeSessionCookie } from "@/lib/auth/session";
 import { createVerificationToken } from "@/lib/auth/emailVerification";
@@ -36,6 +37,16 @@ export async function POST(request: Request) {
   }
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "auth.signup",
+    windowMs: 60_000,
+    max: 20,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
+
   const emailLower = input.email.toLowerCase().trim();
 
   // Check if email already taken

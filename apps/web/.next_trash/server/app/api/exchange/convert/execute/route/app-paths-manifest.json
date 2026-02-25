@@ -1,0 +1,3 @@
+{
+  "/api/exchange/convert/execute/route": "app/api/exchange/convert/execute/route.js"
+}

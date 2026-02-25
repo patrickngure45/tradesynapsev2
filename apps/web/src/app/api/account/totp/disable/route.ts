@@ -3,6 +3,7 @@ import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { verifyTOTP } from "@/lib/auth/totp";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
 import { apiError } from "@/lib/api/errors";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,16 @@ export async function POST(request: Request) {
   if (authErr || !actingUserId) {
     return apiError(authErr ?? "unauthorized", { status: 401 });
   }
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.totp.disable",
+    windowMs: 60_000,
+    max: 8,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   let body: { code?: string };
   try {

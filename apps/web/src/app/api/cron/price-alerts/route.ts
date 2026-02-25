@@ -7,6 +7,7 @@ import { getExternalIndexUsdt } from "@/lib/market/indexPrice";
 import { getOrComputeFxReferenceRate } from "@/lib/fx/reference";
 import { createNotification } from "@/lib/notifications";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,10 +51,7 @@ function isEnabledInProd(): boolean {
 }
 
 function checkCronSecret(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
-  if (!expected) return false;
-  const got = request.headers.get("x-cron-secret") ?? new URL(request.url).searchParams.get("secret") ?? "";
-  return got === expected;
+  return !requireCronRequestAuth(request, { allowInNonProd: false });
 }
 
 /**

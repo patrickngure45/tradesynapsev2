@@ -42,6 +42,19 @@ Exchange safety (optional; defaults to OFF unless set):
 - `EXCHANGE_PRICE_BAND_BPS` — rejects limit orders too far from reference price
 - `EXCHANGE_CANCEL_MAX_PER_MIN` — per-user cancel rate limit
 
+Exchange abuse limits (enabled with defaults when unset):
+- `EXCHANGE_DEPOSIT_TRACE_MAX_PER_MIN` — per-user deposit trace requests per minute
+- `EXCHANGE_DEPOSIT_REPORT_MAX_PER_MIN` — per-user deposit report requests per minute
+- `EXCHANGE_WITHDRAW_REQUEST_MAX_PER_MIN` — per-user withdrawal requests per minute
+- `EXCHANGE_WITHDRAW_ALLOWLIST_MAX_PER_MIN` — per-user allowlist writes per minute
+
+Rate-limit policy docs:
+- `RATE_LIMIT_POLICY.md` — global proxy tiers + route-level override model
+- `RATE_LIMIT_AUDIT_2026-02-25.md` — mutating endpoint coverage snapshot and priority gaps
+
+Optional (disabled unless set):
+- `EXCHANGE_PLACE_MAX_PER_MIN` — per-user order placement requests per minute
+
 Gas (BSC):
 - Gas fees are modeled and paid in `BNB`.
 
@@ -103,8 +116,58 @@ The web service only runs migrations + serves HTTP/WebSocket traffic. For produc
 - `npm run outbox:worker`
 - `npm run deposit:watch:bsc` (or `deposit:watch:eth`)
 
+Deposit worker scope + reliability docs:
+- `DEPOSITS_SCOPE.md`
+- `DEPOSITS_TODO.md`
+- `BSC_RPC_PLAN.md`
+
+**Deposit worker (BSC) recommended env (baseline)**
+- `DEPOSIT_CONFIRMATIONS=2`
+- `DEPOSIT_SCAN_NATIVE=1`
+- `DEPOSIT_SCAN_TOKENS=1`
+- `DEPOSIT_SCAN_SYMBOLS=USDT,USDC`
+- `DEPOSIT_SCAN_POLL_MS=120000`
+- `DEPOSIT_SCAN_MAX_MS=20000`
+- `DEPOSIT_SCAN_MAX_BLOCKS=120`
+- `DEPOSIT_SCAN_BLOCKS_PER_BATCH=60`
+- `EXCHANGE_SCAN_LOCK_TTL_MS=120000`
+- `BSC_RPC_URL=<paid endpoint>`
+- Optional failover: `BSC_RPC_URLS=<url1,url2>`
+
 Sweeps should run as a scheduled job (or a separate service invoked on a timer):
 - `npm run sweep:deposits`
+
+## Release safety gates (real-user funds)
+
+Run these before pushing to production:
+
+```bash
+npm run preflight:release
+```
+
+What it checks:
+- required high-risk env vars are set (`DATABASE_URL`, session secret, wallet seed/key)
+- production URL and safety flags (`NEXT_PUBLIC_BASE_URL`, `RUN_SEED_PROD`, `NEXT_PUBLIC_USE_MAINNET`)
+- cron secret and optional allowlist presence
+- `lint` + `build` gates
+
+Optional stricter gate (includes tests):
+
+```bash
+RELEASE_RUN_TESTS=1 npm run preflight:release
+```
+
+After deploy, run smoke checks against live:
+
+```bash
+BASE_URL=https://coinwaka.com npm run smoke:postdeploy
+```
+
+Smoke checks verify:
+- `/api/system/version` is healthy and running in production mode
+- `/api/status` responds with valid health payload
+- dev endpoints are blocked in production
+- cron endpoints reject unauthenticated requests
 
 ## Exchange rollout checklist (production)
 
@@ -140,6 +203,39 @@ For the systematic, production-grade checklist (scope, architecture, paid servic
 
 - `DEPOSITS_TODO.md`
 
+### Cron auth + IP allowlist (recommended)
+
+Cron endpoints are protected by shared-secret auth in production and now support optional source IP allowlists.
+
+Set these env vars in Railway:
+
+- `EXCHANGE_CRON_SECRET=<long-random-secret>`
+- `CRON_SECRET=<same-secret-or-fallback>`
+- `EXCHANGE_CRON_ALLOWED_IPS=<comma-separated scheduler egress IPs>`
+- `CRON_ALLOWED_IPS=<fallback allowlist>`
+
+For P2P cron routes, you can use dedicated values:
+
+- `P2P_CRON_SECRET=<long-random-secret>`
+- `P2P_CRON_ALLOWED_IPS=<comma-separated scheduler egress IPs>`
+
+Example:
+
+```env
+EXCHANGE_CRON_SECRET=replace-with-64-char-random
+CRON_SECRET=replace-with-64-char-random
+EXCHANGE_CRON_ALLOWED_IPS=203.0.113.10,203.0.113.11
+CRON_ALLOWED_IPS=203.0.113.10,203.0.113.11
+
+P2P_CRON_SECRET=replace-with-64-char-random
+P2P_CRON_ALLOWED_IPS=198.51.100.20
+```
+
+Notes:
+- Allowlist is optional; when set, only requests from listed IPs pass auth.
+- If your scheduler has dynamic egress IPs, leave allowlist unset and rely on secret + proxy throttling.
+- Rotate cron secrets after incidents or provider changes.
+
 ### Required (Arcade delayed actions)
 
 Some Arcade modules create `scheduled` actions that must be moved to `ready` on a timer.
@@ -162,9 +258,41 @@ These are the common operational jobs:
 	- Requires email transport config (`RESEND_API_KEY` or SMTP vars) and verified user emails.
 	- Writes heartbeat `cron:email-notifications` (visible on `/status` + admin status).
 
+- Ops alerts (every **1–2 minutes**)
+	- Detects degraded operational signals and emails a summary (deduped + rate-limited).
+	- `GET /api/cron/ops-alerts?secret=...`
+
+	Required env:
+	- `OPS_ALERT_EMAIL_TO` — comma-separated recipient list
+	- Email transport config (same as email notifications; e.g. `RESEND_API_KEY` or SMTP vars)
+
+	Tuning (optional):
+	- `OPS_ALERT_MIN_INTERVAL_MINUTES` (default `30`) — minimum interval between sends for the same degradation state
+	- `OPS_OUTBOX_DEAD_THRESHOLD` (default `1`) — alert if outbox dead letters exceed threshold
+	- `OPS_OUTBOX_OPEN_THRESHOLD` (default `5000`) — alert if outbox open backlog exceeds threshold
+	- `OPS_EMAIL_OUTBOX_PENDING_THRESHOLD` (default `200`) — alert if `ex_email_outbox` pending exceeds threshold
+	- `OPS_EMAIL_OUTBOX_AGE_MINUTES` (default `20`) — alert if oldest pending email is older than this
+	- `OPS_JOB_LOCK_STALE_AFTER_MINUTES` (default `10`) — alert if a job lock is held and not updated for this long
+
+	Expected-service checks (optional; alert if heartbeat is missing/stale):
+	- `EXPECT_OUTBOX_WORKER=1`
+	- `EXPECT_DEPOSIT_SCAN=1`
+	- `EXPECT_SWEEP_DEPOSITS=1`
+
 - Deposit scan (native + allowlisted token logs) (every **2–3 minutes**)
 	- Recommended (BSC):
 		- `GET /api/exchange/cron/scan-deposits?secret=...&confirmations=2&native=1&tokens=1&symbols=USDT%2CUSDC&max_ms=8000&max_blocks=40&blocks_per_batch=20`
+
+	Notes:
+	- Optionally, scan-deposits can run a small finalize pass right after scanning by setting `EXCHANGE_FINALIZE_AFTER_SCAN=1` (or passing `finalize=1`).
+	- The finalize pass is capped/time-budgeted so the scan call stays within typical cron HTTP timeouts.
+
+- Finalize pending deposits (credits any pending events that are now confirmed) (every **1–2 minutes**)
+	- `GET /api/exchange/cron/finalize-deposits?secret=...&max=250&max_ms=15000`
+
+	Notes:
+	- This is a lightweight “catch-up” job that helps ensure pending-native deposits are credited promptly.
+	- It is idempotent (won’t double-credit) and uses a distributed DB lock.
 
 	Notes:
 	- In production, token scanning requires an allowlist via `symbols=...` unless `ALLOW_TOKEN_SCAN_ALL=1` is set.
@@ -197,7 +325,31 @@ Expire stale P2P orders and send “expiring soon” reminders (every **1 minute
 Notes:
 - Uses `P2P_CRON_SECRET` if set; otherwise accepts the shared `EXCHANGE_CRON_SECRET` / `CRON_SECRET`.
 
+#### Verified agents (M-Pesa)
+
+To create (or update) a **verified-agent** M-Pesa payment method for a dedicated agent user, use:
+
+```bash
+npm run p2p:add-verified-agent -- \
+	--email agent1@example.com \
+	--name "Agent One" \
+	--phone "+2547xxxxxxx" \
+	--network Safaricom
+```
+
+Notes:
+- If `--password` is omitted, the password defaults to the **local-part** of the email (e.g. `agent1`).
+- The script sets `email_verified=true`, `kyc_level=full`, and stores `verifiedAgent=true` in `p2p_payment_method.details`.
+
 ### Optional (price alerts)
+
+## Smoke tests (exchange)
+
+Recommended single command (starts dev server + auto dev-login when available):
+
+- `npm run smoke:exchange:dev`
+
+Non-dev smoke scripts (example: `npm run smoke:exchange-orders`) intentionally require auth via `COOKIE=...` / `PP_SESSION+CSRF` and will fail with `No auth configured` if you run them without a running server + credentials.
 
 If you’re using price alerts (`app_price_alert`) and want notifications to trigger automatically:
 
@@ -425,6 +577,28 @@ See `project/DEMO_CHECKLIST.md` for a guided walkthrough.
 
 ```bash
 npm run smoke:all
+```
+
+Exchange-specific smoke tests (useful for go-live QA):
+
+```bash
+npm run smoke:exchange-core
+
+# or auto-start the dev server:
+npm run smoke:exchange-core:dev
+
+# individual:
+npm run smoke:exchange-marketdata-stream
+npm run smoke:exchange-ledger
+npm run smoke:exchange-orders
+npm run smoke:exchange-withdrawals
+```
+
+Dev helpers (auto-starts the dev server in the smoke script):
+
+```bash
+npm run smoke:exchange-orders:dev
+npm run smoke:exchange-withdrawals:dev
 ```
 
 Individual smoke scripts are in `scripts/smoke-*.ts`.

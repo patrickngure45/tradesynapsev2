@@ -1,0 +1,3 @@
+{
+  "/api/exchange/cron/outbox-worker/route": "app/api/exchange/cron/outbox-worker/route.js"
+}

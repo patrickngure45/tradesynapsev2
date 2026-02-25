@@ -6,6 +6,7 @@ import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,6 +105,16 @@ export async function POST(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.recurring_buys.create",
+    windowMs: 60_000,
+    max: 12,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   let body: unknown;
   try {
@@ -206,6 +217,16 @@ export async function PATCH(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.recurring_buys.patch",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -282,6 +303,16 @@ export async function DELETE(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.recurring_buys.delete",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   try {
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));

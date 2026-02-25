@@ -5,6 +5,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -142,6 +143,16 @@ export async function POST(request: Request) {
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
 
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.conditional_orders.create",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
+
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
     if (activeErr) return apiError(activeErr);
@@ -210,6 +221,16 @@ export async function DELETE(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.conditional_orders.delete",
+    windowMs: 60_000,
+    max: 24,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   const url = new URL(request.url);
   const id = url.searchParams.get("id") ?? "";

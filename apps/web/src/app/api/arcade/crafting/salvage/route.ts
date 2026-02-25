@@ -4,6 +4,7 @@ import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { SHARD_ITEM, shardsPerUnitForSalvage } from "@/lib/arcade/crafting";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
 
@@ -44,6 +45,15 @@ export async function POST(request: Request) {
   const grant = perUnit * qty;
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.crafting.salvage",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const out = await retryOnceOnTransientDbError(async () => {

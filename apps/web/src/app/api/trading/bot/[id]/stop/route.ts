@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError } from "@/lib/api/errors";
 import { auditContextFromRequest, writeAuditLog } from "@/lib/auditLog";
@@ -14,6 +15,16 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "trading.bot.stop",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   const { id } = await ctx.params;
 

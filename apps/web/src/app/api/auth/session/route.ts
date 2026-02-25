@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { getSql } from "@/lib/db";
 import { apiError, apiZodError } from "@/lib/api/errors";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { createSessionToken, serializeClearSessionCookie, serializeSessionCookie } from "@/lib/auth/session";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { requireBootstrapKeyIfProd } from "@/lib/auth/keys";
@@ -33,6 +34,15 @@ export async function POST(request: Request) {
   }
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "auth.session.create",
+    windowMs: 60_000,
+    max: 20,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   let rows: { id: string; status: string; session_version: number }[];
   try {
@@ -88,10 +98,20 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "auth.session.delete",
+    windowMs: 60_000,
+    max: 20,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
+
   const secure = process.env.NODE_ENV === "production";
 
   try {
-    const sql = getSql();
     await writeAuditLog(sql, {
       actorId: null,
       actorType: "user",

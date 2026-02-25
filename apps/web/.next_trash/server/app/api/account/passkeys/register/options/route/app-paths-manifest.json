@@ -1,0 +1,3 @@
+{
+  "/api/account/passkeys/register/options/route": "app/api/account/passkeys/register/options/route.js"
+}

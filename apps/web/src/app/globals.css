@@ -2,13 +2,18 @@
 @import "tailwindcss";
 
 :root {
+  /* Fonts (avoid build-time network font fetches) */
+  --font-geist-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
   /* Core surfaces */
-  --background: #f5f7fa;
+  --background: #fcfcfd;
   --foreground: #0b1220;
   --card: #ffffff;
-  --card-2: #eef2f9;
-  --muted: #52607a;
-  --border: rgba(15, 23, 42, 0.10);
+  --card-2: #f4f6f8;
+  --muted: #5c677f;
+  --border: rgba(11, 18, 32, 0.12);
 
   /* Back-compat aliases (used across older components) */
   --bg: var(--background);
@@ -17,23 +22,42 @@
   --hover-bg: var(--card-2);
   --accent-hover: var(--accent);
 
-  /* Brand accent — TradeSynapse blue/cyan */
-  --accent: #2563eb;
-  --accent-2: #06b6d4;
-  --ring: rgba(37, 99, 235, 0.40);
+  /* Brand accent — Coinwaka Ember (wealth + growth/burn) */
+  --accent: #f97316;
+  --accent-2: #fbbf24;
+  --ring: rgba(249, 115, 22, 0.35);
 
   /* Semantic: trading colors */
   --up: #10b981;
   --up-bg: rgba(16, 185, 129, 0.10);
   --down: #ef4444;
   --down-bg: rgba(239, 68, 68, 0.10);
-  --warn: #f59e0b;
-  --warn-bg: rgba(245, 158, 11, 0.10);
+  --warn: #d97706;
+  --warn-bg: rgba(217, 119, 6, 0.12);
 
   /* Effects */
-  --shadow: 0 1px 3px rgba(2, 8, 23, 0.06), 0 8px 24px rgba(2, 8, 23, 0.06);
-  --shadow-2: 0 4px 12px rgba(2, 8, 23, 0.08), 0 16px 40px rgba(2, 8, 23, 0.10);
-  --glow: 0 0 40px rgba(37, 99, 235, 0.08);
+  --shadow: 0 1px 2px rgba(11, 18, 32, 0.06), 0 10px 28px rgba(11, 18, 32, 0.08);
+  --shadow-2: 0 6px 16px rgba(11, 18, 32, 0.10), 0 22px 64px rgba(11, 18, 32, 0.14);
+  --glow: 0 0 48px rgba(249, 115, 22, 0.10);
+
+  /* v2 tokens (safe to expose globally; v2 UI uses these names) */
+  --v2-bg: var(--background);
+  --v2-surface: var(--card);
+  --v2-surface-2: color-mix(in srgb, var(--card-2) 86%, transparent);
+  --v2-text: var(--foreground);
+  --v2-muted: var(--muted);
+  --v2-border: var(--border);
+  --v2-accent: var(--accent);
+  --v2-accent-2: var(--accent-2);
+  --v2-ring: var(--ring);
+  --v2-warn: var(--warn);
+  --v2-warn-bg: var(--warn-bg);
+  --v2-up: var(--up);
+  --v2-up-bg: var(--up-bg);
+  --v2-down: var(--down);
+  --v2-down-bg: var(--down-bg);
+  --v2-shadow-sm: var(--shadow);
+  --v2-shadow-md: var(--shadow-2);
 }
 
 @theme inline {
@@ -58,70 +82,74 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --background: #0a0e17;
-    --foreground: #e4eaf5;
-    --card: #0f1724;
-    --card-2: #141d2e;
-    --muted: #8b9ab8;
-    --border: rgba(148, 163, 194, 0.10);
+    --background: #070a11;
+    --foreground: #eaf0ff;
+    --card: #0c101b;
+    --card-2: #101626;
+    --muted: #97a6c4;
+    --border: rgba(234, 240, 255, 0.10);
 
-    --accent: #3b82f6;
-    --accent-2: #22d3ee;
-    --ring: rgba(59, 130, 246, 0.35);
+    --accent: #fb923c;
+    --accent-2: #fcd34d;
+    --ring: rgba(251, 146, 60, 0.33);
 
     --up: #34d399;
     --up-bg: rgba(52, 211, 153, 0.12);
     --down: #f87171;
     --down-bg: rgba(248, 113, 113, 0.12);
     --warn: #fbbf24;
-    --warn-bg: rgba(251, 191, 36, 0.12);
+    --warn-bg: rgba(251, 191, 36, 0.14);
 
-    --shadow: 0 2px 8px rgba(0, 0, 0, 0.30), 0 12px 32px rgba(0, 0, 0, 0.25);
-    --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35), 0 20px 48px rgba(0, 0, 0, 0.30);
-    --glow: 0 0 60px rgba(59, 130, 246, 0.12);
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 18px 52px rgba(0, 0, 0, 0.30);
+    --shadow-2: 0 10px 26px rgba(0, 0, 0, 0.45), 0 26px 78px rgba(0, 0, 0, 0.35);
+    --glow: 0 0 72px rgba(251, 146, 60, 0.12);
   }
 }
 
 /* Explicit dark theme override */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: #0a0e17;
-  --foreground: #e4eaf5;
-  --card: #0f1724;
-  --card-2: #141d2e;
-  --muted: #8b9ab8;
-  --border: rgba(148, 163, 194, 0.10);
+  --background: #070a11;
+  --foreground: #eaf0ff;
+  --card: #0c101b;
+  --card-2: #101626;
+  --muted: #97a6c4;
+  --border: rgba(234, 240, 255, 0.10);
 
-  --accent: #3b82f6;
-  --accent-2: #22d3ee;
-  --ring: rgba(59, 130, 246, 0.35);
+  --accent: #fb923c;
+  --accent-2: #fcd34d;
+  --ring: rgba(251, 146, 60, 0.33);
 
   --up: #34d399;
   --up-bg: rgba(52, 211, 153, 0.12);
   --down: #f87171;
   --down-bg: rgba(248, 113, 113, 0.12);
   --warn: #fbbf24;
-  --warn-bg: rgba(251, 191, 36, 0.12);
+  --warn-bg: rgba(251, 191, 36, 0.14);
 
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.30), 0 12px 32px rgba(0, 0, 0, 0.25);
-  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35), 0 20px 48px rgba(0, 0, 0, 0.30);
-  --glow: 0 0 60px rgba(59, 130, 246, 0.12);
+  --shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 18px 52px rgba(0, 0, 0, 0.30);
+  --shadow-2: 0 10px 26px rgba(0, 0, 0, 0.45), 0 26px 78px rgba(0, 0, 0, 0.35);
+  --glow: 0 0 72px rgba(251, 146, 60, 0.12);
 }
 
 body {
   color-scheme: light dark;
   background:
-    radial-gradient(ellipse 1200px 500px at 15% -5%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 65%),
-    radial-gradient(ellipse 800px 400px at 90% 5%, color-mix(in srgb, var(--accent-2) 6%, transparent), transparent 55%),
+    radial-gradient(900px 360px at 18% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 62%),
+    radial-gradient(700px 320px at 92% 0%, color-mix(in srgb, var(--accent-2) 8%, transparent), transparent 58%),
     var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
     "Segoe UI Emoji";
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 @layer base {
   ::selection {
-    background: rgba(37, 99, 235, 0.22);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
   }
 
   :focus-visible {
@@ -133,7 +161,7 @@ body {
     text-underline-offset: 3px;
   }
 
-  /* Scrollbar styling for dark trading UI */
+  /* Subtle scrollbar styling */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }

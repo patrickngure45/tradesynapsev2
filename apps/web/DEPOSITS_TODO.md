@@ -26,6 +26,8 @@ If secrets/keys have been shared in chat, treat them as compromised.
 
 ## Step 1 — Decide scope (write these down before coding)
 
+Locked scope doc: `DEPOSITS_SCOPE.md`
+
 ### 1.1 Chains
 
 - Now: **BSC mainnet**
@@ -74,6 +76,8 @@ Minimum mitigation:
 ## Step 3 — Paid services (what’s worth paying for)
 
 ### 3.1 BSC RPC (required for professional reliability)
+
+Plan doc: `BSC_RPC_PLAN.md`
 
 Public RPCs will rate-limit or stall under `eth_getLogs`.
 

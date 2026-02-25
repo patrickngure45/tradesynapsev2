@@ -4,6 +4,7 @@ import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { resolveReadOnlyUserScope } from "@/lib/auth/impersonation";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { amount3818PositiveSchema } from "@/lib/exchange/amount";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
@@ -98,6 +99,16 @@ export async function POST(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.holds.post",
+    windowMs: 60_000,
+    max: 16,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

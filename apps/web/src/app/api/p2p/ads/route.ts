@@ -8,6 +8,7 @@ import { requireActiveUser } from "@/lib/auth/activeUser";
 import { getOrComputeFxReferenceRate } from "@/lib/fx/reference";
 import { isSupportedP2PCountry } from "@/lib/p2p/supportedCountries";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -113,13 +114,6 @@ export async function GET(req: NextRequest) {
     const { side, asset, fiat, amount } = query.data;
     const sql = getSql();
 
-    const agentEmails = new Set(
-      String(process.env.P2P_AGENT_EMAILS ?? "")
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
-    );
-
     const fiatUpper = fiat.toUpperCase();
     const assetUpper = asset.toUpperCase();
 
@@ -200,7 +194,39 @@ export async function GET(req: NextRequest) {
             AND (o.buyer_id = ad.user_id OR o.seller_id = ad.user_id)
         ) AS completed_count,
         ad.terms,
-        ad.highlighted_until
+        ad.highlighted_until,
+        (
+          EXISTS (
+            SELECT 1
+            FROM p2p_payment_method pmv
+            WHERE pmv.user_id = ad.user_id
+              AND pmv.is_enabled = true
+              AND pmv.details IS NOT NULL
+              AND jsonb_typeof(pmv.details) = 'object'
+              AND lower(coalesce(pmv.details->>'verifiedAgent', '')) = 'true'
+              AND pmv.id::text = ANY(
+                CASE
+                  WHEN jsonb_typeof(
+                    CASE
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                      WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                      ELSE '[]'::jsonb
+                    END
+                  ) = 'array' THEN (
+                    SELECT array_agg(x)
+                    FROM jsonb_array_elements_text(
+                      CASE
+                        WHEN jsonb_typeof(ad.payment_method_ids) = 'array' THEN ad.payment_method_ids
+                        WHEN jsonb_typeof(ad.payment_method_ids) = 'string' AND left((ad.payment_method_ids #>> '{}'), 1) = '[' THEN (ad.payment_method_ids #>> '{}')::jsonb
+                        ELSE '[]'::jsonb
+                      END
+                    ) AS x
+                  )
+                  ELSE ARRAY[]::text[]
+                END
+              )
+          )
+        ) AS is_verified_agent
       FROM p2p_ad ad
       JOIN app_user u ON ad.user_id = u.id
       LEFT JOIN (
@@ -284,7 +310,6 @@ export async function GET(req: NextRequest) {
 
         return {
           ...ad,
-          is_verified_agent: agentEmails.size > 0 ? agentEmails.has(String(ad.email ?? "").toLowerCase()) : false,
           // Keep UI compatibility: provide a string price field.
           fixed_price: displayPrice !== null ? String(displayPrice) : null,
           _display_price: displayPrice,
@@ -297,6 +322,10 @@ export async function GET(req: NextRequest) {
       const ha = Boolean(a._highlight_active);
       const hb = Boolean(b._highlight_active);
       if (ha !== hb) return ha ? -1 : 1;
+
+      const va = Boolean(a.is_verified_agent);
+      const vb = Boolean(b.is_verified_agent);
+      if (va !== vb) return va ? -1 : 1;
 
       // When user wants to BUY, targetSide is SELL, show lowest first.
       // When user wants to SELL, targetSide is BUY, show highest first.
@@ -321,6 +350,16 @@ export async function POST(req: NextRequest) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request: req,
+    limiterName: "p2p.ads.create",
+    windowMs: 60_000,
+    max: 10,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);
@@ -447,8 +486,8 @@ export async function POST(req: NextRequest) {
     let paymentMethodIds: string[] = [];
     if (data.side === "SELL") {
       paymentMethodIds = uniqStrings(data.payment_methods ?? []).slice(0, 3);
-      const owned = await sql<{ id: string }[]>`
-        SELECT id::text AS id
+      const owned = await sql<{ id: string; identifier: string; details: unknown }[]>`
+        SELECT id::text AS id, lower(identifier)::text AS identifier, details
         FROM p2p_payment_method
         WHERE user_id = ${actingUserId}::uuid
           AND is_enabled = true
@@ -458,6 +497,26 @@ export async function POST(req: NextRequest) {
         return apiError("invalid_input", {
           details: { message: "One or more payment methods are invalid or not yours." },
         });
+      }
+
+      for (const m of owned) {
+        const details = m.details as any;
+        const isObj = Boolean(details) && typeof details === "object" && !Array.isArray(details);
+        const isEmptyObj = isObj && Object.keys(details).length === 0;
+        if (!isObj || isEmptyObj) {
+          return apiError("invalid_input", {
+            details: { message: "One or more payment methods are missing required payout details." },
+          });
+        }
+
+        if (String(m.identifier).toLowerCase() === "mpesa") {
+          const phone = typeof details.phoneNumber === "string" ? details.phoneNumber.trim() : "";
+          if (!phone) {
+            return apiError("invalid_input", {
+              details: { message: "M-Pesa payout methods must include details.phoneNumber." },
+            });
+          }
+        }
       }
     }
 

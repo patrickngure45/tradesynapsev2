@@ -17,7 +17,7 @@ export default function RouteError({
         !
       </div>
       <h2 className="text-lg font-semibold">Something went wrong</h2>
-      <p className="max-w-md text-sm text-[var(--muted)]">
+      <p className="max-w-md text-sm text-[var(--v2-muted)]">
         An unexpected error occurred. Please try again.
         {error.digest && (
           <span className="mt-2 block font-mono text-xs">ID: {error.digest}</span>
@@ -25,7 +25,7 @@ export default function RouteError({
       </p>
       <button
         onClick={() => reset()}
-        className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]/80"
+        className="rounded-lg bg-[var(--v2-accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-110"
       >
         Try Again
       </button>

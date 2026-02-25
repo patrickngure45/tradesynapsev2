@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { V2Button } from "@/components/v2/Button";
+import { V2Card, V2CardBody, V2CardHeader } from "@/components/v2/Card";
+import { V2Input } from "@/components/v2/Input";
 
 // --- Types ---
 type Withdrawal = {
@@ -511,6 +514,7 @@ export function AdminDashboardClient() {
   const [depLoading, setDepLoading] = useState<"lookup" | "credit" | null>(null);
   const [depResult, setDepResult] = useState<any>(null);
   const [depToolError, setDepToolError] = useState<string | null>(null);
+  const [depFinalizeLoading, setDepFinalizeLoading] = useState(false);
 
   const runDepositLookup = useCallback(async () => {
     setDepLoading("lookup");
@@ -551,6 +555,23 @@ export function AdminDashboardClient() {
       setDepLoading(null);
     }
   }, [depTxHash, depConfirmations]);
+
+  const runDepositFinalizeNow = useCallback(async () => {
+    setDepFinalizeLoading(true);
+    setDepToolError(null);
+    try {
+      const out = await adminFetch(`/api/exchange/admin/deposits/finalize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmations: depConfirmations, max: 250, max_ms: 15000 }),
+      });
+      setDepResult(out);
+    } catch (e: any) {
+      setDepToolError(e?.message ?? "finalize_failed");
+    } finally {
+      setDepFinalizeLoading(false);
+    }
+  }, [depConfirmations]);
 
   // Audit log state
   type AuditRow = {
@@ -1002,96 +1023,196 @@ export function AdminDashboardClient() {
     if (tab === "kyc-review") return fetchKycSubmissions(0);
   }, [tab, fetchWallet, fetchWithdrawals, fetchRecon, fetchDeadLetters, fetchAuditLog, fetchKycSubmissions]);
 
+  const v2SelectClass =
+    "h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[13px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]";
+  const v2MiniPanelClass =
+    "rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)]";
+
   const DepositToolsCard = () => (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold tracking-tight">Deposit Tools</h3>
-        <Badge text="Admin" variant="blue" />
-      </div>
-      <p className="mt-0.5 text-[10px] text-[var(--muted)]">Lookup or credit a deposit by tx hash (BNB, allowlisted tokens).</p>
+    <V2Card>
+      <V2CardHeader title="Deposit Tools" right={<Badge text="Admin" variant="blue" />} subtitle="Lookup or credit a deposit by tx hash (BNB, allowlisted tokens)." />
+      <V2CardBody>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <label className="grid gap-1">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Tx hash</div>
+            <V2Input
+              value={depTxHash}
+              onChange={(e) => setDepTxHash(e.target.value)}
+              placeholder="0x…"
+              className="font-mono text-[12px]"
+            />
+          </label>
+          <label className="grid gap-1">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Deposit address (optional)</div>
+            <V2Input
+              value={depAddress}
+              onChange={(e) => setDepAddress(e.target.value)}
+              placeholder="0x…"
+              className="font-mono text-[12px]"
+            />
+          </label>
+        </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-        <label className="block">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Tx Hash</div>
-          <input
-            value={depTxHash}
-            onChange={(e) => setDepTxHash(e.target.value)}
-            placeholder="0x…"
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-mono text-[var(--foreground)] outline-none"
-          />
-        </label>
-        <label className="block">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Deposit Address (optional)</div>
-          <input
-            value={depAddress}
-            onChange={(e) => setDepAddress(e.target.value)}
-            placeholder="0x…"
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-mono text-[var(--foreground)] outline-none"
-          />
-        </label>
-      </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-[12px] font-semibold text-[var(--v2-muted)]">
+            confirmations
+            <V2Input
+              type="number"
+              min={0}
+              max={200}
+              value={depConfirmations}
+              onChange={(e) => setDepConfirmations(Number(e.target.value || 0))}
+              className="h-9 w-24 text-[12px]"
+            />
+          </label>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
-          confirmations
-          <input
-            type="number"
-            min={0}
-            max={200}
-            value={depConfirmations}
-            onChange={(e) => setDepConfirmations(Number(e.target.value || 0))}
-            className="w-20 rounded border border-[var(--border)] bg-[var(--card-2)] px-2 py-1 text-[10px] text-[var(--foreground)]"
-          />
-        </label>
+          <V2Button
+            size="sm"
+            variant="secondary"
+            onClick={runDepositLookup}
+            disabled={depLoading !== null}
+          >
+            {depLoading === "lookup" ? "Looking up…" : "Lookup"}
+          </V2Button>
 
-        <button
-          type="button"
-          onClick={runDepositLookup}
-          disabled={depLoading !== null}
-          className="rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[color-mix(in_srgb,var(--card-2)_75%,transparent)] disabled:opacity-60"
-        >
-          {depLoading === "lookup" ? "Looking up…" : "Lookup"}
-        </button>
+          <V2Button
+            size="sm"
+            variant="primary"
+            onClick={runDepositCredit}
+            disabled={depLoading !== null}
+          >
+            {depLoading === "credit" ? "Crediting…" : "Credit"}
+          </V2Button>
 
-        <button
-          type="button"
-          onClick={runDepositCredit}
-          disabled={depLoading !== null}
-          className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--accent-foreground)] hover:opacity-90 disabled:opacity-60"
-        >
-          {depLoading === "credit" ? "Crediting…" : "Credit"}
-        </button>
+          <V2Button
+            size="sm"
+            variant="secondary"
+            onClick={runDepositFinalizeNow}
+            disabled={depLoading !== null || depFinalizeLoading}
+            title="Runs the finalize-pending-deposits job (credits pending deposits that are now confirmed)."
+          >
+            {depFinalizeLoading ? "Finalizing…" : "Finalize now"}
+          </V2Button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setDepToolError(null);
-            setDepResult(null);
-          }}
-          className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
-        >
-          clear
-        </button>
-      </div>
+          <V2Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDepToolError(null);
+              setDepResult(null);
+            }}
+          >
+            Clear
+          </V2Button>
+        </div>
 
       {depToolError ? (
-        <div className="mt-3 rounded border border-rose-300 bg-rose-50 px-3 py-2 text-[10px] text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+        <div className="mt-3 rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-down-bg)] px-3 py-2 text-[12px] font-semibold text-[var(--v2-down)]">
           {depToolError}
         </div>
       ) : null}
 
       {depResult ? (
-        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card-2)] p-3">
+        <div className={"mt-3 p-3 " + v2MiniPanelClass}>
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Result</div>
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Result</div>
             {depResult?.ok ? <Badge text="OK" variant="green" /> : <Badge text="Error" variant="red" />}
           </div>
-          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--foreground)]">
+
+          {depResult?.ok ? (
+            <div className="mt-2 grid gap-2 rounded-xl border border-[var(--v2-border)] bg-[color-mix(in_srgb,var(--v2-surface-2)_70%,transparent)] px-3 py-2 text-[12px]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[12px] font-semibold text-[var(--v2-text)]">
+                  Verdict: <span className="font-mono">{String(depResult?.verdict ?? "—")}</span>
+                </div>
+                {(() => {
+                  const v = String(depResult?.verdict ?? "");
+                  const variant = v === "credited" ? "green" : v === "not_ours" ? "red" : v === "seen" ? "amber" : "gray";
+                  return <Badge text={v || "—"} variant={variant as any} />;
+                })()}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 text-[12px] text-[var(--v2-muted)]">
+                <span>
+                  confs req: <span className="font-mono text-[var(--v2-text)]">{String(depResult?.confirmations_required ?? "—")}</span>
+                </span>
+                <span>
+                  tip: <span className="font-mono text-[var(--v2-text)]">{String(depResult?.tip ?? "—")}</span>
+                </span>
+                <span>
+                  safe tip: <span className="font-mono text-[var(--v2-text)]">{String(depResult?.safe_tip ?? "—")}</span>
+                </span>
+                <span>
+                  cursor lag: <span className="font-mono text-[var(--v2-text)]">{String(depResult?.cursor?.lag_blocks ?? "—")}</span>
+                </span>
+              </div>
+
+              <div className="grid gap-1 text-[12px] text-[var(--v2-muted)]">
+                <div>
+                  deposit addr: <span className="font-mono text-[var(--v2-text)]">{String(depResult?.deposit_address?.address ?? depResult?.query?.address ?? "—")}</span>
+                </div>
+                {depResult?.diagnostic?.message ? (
+                  <div>
+                    note: <span className="text-[var(--v2-text)]">{String(depResult.diagnostic.message)}</span>
+                  </div>
+                ) : null}
+                <div>
+                  credited: <span className="font-mono text-[var(--v2-text)]">{String(Boolean(depResult?.credited))}</span>
+                  {typeof depResult?.uncredited_for_address !== "undefined" ? (
+                    <>
+                      {" "}
+                      <span className="text-[var(--v2-muted)]">•</span>{" "}
+                      uncredited for address:{" "}
+                      <span className="font-mono text-[var(--v2-text)]">{String(depResult?.uncredited_for_address)}</span>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              {depResult?.matches ? (
+                <div className="grid gap-2">
+                  <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">On-chain matches</div>
+                  <div className="grid gap-1">
+                    {Array.isArray(depResult?.matches?.native) && depResult.matches.native.length > 0 ? (
+                      depResult.matches.native.map((m: any, i: number) => (
+                        <div key={`n:${i}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--v2-border)] bg-[color-mix(in_srgb,var(--v2-surface-2)_65%,transparent)] px-2 py-1">
+                          <div className="font-mono text-[var(--v2-text)]">native</div>
+                          <div className="font-mono text-[var(--v2-text)]">{String(m?.amount ?? "—")} {String(m?.asset_symbol ?? "BNB")}</div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-[12px] text-[var(--v2-muted)]">No native matches.</div>
+                    )}
+
+                    {Array.isArray(depResult?.matches?.token) && depResult.matches.token.length > 0 ? (
+                      depResult.matches.token.slice(0, 8).map((m: any, i: number) => {
+                        const contract = String(m?.contract ?? "");
+                        const short = contract && contract.length > 14 ? `${contract.slice(0, 8)}…${contract.slice(-4)}` : contract || "—";
+                        return (
+                          <div key={`t:${i}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--v2-border)] bg-[color-mix(in_srgb,var(--v2-surface-2)_65%,transparent)] px-2 py-1">
+                            <div className="min-w-[160px] font-mono text-[var(--v2-text)]">
+                              {String(m?.asset_symbol ?? "UNKNOWN")} <span className="text-[var(--v2-muted)]">({short})</span>
+                            </div>
+                            <div className="font-mono text-[var(--v2-text)]">{String(m?.amount ?? "—")}</div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-[12px] text-[var(--v2-muted)]">No token matches.</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 font-mono text-[11px] text-[var(--v2-text)]">
             {JSON.stringify(depResult, null, 2)}
           </pre>
         </div>
       ) : null}
-    </div>
+      </V2CardBody>
+    </V2Card>
   );
 
   // Auto-refresh on tab/filter change + polling
@@ -1113,68 +1234,61 @@ export function AdminDashboardClient() {
     <div className="mt-6 grid gap-6">
       {/* Error banner */}
       {error ? (
-        <div className="rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+        <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-down-bg)] px-3 py-3 text-[13px] font-semibold text-[var(--v2-down)]">
           {error}
-          <button
-            type="button"
-            className="ml-3 text-[10px] underline"
-            onClick={() => setError(null)}
-          >
-            dismiss
-          </button>
+          <span className="mx-2 text-[var(--v2-muted)]">·</span>
+          <V2Button size="sm" variant="ghost" onClick={() => setError(null)}>
+            Dismiss
+          </V2Button>
         </div>
       ) : null}
 
       {/* System status */}
-      <div className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <V2Card className="p-4">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-semibold text-[var(--foreground)]">System</div>
+          <div className="text-[13px] font-bold text-[var(--v2-text)]">System</div>
           <div className="flex items-center gap-2">
             {sysBadge}
-            <button
-              type="button"
-              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[10px] font-semibold text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+            <V2Button
+              size="sm"
+              variant="secondary"
               onClick={runNotificationsDigest}
               disabled={digestRunning}
               title="Flush deferred notifications into a digest (admin-only)"
             >
               {digestRunning ? "running…" : "run digest"}
-            </button>
-            <button
-              type="button"
-              className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
-              onClick={fetchSystemStatus}
-            >
+            </V2Button>
+            <V2Button size="sm" variant="ghost" onClick={fetchSystemStatus}>
               refresh
-            </button>
+            </V2Button>
           </div>
         </div>
 
-        {digestMsg ? <div className="text-[10px] text-[var(--muted)]">Digest: {digestMsg}</div> : null}
+        {digestMsg ? <div className="text-[12px] text-[var(--v2-muted)]">Digest: {digestMsg}</div> : null}
 
-        <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+        <div className={"mt-2 " + v2MiniPanelClass}>
           <div className="flex items-center justify-between gap-3 px-3 py-2">
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Deferred notifications</div>
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Deferred notifications</div>
             <div className="flex items-center gap-2">
-              <div className="text-[10px] text-[var(--muted)]">{deferredLoading ? "sync" : `${deferredTotal}`}</div>
-              <button
-                type="button"
-                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+              <div className="text-[12px] text-[var(--v2-muted)]">{deferredLoading ? "sync" : `${deferredTotal}`}</div>
+              <V2Button
+                size="sm"
+                variant="ghost"
                 onClick={loadDeferred}
                 disabled={deferredLoading}
               >
                 {deferredLoading ? "loading" : "load"}
-              </button>
+              </V2Button>
             </div>
           </div>
-          <div className="border-t border-[var(--border)]">
-            {deferredErr ? <div className="px-3 py-2 text-[10px] text-[var(--down)]">{deferredErr}</div> : null}
+          <div className="border-t border-[var(--v2-border)]">
+            {deferredErr ? <div className="px-3 py-2 text-[12px] font-semibold text-[var(--v2-down)]">{deferredErr}</div> : null}
             {deferredUsers.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-[var(--muted)]">No deferred notifications.</div>
+              <div className="px-3 py-3 text-[13px] text-[var(--v2-muted)]">No deferred notifications.</div>
             ) : (
-              <table className="w-full text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="border-b border-[var(--border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  <tr className="border-b border-[var(--v2-border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--v2-muted)]">
                     <th className="px-3 py-2 text-left">User</th>
                     <th className="px-3 py-2 text-right">Count</th>
                     <th className="px-3 py-2" />
@@ -1182,28 +1296,20 @@ export function AdminDashboardClient() {
                 </thead>
                 <tbody>
                   {deferredUsers.slice(0, 8).map((u) => (
-                    <tr key={u.user_id} className="border-b border-[var(--border)] last:border-b-0">
+                    <tr key={u.user_id} className="border-b border-[var(--v2-border)] last:border-b-0">
                       <td className="px-3 py-2">
-                        <div className="truncate font-semibold text-[var(--foreground)]">{u.email || u.user_id}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--muted)]">{u.user_id}</div>
+                        <div className="truncate font-semibold text-[var(--v2-text)]">{u.email || u.user_id}</div>
+                        <div className="mt-0.5 text-[11px] text-[var(--v2-muted)]">{u.user_id}</div>
                       </td>
-                      <td className="px-3 py-2 text-right text-[var(--foreground)]">{u.count}</td>
+                      <td className="px-3 py-2 text-right text-[var(--v2-text)]">{u.count}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void exportDeferredForUser(u.user_id)}
-                            className="rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
-                          >
+                          <V2Button size="sm" variant="secondary" onClick={() => void exportDeferredForUser(u.user_id)}>
                             export
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void clearDeferredForUser(u.user_id)}
-                            className="rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
-                          >
+                          </V2Button>
+                          <V2Button size="sm" variant="secondary" onClick={() => void clearDeferredForUser(u.user_id)}>
                             clear
-                          </button>
+                          </V2Button>
                         </div>
                       </td>
                     </tr>
@@ -1214,37 +1320,37 @@ export function AdminDashboardClient() {
           </div>
         </div>
 
-        <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+        <div className={"mt-2 " + v2MiniPanelClass}>
           <div className="flex items-center justify-between gap-3 px-3 py-2">
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Email outbox</div>
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Email outbox</div>
             <div className="flex items-center gap-2">
-              <div className="text-[10px] text-[var(--muted)]">
+              <div className="text-[12px] text-[var(--v2-muted)]">
                 {emailOutboxLoading
                   ? "sync"
                   : emailOutbox?.missing
                     ? "missing"
                     : `${emailOutbox?.counts?.pending ?? 0} pending • ${emailOutbox?.counts?.failed ?? 0} failed`}
               </div>
-              <button
-                type="button"
-                className="text-[10px] text-[var(--muted)] underline hover:text-[var(--foreground)]"
+              <V2Button
+                size="sm"
+                variant="ghost"
                 onClick={loadEmailOutbox}
                 disabled={emailOutboxLoading}
               >
                 {emailOutboxLoading ? "loading" : "refresh"}
-              </button>
+              </V2Button>
             </div>
           </div>
-          <div className="border-t border-[var(--border)]">
-            {emailOutboxErr ? <div className="px-3 py-2 text-[10px] text-[var(--down)]">{emailOutboxErr}</div> : null}
+          <div className="border-t border-[var(--v2-border)]">
+            {emailOutboxErr ? <div className="px-3 py-2 text-[12px] font-semibold text-[var(--v2-down)]">{emailOutboxErr}</div> : null}
             {emailOutbox?.missing ? (
-              <div className="px-3 py-3 text-xs text-[var(--muted)]">
+              <div className="px-3 py-3 text-[13px] text-[var(--v2-muted)]">
                 Outbox table not found (migration not applied yet).
               </div>
             ) : emailOutbox?.recent_failed?.length ? (
-              <table className="w-full text-[11px]">
+              <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="border-b border-[var(--border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  <tr className="border-b border-[var(--v2-border)] text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--v2-muted)]">
                     <th className="px-3 py-2 text-left">To</th>
                     <th className="px-3 py-2 text-left">Subject</th>
                     <th className="px-3 py-2 text-right">Attempts</th>
@@ -1253,29 +1359,29 @@ export function AdminDashboardClient() {
                 </thead>
                 <tbody>
                   {emailOutbox.recent_failed.slice(0, 5).map((r) => (
-                    <tr key={r.id} className="border-b border-[var(--border)] last:border-b-0">
+                    <tr key={r.id} className="border-b border-[var(--v2-border)] last:border-b-0">
                       <td className="px-3 py-2">
-                        <div className="truncate font-semibold text-[var(--foreground)]">{r.to_email}</div>
-                        <div className="mt-0.5 truncate text-[10px] text-[var(--muted)]">{r.last_error || "failed"}</div>
+                        <div className="truncate font-semibold text-[var(--v2-text)]">{r.to_email}</div>
+                        <div className="mt-0.5 truncate text-[11px] text-[var(--v2-muted)]">{r.last_error || "failed"}</div>
                       </td>
-                      <td className="px-3 py-2 text-[var(--foreground)]">
+                      <td className="px-3 py-2 text-[var(--v2-text)]">
                         <div className="truncate">{r.subject}</div>
                       </td>
-                      <td className="px-3 py-2 text-right text-[var(--foreground)]">{r.attempts}</td>
-                      <td className="px-3 py-2 text-right text-[10px] text-[var(--muted)]">{r.updated_at}</td>
+                      <td className="px-3 py-2 text-right text-[var(--v2-text)]">{r.attempts}</td>
+                      <td className="px-3 py-2 text-right text-[11px] text-[var(--v2-muted)]">{r.updated_at}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <div className="px-3 py-3 text-xs text-[var(--muted)]">No failed emails.</div>
+              <div className="px-3 py-3 text-[13px] text-[var(--v2-muted)]">No failed emails.</div>
             )}
           </div>
         </div>
 
         {sysStatus ? (
           <>
-            <div className="grid grid-cols-1 gap-2 text-[10px] text-[var(--muted)] md:grid-cols-4">
+            <div className="grid grid-cols-1 gap-2 text-[12px] text-[var(--v2-muted)] md:grid-cols-4">
               <div>
                 DB: {sysStatus.db?.ok ? "ok" : "down"}
                 {typeof sysStatus.db?.latency_ms === "number" ? ` (${sysStatus.db.latency_ms}ms)` : ""}
@@ -1300,31 +1406,31 @@ export function AdminDashboardClient() {
               </div>
             </div>
 
-            <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[11px]">
+            <div className={"mt-2 px-3 py-2 text-[12px] " + v2MiniPanelClass}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Stuck signals</div>
-                <div className="text-[10px] text-[var(--muted)]">
+                <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Stuck signals</div>
+                <div className="text-[12px] text-[var(--v2-muted)]">
                   Ops alert last sent: {sysStatus.ops_alerts?.degraded_last_sent_at ? new Date(String(sysStatus.ops_alerts.degraded_last_sent_at)).toLocaleString() : "—"}
                 </div>
               </div>
-              <div className="mt-1 text-[10px] text-[var(--muted)]">
+              <div className="mt-1 text-[12px] text-[var(--v2-muted)]">
                 Stale services: {(sysStatus.stale_expected_services ?? []).length ? (sysStatus.stale_expected_services ?? []).join(", ") : "none"}
               </div>
               {(sysStatus.outbox?.dead ?? 0) > 0 || (sysStatus.outbox?.with_errors ?? 0) > 0 || (sysStatus.email_outbox?.failed ?? 0) > 0 ? (
-                <div className="mt-1 text-[10px] text-[var(--down)]">
+                <div className="mt-1 text-[12px] font-semibold text-[var(--v2-down)]">
                   Attention: outbox dead/errors or email failures detected.
                 </div>
               ) : null}
             </div>
 
             {Array.isArray(sysStatus.heartbeats) && sysStatus.heartbeats.length > 0 ? (
-              <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+              <div className={"mt-2 " + v2MiniPanelClass}>
                 <div className="flex items-center justify-between gap-3 px-3 py-2">
-                  <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--muted)]">Heartbeats</div>
-                  <div className="text-[10px] text-[var(--muted)]">{sysStatus.heartbeats.length}</div>
+                  <div className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-[var(--v2-muted)]">Heartbeats</div>
+                  <div className="text-[12px] text-[var(--v2-muted)]">{sysStatus.heartbeats.length}</div>
                 </div>
-                <div className="border-t border-[var(--border)]">
-                  <table className="w-full text-[11px]">
+                <div className="border-t border-[var(--v2-border)]">
+                  <table className="w-full text-[12px]">
                     <tbody>
                       {sysStatus.heartbeats
                         .slice()
@@ -1337,12 +1443,12 @@ export function AdminDashboardClient() {
                           const variant = status === "ok" ? "green" : status === "degraded" ? "amber" : "red";
                           const last = hb.last_seen_at ? new Date(String(hb.last_seen_at)).toLocaleString() : "—";
                           return (
-                            <tr key={svc} className={(isCond ? "bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] " : "") + "border-b border-[var(--border)] last:border-b-0"}>
-                              <td className="px-3 py-2 font-semibold text-[var(--foreground)]">{svc}</td>
+                            <tr key={svc} className={(isCond ? "bg-[color-mix(in_srgb,var(--v2-accent)_8%,transparent)] " : "") + "border-b border-[var(--v2-border)] last:border-b-0"}>
+                              <td className="px-3 py-2 font-semibold text-[var(--v2-text)]">{svc}</td>
                               <td className="px-3 py-2 text-right">
                                 <Badge text={status} variant={variant as any} />
                               </td>
-                              <td className="px-3 py-2 text-right text-[10px] text-[var(--muted)]">{last}</td>
+                              <td className="px-3 py-2 text-right text-[11px] text-[var(--v2-muted)]">{last}</td>
                             </tr>
                           );
                         })}
@@ -1353,12 +1459,12 @@ export function AdminDashboardClient() {
             ) : null}
           </>
         ) : (
-          <div className="text-[10px] text-[var(--muted)]">{sysStatusError ? `Status error: ${sysStatusError}` : "Checking..."}</div>
+          <div className="text-[12px] text-[var(--v2-muted)]">{sysStatusError ? `Status error: ${sysStatusError}` : "Checking..."}</div>
         )}
-      </div>
+      </V2Card>
 
       {/* Tab bar */}
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] text-xs">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--v2-border)] text-[12px]">
         <div className="flex gap-1 overflow-x-auto" role="tablist">
           {(
             [
@@ -1376,11 +1482,12 @@ export function AdminDashboardClient() {
               type="button"
               role="tab"
               aria-selected={tab === t.key}
-              className={`px-4 py-2 transition ${
-                tab === t.key
-                  ? "border-b-2 border-[var(--accent)] text-[var(--foreground)]"
-                  : "text-[var(--muted)] hover:text-[var(--foreground)]"
-              }`}
+              className={
+                "px-3 py-2 whitespace-nowrap border-b-2 text-[12px] font-semibold " +
+                (tab === t.key
+                  ? "border-[var(--v2-accent)] text-[var(--v2-text)]"
+                  : "border-transparent text-[var(--v2-muted)] hover:text-[var(--v2-text)]")
+              }
               onClick={() => setTab(t.key)}
             >
               {t.label}
@@ -1388,42 +1495,39 @@ export function AdminDashboardClient() {
           ))}
         </div>
 
-        <button
-          type="button"
-          className="px-4 py-2 text-[var(--muted)] hover:text-[var(--foreground)]"
-          onClick={refreshCurrentTab}
-          disabled={isRefreshing}
-        >
+        <V2Button size="sm" variant="ghost" onClick={refreshCurrentTab} disabled={isRefreshing}>
           {isRefreshing ? "Loading..." : "Refresh"}
-        </button>
+        </V2Button>
       </div>
 
       {/* ========== Wallet / All Balances ========== */}
       {tab === "wallet" ? (
         <div className="grid gap-6">
           {!walletData && !walletLoading && !error ? (
-            <p className="text-xs text-[var(--muted)]">Loading wallet data...</p>
+            <p className="text-[13px] text-[var(--v2-muted)]">Loading wallet data...</p>
           ) : null}
 
           {walletData ? (
             <>
               {/* Summary Cards */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Hot Wallet</div>
-                  <div className="mt-1 font-mono text-[11px] text-[var(--foreground)] break-all">{walletData.address}</div>
-                </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Registered Users</div>
-                  <div className="mt-1 text-lg font-semibold text-[var(--foreground)]">{walletData.userCounts.with_email}</div>
-                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                <V2Card className="p-4">
+                  <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Hot Wallet</div>
+                  <div className="mt-2 break-all font-mono text-[12px] text-[var(--v2-text)]">{walletData.address}</div>
+                </V2Card>
+
+                <V2Card className="p-4">
+                  <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Registered Users</div>
+                  <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">{walletData.userCounts.with_email}</div>
+                  <div className="mt-1 text-[12px] text-[var(--v2-muted)]">
                     {walletData.userCounts.admins} admin · {walletData.userCounts.with_ledger} with ledger accounts · {walletData.userCounts.total} active registered · {walletData.userCounts.active_non_system} active total · {walletData.userCounts.banned_non_system} banned · {walletData.userCounts.system_rows} system
                   </div>
-                </div>
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Enabled Assets</div>
-                  <div className="mt-1 text-lg font-semibold text-[var(--foreground)]">{walletData.assets.length}</div>
-                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                </V2Card>
+
+                <V2Card className="p-4">
+                  <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Enabled Assets</div>
+                  <div className="mt-2 text-2xl font-extrabold tracking-tight text-[var(--v2-text)]">{walletData.assets.length}</div>
+                  <div className="mt-1 text-[12px] text-[var(--v2-muted)]">
                     {(() => {
                       const symbols = walletData.assets.map((a) => a.symbol).filter(Boolean);
                       const sample = symbols.slice(0, 12);
@@ -1431,13 +1535,13 @@ export function AdminDashboardClient() {
                       return `Sample: ${sample.join(" · ")}${more ? ` · +${more} more` : ""}`;
                     })()}
                   </div>
-                </div>
+                </V2Card>
               </div>
 
               {/* Fund Wiring Health */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
+              <V2Card className="p-5">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold tracking-tight">Fund Wiring Health</h3>
+                  <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">Fund Wiring Health</h3>
                   <Badge
                     text={
                       walletData.health.hotWalletHasGas &&
@@ -1457,52 +1561,52 @@ export function AdminDashboardClient() {
                     }
                   />
                 </div>
-                <p className="mt-0.5 text-[10px] text-[var(--muted)]">Live checks for queue, wallet gas, and movement rails</p>
+                <p className="mt-1 text-[13px] text-[var(--v2-muted)]">Live checks for queue, wallet gas, and movement rails</p>
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="rounded-lg border border-[var(--border)] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Hot Wallet BNB</div>
-                    <div className="mt-1 text-sm font-semibold">{formatNum(walletData.health.hotWalletBnb, 8)}</div>
+                  <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Hot Wallet BNB</div>
+                    <div className="mt-2 text-[15px] font-semibold text-[var(--v2-text)]">{formatNum(walletData.health.hotWalletBnb, 8)}</div>
                     <div className="mt-1">
                       <Badge text={walletData.health.hotWalletHasGas ? "Gas OK" : "Low Gas"} variant={walletData.health.hotWalletHasGas ? "green" : "red"} />
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Pending Withdrawals</div>
-                    <div className="mt-1 text-sm font-semibold">{walletData.health.pendingWithdrawals}</div>
-                    <div className="mt-1 text-[10px] text-[var(--muted)]">Amount: {formatNum(walletData.health.pendingWithdrawalAmount)}</div>
+                  <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Pending Withdrawals</div>
+                    <div className="mt-2 text-[15px] font-semibold text-[var(--v2-text)]">{walletData.health.pendingWithdrawals}</div>
+                    <div className="mt-1 text-[12px] text-[var(--v2-muted)]">Amount: {formatNum(walletData.health.pendingWithdrawalAmount)}</div>
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Fund Outbox</div>
-                    <div className="mt-1 text-sm font-semibold">Open {walletData.health.outboxOpen} · Dead {walletData.health.outboxDead}</div>
-                    <div className="mt-1 text-[10px] text-[var(--muted)]">Historical errors: {walletData.health.outboxWithErrors}</div>
+                  <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Fund Outbox</div>
+                    <div className="mt-2 text-[15px] font-semibold text-[var(--v2-text)]">Open {walletData.health.outboxOpen} · Dead {walletData.health.outboxDead}</div>
+                    <div className="mt-1 text-[12px] text-[var(--v2-muted)]">Historical errors: {walletData.health.outboxWithErrors}</div>
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Deposit Rails</div>
-                    <div className="mt-1 text-sm font-semibold">{walletData.health.depositAddresses} active addresses</div>
+                  <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Deposit Rails</div>
+                    <div className="mt-2 text-[15px] font-semibold text-[var(--v2-text)]">{walletData.health.depositAddresses} active addresses</div>
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-[var(--muted)]">Withdrawal Allowlist</div>
-                    <div className="mt-1 text-sm font-semibold">{walletData.health.allowlistApproved} approved</div>
+                  <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] p-3">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Withdrawal Allowlist</div>
+                    <div className="mt-2 text-[15px] font-semibold text-[var(--v2-text)]">{walletData.health.allowlistApproved} approved</div>
                   </div>
                 </div>
-              </div>
+              </V2Card>
 
               {/* Deposit Tools */}
               <DepositToolsCard />
 
               {/* On-Chain Balances */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-                <h3 className="text-sm font-semibold tracking-tight">On-Chain Hot Wallet Balances</h3>
-                <p className="mt-0.5 text-[10px] text-[var(--muted)]">Live balances on BSC for the exchange hot wallet</p>
+              <V2Card className="p-5">
+                <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">On-Chain Hot Wallet Balances</h3>
+                <p className="mt-1 text-[13px] text-[var(--v2-muted)]">Live balances on BSC for the exchange hot wallet</p>
                 <div className="mt-4 overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[12px]">
                     <thead>
-                      <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                      <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                         <th className="px-3 py-2 font-medium">Asset</th>
                         <th className="px-3 py-2 text-right font-medium">Balance</th>
                         <th className="px-3 py-2 font-medium">Contract</th>
@@ -1510,10 +1614,10 @@ export function AdminDashboardClient() {
                     </thead>
                     <tbody>
                       {walletData.onChain.map((b) => (
-                        <tr key={b.symbol} className="border-b border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--card)_80%,transparent)]">
-                          <td className="px-3 py-2.5 font-medium">{b.symbol}</td>
-                          <td className="px-3 py-2.5 text-right font-mono">{formatNum(b.balance)}</td>
-                          <td className="px-3 py-2.5 font-mono text-[10px] text-[var(--muted)]">
+                        <tr key={b.symbol} className="border-b border-[var(--v2-border)] hover:bg-[var(--v2-surface-2)]">
+                          <td className="px-3 py-2.5 font-semibold text-[var(--v2-text)]">{b.symbol}</td>
+                          <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-text)]">{formatNum(b.balance)}</td>
+                          <td className="px-3 py-2.5 font-mono text-[11px] text-[var(--v2-muted)]">
                             {b.contractAddress ? `${b.contractAddress.slice(0, 10)}...${b.contractAddress.slice(-6)}` : "Native"}
                           </td>
                         </tr>
@@ -1521,16 +1625,16 @@ export function AdminDashboardClient() {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </V2Card>
 
               {/* Ledger Balances (Non-system Users Aggregated) */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-                <h3 className="text-sm font-semibold tracking-tight">Internal Ledger Balances (Users)</h3>
-                <p className="mt-0.5 text-[10px] text-[var(--muted)]">Aggregate of non-system user balances on the exchange ledger</p>
+              <V2Card className="p-5">
+                <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">Internal Ledger Balances (Users)</h3>
+                <p className="mt-1 text-[13px] text-[var(--v2-muted)]">Aggregate of non-system user balances on the exchange ledger</p>
                 <div className="mt-4 overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[12px]">
                     <thead>
-                      <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                      <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                         <th className="px-3 py-2 font-medium">Asset</th>
                         <th className="px-3 py-2 font-medium">Chain</th>
                         <th className="px-3 py-2 text-right font-medium">Total Posted</th>
@@ -1541,62 +1645,62 @@ export function AdminDashboardClient() {
                     </thead>
                     <tbody>
                       {walletData.ledger.map((row) => (
-                        <tr key={row.asset_id} className="border-b border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--card)_80%,transparent)]">
-                          <td className="px-3 py-2.5 font-medium">{row.symbol}</td>
+                        <tr key={row.asset_id} className="border-b border-[var(--v2-border)] hover:bg-[var(--v2-surface-2)]">
+                          <td className="px-3 py-2.5 font-semibold text-[var(--v2-text)]">{row.symbol}</td>
                           <td className="px-3 py-2.5">
                             <Badge text={row.chain.toUpperCase()} variant="blue" />
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono">{formatNum(row.total_posted)}</td>
+                          <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-text)]">{formatNum(row.total_posted)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-amber-600 dark:text-amber-400">{formatNum(row.total_held)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400">{formatNum(row.total_available)}</td>
-                          <td className="px-3 py-2.5 text-right font-mono text-[var(--muted)]">{row.num_accounts}</td>
+                          <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-muted)]">{row.num_accounts}</td>
                         </tr>
                       ))}
                       {walletData.ledger.length === 0 && (
-                        <tr><td colSpan={6} className="px-3 py-4 text-center text-[var(--muted)]">No ledger entries</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-4 text-center text-[var(--v2-muted)]">No ledger entries</td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </V2Card>
 
               {/* Fees + Pending Withdrawals side by side */}
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {/* Collected Fees */}
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-                  <h3 className="text-sm font-semibold tracking-tight">Collected Fees</h3>
-                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">Total fees collected from trades</p>
+                <V2Card className="p-5">
+                  <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">Collected Fees</h3>
+                  <p className="mt-1 text-[13px] text-[var(--v2-muted)]">Total fees collected from trades</p>
                   <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-[12px]">
                       <thead>
-                        <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                        <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                           <th className="px-3 py-2 font-medium">Asset</th>
                           <th className="px-3 py-2 text-right font-medium">Total Fees</th>
                         </tr>
                       </thead>
                       <tbody>
                         {walletData.fees.map((f) => (
-                          <tr key={`${f.chain}-${f.symbol}`} className="border-b border-[var(--border)]">
-                            <td className="px-3 py-2.5 font-medium">{f.symbol} <span className="text-[10px] text-[var(--muted)]">{f.chain.toUpperCase()}</span></td>
+                          <tr key={`${f.chain}-${f.symbol}`} className="border-b border-[var(--v2-border)]">
+                            <td className="px-3 py-2.5 font-semibold text-[var(--v2-text)]">{f.symbol} <span className="text-[11px] text-[var(--v2-muted)]">{f.chain.toUpperCase()}</span></td>
                             <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400">{formatNum(f.total_fees)}</td>
                           </tr>
                         ))}
                         {walletData.fees.length === 0 && (
-                          <tr><td colSpan={2} className="px-3 py-4 text-center text-[var(--muted)]">No fees collected yet</td></tr>
+                          <tr><td colSpan={2} className="px-3 py-4 text-center text-[var(--v2-muted)]">No fees collected yet</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </V2Card>
 
                 {/* Pending Withdrawals */}
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-                  <h3 className="text-sm font-semibold tracking-tight">Pending Withdrawals</h3>
-                  <p className="mt-0.5 text-[10px] text-[var(--muted)]">Withdrawals awaiting processing</p>
+                <V2Card className="p-5">
+                  <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">Pending Withdrawals</h3>
+                  <p className="mt-1 text-[13px] text-[var(--v2-muted)]">Withdrawals awaiting processing</p>
                   <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-xs">
+                    <table className="w-full text-[12px]">
                       <thead>
-                        <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                        <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                           <th className="px-3 py-2 font-medium">Asset</th>
                           <th className="px-3 py-2 text-right font-medium">Total Pending</th>
                           <th className="px-3 py-2 text-right font-medium">Count</th>
@@ -1604,29 +1708,29 @@ export function AdminDashboardClient() {
                       </thead>
                       <tbody>
                         {walletData.pendingWithdrawals.map((pw) => (
-                          <tr key={`${pw.chain}-${pw.symbol}`} className="border-b border-[var(--border)]">
-                            <td className="px-3 py-2.5 font-medium">{pw.symbol} <span className="text-[10px] text-[var(--muted)]">{pw.chain.toUpperCase()}</span></td>
+                          <tr key={`${pw.chain}-${pw.symbol}`} className="border-b border-[var(--v2-border)]">
+                            <td className="px-3 py-2.5 font-semibold text-[var(--v2-text)]">{pw.symbol} <span className="text-[11px] text-[var(--v2-muted)]">{pw.chain.toUpperCase()}</span></td>
                             <td className="px-3 py-2.5 text-right font-mono text-amber-600 dark:text-amber-400">{formatNum(pw.total_pending)}</td>
-                            <td className="px-3 py-2.5 text-right font-mono text-[var(--muted)]">{pw.count}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-muted)]">{pw.count}</td>
                           </tr>
                         ))}
                         {walletData.pendingWithdrawals.length === 0 && (
-                          <tr><td colSpan={3} className="px-3 py-4 text-center text-[var(--muted)]">No pending withdrawals</td></tr>
+                          <tr><td colSpan={3} className="px-3 py-4 text-center text-[var(--v2-muted)]">No pending withdrawals</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </V2Card>
               </div>
 
               {/* Coverage Ratio */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow)]">
-                <h3 className="text-sm font-semibold tracking-tight">Reserve Coverage</h3>
-                <p className="mt-0.5 text-[10px] text-[var(--muted)]">On-chain balance vs total user liabilities per asset</p>
+              <V2Card className="p-5">
+                <h3 className="text-[15px] font-semibold tracking-tight text-[var(--v2-text)]">Reserve Coverage</h3>
+                <p className="mt-1 text-[13px] text-[var(--v2-muted)]">On-chain balance vs total user liabilities per asset</p>
                 <div className="mt-4 overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-[12px]">
                     <thead>
-                      <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                      <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                         <th className="px-3 py-2 font-medium">Asset</th>
                         <th className="px-3 py-2 text-right font-medium">On-Chain</th>
                         <th className="px-3 py-2 text-right font-medium">User Liabilities</th>
@@ -1643,10 +1747,10 @@ export function AdminDashboardClient() {
                         const coverage = liability > 0 ? ((onChain / liability) * 100) : (onChain > 0 ? 999 : 0);
                         const coverageText = coverage >= 999 ? ">999%" : `${coverage.toFixed(1)}%`;
                         return (
-                          <tr key={oc.symbol} className="border-b border-[var(--border)]">
-                            <td className="px-3 py-2.5 font-medium">{oc.symbol}</td>
-                            <td className="px-3 py-2.5 text-right font-mono">{formatNum(onChain)}</td>
-                            <td className="px-3 py-2.5 text-right font-mono">{formatNum(liability)}</td>
+                          <tr key={oc.symbol} className="border-b border-[var(--v2-border)] hover:bg-[var(--v2-surface-2)]">
+                            <td className="px-3 py-2.5 font-semibold text-[var(--v2-text)]">{oc.symbol}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-text)]">{formatNum(onChain)}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-[var(--v2-text)]">{formatNum(liability)}</td>
                             <td className={`px-3 py-2.5 text-right font-mono ${
                               surplus >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
                             }`}>{surplus >= 0 ? "+" : ""}{formatNum(surplus)}</td>
@@ -1662,7 +1766,7 @@ export function AdminDashboardClient() {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </V2Card>
             </>
           ) : null}
         </div>
@@ -1679,7 +1783,7 @@ export function AdminDashboardClient() {
       {tab === "withdrawals" ? (
         <div className="grid gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-[var(--muted)]">Filter:</span>
+            <span className="text-[13px] text-[var(--v2-muted)]">Filter:</span>
             {["review", "requested", "needs_review", "approved", "broadcasted", "confirmed", "rejected", "failed", "canceled"].map(
               (s) => (
                 <button
@@ -1687,8 +1791,8 @@ export function AdminDashboardClient() {
                   type="button"
                   className={`rounded-full px-3 py-1 text-[11px] transition ${
                     wdFilter === s
-                      ? "bg-[var(--accent)] text-white"
-                      : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                      ? "bg-[var(--v2-accent)] text-white"
+                      : "border border-[var(--v2-border)] text-[var(--v2-muted)] hover:text-[var(--v2-text)]"
                   }`}
                   onClick={() => setWdFilter(s)}
                 >
@@ -1699,15 +1803,12 @@ export function AdminDashboardClient() {
           </div>
 
           {withdrawals.length === 0 && !wdLoading ? (
-            <p className="text-xs text-[var(--muted)]">No withdrawals match this filter.</p>
+            <p className="text-[13px] text-[var(--v2-muted)]">No withdrawals match this filter.</p>
           ) : null}
 
           <div className="grid gap-2">
             {withdrawals.map((w) => (
-              <div
-                key={w.id}
-                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]"
-              >
+              <V2Card key={w.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="grid gap-1">
                     <div className="flex items-center gap-2">
@@ -1722,10 +1823,10 @@ export function AdminDashboardClient() {
                         />
                       ) : null}
                     </div>
-                    <div className="text-[11px] text-[var(--muted)]">
-                      To: <span className="font-mono">{w.destination_address}</span>
+                    <div className="text-[12px] text-[var(--v2-muted)]">
+                      To: <span className="font-mono text-[var(--v2-text)]">{w.destination_address}</span>
                     </div>
-                    <div className="flex gap-3 text-[11px] text-[var(--muted)]">
+                    <div className="flex gap-3 text-[12px] text-[var(--v2-muted)]">
                       <span>User: {w.user_id.slice(0, 8)}...</span>
                       <span>{w.chain.toUpperCase()}</span>
                       <span>{new Date(w.created_at).toLocaleString()}</span>
@@ -1739,9 +1840,9 @@ export function AdminDashboardClient() {
 
                   {(w.status === "requested" || w.status === "needs_review") ? (
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                      <V2Button
+                        size="sm"
+                        variant="ghost"
                         onClick={() => {
                           const next = openExplainWithdrawalId === w.id ? null : w.id;
                           setOpenExplainWithdrawalId(next);
@@ -1750,31 +1851,32 @@ export function AdminDashboardClient() {
                         disabled={actionLoading === w.id}
                       >
                         {openExplainWithdrawalId === w.id ? "Hide" : "Explain"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg bg-emerald-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                      </V2Button>
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
+                        className="bg-[var(--v2-up)] text-white border-transparent hover:brightness-105"
                         disabled={actionLoading === w.id}
                         onClick={() => handleApprove(w.id)}
                       >
                         {actionLoading === w.id ? "..." : "Approve"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg bg-rose-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+                      </V2Button>
+                      <V2Button
+                        size="sm"
+                        variant="danger"
                         disabled={actionLoading === w.id}
                         onClick={() => handleReject(w.id)}
                       >
                         {actionLoading === w.id ? "..." : "Reject"}
-                      </button>
+                      </V2Button>
                     </div>
                   ) : null}
 
                   {w.status === "approved" ? (
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                      <V2Button
+                        size="sm"
+                        variant="ghost"
                         onClick={() => {
                           const next = openExplainWithdrawalId === w.id ? null : w.id;
                           setOpenExplainWithdrawalId(next);
@@ -1783,31 +1885,26 @@ export function AdminDashboardClient() {
                         disabled={actionLoading === w.id}
                       >
                         {openExplainWithdrawalId === w.id ? "Hide" : "Explain"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                        disabled={actionLoading === w.id}
-                        onClick={() => handleBroadcast(w.id)}
-                      >
+                      </V2Button>
+                      <V2Button size="sm" variant="primary" disabled={actionLoading === w.id} onClick={() => handleBroadcast(w.id)}>
                         {actionLoading === w.id ? "..." : "Broadcast"}
-                      </button>
+                      </V2Button>
                     </div>
                   ) : null}
                 </div>
 
                 {openExplainWithdrawalId === w.id ? (
-                  <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Status explanation</div>
+                  <div className={"mt-3 p-3 " + v2MiniPanelClass}>
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Status explanation</div>
                     {explainErrorByWithdrawalId[w.id] ? (
-                      <div className="mt-2 text-xs text-[var(--muted)]">Unable to load explanation: {explainErrorByWithdrawalId[w.id]}</div>
+                      <div className="mt-2 text-[12px] text-[var(--v2-muted)]">Unable to load explanation: {explainErrorByWithdrawalId[w.id]}</div>
                     ) : explainByWithdrawalId[w.id] ? (
                       <div className="mt-2 grid gap-3">
-                        <div className="text-sm font-semibold text-[var(--foreground)]">{explainByWithdrawalId[w.id]!.summary}</div>
+                        <div className="text-[13px] font-semibold text-[var(--v2-text)]">{explainByWithdrawalId[w.id]!.summary}</div>
                         {explainByWithdrawalId[w.id]!.blockers.length > 0 ? (
                           <div>
-                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Blockers</div>
-                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                            <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Blockers</div>
+                            <ul className="mt-2 list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                               {explainByWithdrawalId[w.id]!.blockers.map((b, i) => (
                                 <li key={i}>{b}</li>
                               ))}
@@ -1816,8 +1913,8 @@ export function AdminDashboardClient() {
                         ) : null}
                         {explainByWithdrawalId[w.id]!.next_steps.length > 0 ? (
                           <div>
-                            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Next steps</div>
-                            <ul className="mt-2 list-disc pl-5 text-xs text-[var(--muted)]">
+                            <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Next steps</div>
+                            <ul className="mt-2 list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                               {explainByWithdrawalId[w.id]!.next_steps.slice(0, 4).map((s, i) => (
                                 <li key={i}>{s}</li>
                               ))}
@@ -1826,11 +1923,11 @@ export function AdminDashboardClient() {
                         ) : null}
                       </div>
                     ) : (
-                      <div className="mt-2 text-xs text-[var(--muted)]">Loading…</div>
+                      <div className="mt-2 text-[12px] text-[var(--v2-muted)]">Loading…</div>
                     )}
                   </div>
                 ) : null}
-              </div>
+              </V2Card>
             ))}
           </div>
         </div>
@@ -1839,19 +1936,14 @@ export function AdminDashboardClient() {
       {/* ========== Reconciliation ========== */}
       {tab === "reconciliation" ? (
         <div className="grid gap-4">
-          <button
-            type="button"
-            className="w-fit rounded-lg bg-[linear-gradient(135deg,var(--accent),var(--accent-2))] px-4 py-2 text-xs font-semibold text-white shadow-[var(--shadow)] disabled:opacity-60"
-            disabled={reconLoading}
-            onClick={fetchRecon}
-          >
+          <V2Button variant="primary" size="sm" disabled={reconLoading} onClick={fetchRecon}>
             {reconLoading ? "Running..." : "Run Full Reconciliation"}
-          </button>
+          </V2Button>
 
           {reconReport ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
+            <V2Card className="p-4">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium">Result</h3>
+                <h3 className="text-[15px] font-semibold text-[var(--v2-text)]">Result</h3>
                 <Badge
                   text={reconReport.ok ? "PASS" : "FAIL"}
                   variant={reconReport.ok ? "green" : "red"}
@@ -1861,19 +1953,19 @@ export function AdminDashboardClient() {
                 {(reconReport.checks ?? []).map((c, i) => (
                   <div
                     key={i}
-                    className="flex items-start gap-2 rounded border border-[var(--border)] px-3 py-2 text-xs"
+                    className={"flex flex-wrap items-start gap-2 px-3 py-2 text-[12px] " + v2MiniPanelClass}
                   >
                     <span className={c.ok ? "text-emerald-600" : "text-rose-600"}>
                       {c.ok ? "PASS" : "FAIL"}
                     </span>
-                    <span className="font-medium">{c.name}</span>
+                    <span className="font-semibold text-[var(--v2-text)]">{c.name}</span>
                     {c.detail ? (
-                      <span className="text-[var(--muted)]">{c.detail}</span>
+                      <span className="text-[var(--v2-muted)]">{c.detail}</span>
                     ) : null}
                   </div>
                 ))}
               </div>
-            </div>
+            </V2Card>
           ) : null}
         </div>
       ) : null}
@@ -1882,28 +1974,25 @@ export function AdminDashboardClient() {
       {tab === "dead-letters" ? (
         <div className="grid gap-4">
           <div className="flex items-center gap-3">
-            <span className="ml-auto text-[11px] text-[var(--muted)]">
+            <span className="ml-auto text-[12px] text-[var(--v2-muted)]">
               {dlTotal} total{dlTotal > DL_PAGE_SIZE ? ` · showing ${dlOffset + 1}–${Math.min(dlOffset + DL_PAGE_SIZE, dlTotal)}` : ""}
             </span>
           </div>
 
           {deadLetters.length === 0 && !dlLoading ? (
-            <p className="text-xs text-[var(--muted)]">No dead-lettered events.</p>
+            <p className="text-[13px] text-[var(--v2-muted)]">No dead-lettered events.</p>
           ) : null}
 
           <div className="grid gap-2">
             {deadLetters.map((dl) => (
-              <div
-                key={dl.id}
-                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]"
-              >
+              <V2Card key={dl.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="grid gap-1">
                     <div className="flex items-center gap-2">
                       <Badge text={dl.topic} variant="blue" />
-                      <span className="font-mono text-[11px] text-[var(--muted)]">{dl.id.slice(0, 8)}...</span>
+                      <span className="font-mono text-[12px] text-[var(--v2-muted)]">{dl.id.slice(0, 8)}...</span>
                     </div>
-                    <div className="text-[11px] text-[var(--muted)]">
+                    <div className="text-[12px] text-[var(--v2-muted)]">
                       {(dl.aggregate_type ?? "-")}{dl.aggregate_id ? `:${dl.aggregate_id.slice(0, 8)}...` : ""} · Attempts: {dl.attempts}
                     </div>
                     {dl.last_error ? (
@@ -1911,62 +2000,58 @@ export function AdminDashboardClient() {
                         {dl.last_error}
                       </div>
                     ) : null}
-                    <div className="text-[10px] text-[var(--muted)]">
+                    <div className="text-[12px] text-[var(--v2-muted)]">
                       {new Date(dl.created_at).toLocaleString()}
                     </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
-                      onClick={() => handleExportDeadLetter(dl)}
-                    >
+                    <V2Button size="sm" variant="secondary" onClick={() => handleExportDeadLetter(dl)}>
                       Export
-                    </button>
+                    </V2Button>
 
-                    <button
-                      type="button"
-                      className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--card-2)] disabled:opacity-60"
+                    <V2Button
+                      size="sm"
+                      variant="secondary"
                       disabled={resolveLoading === dl.id}
                       onClick={() => handleResolveDeadLetter(dl.id)}
                     >
                       {resolveLoading === dl.id ? "..." : "Resolve"}
-                    </button>
+                    </V2Button>
 
-                    <button
-                      type="button"
-                      className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                    <V2Button
+                      size="sm"
+                      variant="primary"
                       disabled={retryLoading === dl.id}
                       onClick={() => handleRetryDeadLetter(dl.id)}
                     >
                       {retryLoading === dl.id ? "..." : "Retry"}
-                    </button>
+                    </V2Button>
                   </div>
                 </div>
-              </div>
+              </V2Card>
             ))}
           </div>
 
           {/* Dead-letter pagination */}
           {dlTotal > DL_PAGE_SIZE && (
             <div className="flex items-center gap-3">
-              <button
-                type="button"
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={dlOffset === 0 || dlLoading}
                 onClick={() => fetchDeadLetters(Math.max(0, dlOffset - DL_PAGE_SIZE))}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 ← Prev
-              </button>
-              <button
-                type="button"
+              </V2Button>
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={dlOffset + DL_PAGE_SIZE >= dlTotal || dlLoading}
                 onClick={() => fetchDeadLetters(dlOffset + DL_PAGE_SIZE)}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 Next →
-              </button>
+              </V2Button>
             </div>
           )}
         </div>
@@ -1976,30 +2061,30 @@ export function AdminDashboardClient() {
       {tab === "kyc-review" ? (
         <div className="grid gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-[var(--muted)]">Filter:</span>
+            <span className="text-[13px] text-[var(--v2-muted)]">Filter:</span>
             {["pending_review", "approved", "rejected"].map((s) => (
               <button
                 key={s}
                 type="button"
                 className={`rounded-full px-3 py-1 text-[11px] transition ${
                   kycFilter === s
-                    ? "bg-[var(--accent)] text-white"
-                    : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                    ? "bg-[var(--v2-accent)] text-white"
+                    : "border border-[var(--v2-border)] text-[var(--v2-muted)] hover:text-[var(--v2-text)]"
                 }`}
                 onClick={() => setKycFilter(s)}
               >
                 {s.replace("_", " ")}
               </button>
             ))}
-            <span className="text-[11px] text-[var(--muted)]">
+            <span className="text-[12px] text-[var(--v2-muted)]">
               {kycTotal} total{kycTotal > KYC_PAGE_SIZE ? ` · ${kycOffset + 1}–${Math.min(kycOffset + KYC_PAGE_SIZE, kycTotal)}` : ""}
             </span>
           </div>
 
           {/* Bulk action bar */}
           {kycFilter === "pending_review" && kycSubmissions.some((s) => s.status === "pending_review") ? (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2">
-              <label className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+            <div className={"flex flex-wrap items-center gap-3 px-3 py-2 " + v2MiniPanelClass}>
+              <label className="flex items-center gap-1.5 text-[12px] text-[var(--v2-muted)]">
                 <input
                   type="checkbox"
                   checked={
@@ -2007,36 +2092,34 @@ export function AdminDashboardClient() {
                     kycSelected.size === kycSubmissions.filter((s) => s.status === "pending_review").length
                   }
                   onChange={toggleKycSelectAll}
-                  className="accent-[var(--accent)]"
+                  className="accent-[var(--v2-accent)]"
                 />
                 Select all
               </label>
               {kycSelected.size > 0 ? (
                 <>
-                  <span className="text-[11px] text-[var(--foreground)]">{kycSelected.size} selected</span>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-emerald-600 px-4 py-2 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                  <span className="text-[12px] font-semibold text-[var(--v2-text)]">{kycSelected.size} selected</span>
+                  <V2Button
+                    size="sm"
+                    variant="secondary"
+                    className="bg-[var(--v2-up)] text-white border-transparent hover:brightness-105"
                     disabled={kycBulkLoading}
                     onClick={handleBulkKycApprove}
                   >
                     {kycBulkLoading ? "..." : `Approve ${kycSelected.size}`}
-                  </button>
+                  </V2Button>
                 </>
               ) : null}
             </div>
           ) : null}
 
           {kycSubmissions.length === 0 && !kycLoading ? (
-            <p className="text-xs text-[var(--muted)]">No KYC submissions match this filter.</p>
+            <p className="text-[13px] text-[var(--v2-muted)]">No KYC submissions match this filter.</p>
           ) : null}
 
           <div className="grid gap-2">
             {kycSubmissions.map((sub) => (
-              <div
-                key={sub.id}
-                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]"
-              >
+              <V2Card key={sub.id} className="p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
                     {/* Bulk checkbox */}
@@ -2045,7 +2128,7 @@ export function AdminDashboardClient() {
                         type="checkbox"
                         checked={kycSelected.has(sub.id)}
                         onChange={() => toggleKycSelect(sub.id)}
-                        className="mt-0.5 accent-[var(--accent)]"
+                        className="mt-0.5 accent-[var(--v2-accent)]"
                       />
                     ) : null}
                     <div className="grid gap-1">
@@ -2056,7 +2139,7 @@ export function AdminDashboardClient() {
                           variant={sub.status === "approved" ? "green" : sub.status === "rejected" ? "red" : "amber"}
                         />
                       </div>
-                      <div className="flex gap-3 text-[11px] text-[var(--muted)]">
+                      <div className="flex gap-3 text-[12px] text-[var(--v2-muted)]">
                         <span>User: {sub.user_id.slice(0, 8)}...</span>
                         <span>{new Date(sub.created_at).toLocaleString()}</span>
                       </div>
@@ -2070,48 +2153,49 @@ export function AdminDashboardClient() {
 
                   {sub.status === "pending_review" ? (
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg bg-emerald-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
+                        className="bg-[var(--v2-up)] text-white border-transparent hover:brightness-105"
                         disabled={kycActionLoading === sub.id}
                         onClick={() => handleKycApprove(sub.id)}
                       >
                         {kycActionLoading === sub.id ? "..." : "Approve"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg bg-rose-600 px-4 py-2.5 text-[11px] font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+                      </V2Button>
+                      <V2Button
+                        size="sm"
+                        variant="danger"
                         disabled={kycActionLoading === sub.id}
                         onClick={() => handleKycReject(sub.id)}
                       >
                         {kycActionLoading === sub.id ? "..." : "Reject"}
-                      </button>
+                      </V2Button>
                     </div>
                   ) : null}
                 </div>
-              </div>
+              </V2Card>
             ))}
           </div>
 
           {/* KYC pagination */}
           {kycTotal > KYC_PAGE_SIZE && (
             <div className="flex items-center gap-3">
-              <button
-                type="button"
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={kycOffset === 0 || kycLoading}
                 onClick={() => fetchKycSubmissions(Math.max(0, kycOffset - KYC_PAGE_SIZE))}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 ← Prev
-              </button>
-              <button
-                type="button"
+              </V2Button>
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={kycOffset + KYC_PAGE_SIZE >= kycTotal || kycLoading}
                 onClick={() => fetchKycSubmissions(kycOffset + KYC_PAGE_SIZE)}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 Next →
-              </button>
+              </V2Button>
             </div>
           )}
         </div>
@@ -2120,16 +2204,15 @@ export function AdminDashboardClient() {
       {/* ========== Audit Log ========== */}
       {tab === "audit-log" ? (
         <div className="grid gap-4">
-          <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Account Timeline Export</div>
+          <V2Card className="p-4">
+            <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Account Timeline Export</div>
 
             <div className="grid gap-3 md:grid-cols-3">
               <label className="block md:col-span-2">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">User ID (uuid)</div>
-                <input
-                  type="text"
+                <div className="text-[10px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">User ID (uuid)</div>
+                <V2Input
                   placeholder="e.g. 6d8c..."
-                  className="mt-1 w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs font-mono outline-none transition focus:border-[var(--accent)]"
+                  className="mt-1 font-mono text-[13px]"
                   value={timelineUserId}
                   onChange={(e) => setTimelineUserId(e.target.value)}
                   onKeyDown={(e) => {
@@ -2138,12 +2221,12 @@ export function AdminDashboardClient() {
                 />
               </label>
               <label className="block">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted)]">Limit</div>
-                <input
+                <div className="text-[10px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Limit</div>
+                <V2Input
                   type="number"
                   min={1}
                   max={5000}
-                  className="mt-1 w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                  className="mt-1 text-[13px]"
                   value={timelineLimit}
                   onChange={(e) => setTimelineLimit(Number(e.target.value || 0))}
                 />
@@ -2151,65 +2234,64 @@ export function AdminDashboardClient() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="rounded bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-[var(--accent-foreground)] hover:opacity-90 disabled:opacity-60"
+              <V2Button
+                size="sm"
+                variant="primary"
                 disabled={timelineLoading || !timelineUserId.trim()}
                 onClick={() => void exportAccountTimeline()}
               >
                 {timelineLoading ? "Exporting…" : "Download JSON"}
-              </button>
-              <span className="text-[11px] text-[var(--muted)]">Includes deposits, withdrawals, orders, and ledger entries.</span>
+              </V2Button>
+              <span className="text-[12px] text-[var(--v2-muted)]">Includes deposits, withdrawals, orders, and ledger entries.</span>
             </div>
 
             {timelineError ? (
-              <div className="text-xs text-[var(--muted)]">Unable to export: {timelineError}</div>
+              <div className="text-[12px] text-[var(--v2-muted)]">Unable to export: {timelineError}</div>
             ) : null}
-          </div>
+          </V2Card>
 
-          <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[var(--shadow)]">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">Explain by ID</div>
+          <V2Card className="p-4">
+            <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">Explain by ID</div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-                <div className="text-xs font-semibold text-[var(--foreground)]">Exchange order</div>
+              <div className={"p-3 " + v2MiniPanelClass}>
+                <div className="text-[13px] font-semibold text-[var(--v2-text)]">Exchange order</div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
+                  <V2Input
                     placeholder="Order ID (uuid)"
-                    className="w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                    className="h-10 text-[13px]"
                     value={explainOrderId}
                     onChange={(e) => setExplainOrderId(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void runExplainOrder();
                     }}
                   />
-                  <button
-                    type="button"
-                    className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
+                  <V2Button
+                    size="sm"
+                    variant="ghost"
                     disabled={explainOrderLoading || !explainOrderId.trim()}
                     onClick={() => void runExplainOrder()}
                   >
                     {explainOrderLoading ? "Loading…" : "Explain"}
-                  </button>
+                  </V2Button>
                 </div>
                 {explainOrderError ? (
-                  <div className="mt-2 text-xs text-[var(--muted)]">Unable to load: {explainOrderError}</div>
+                  <div className="mt-2 text-[12px] text-[var(--v2-muted)]">Unable to load: {explainOrderError}</div>
                 ) : explainOrderResult ? (
-                  <div className="mt-3 grid gap-2 text-xs">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                  <div className="mt-3 grid gap-2 text-[12px]">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">
                       {explainOrderResult.status} · {explainOrderResult.state}
                     </div>
-                    <div className="text-sm font-semibold text-[var(--foreground)]">{explainOrderResult.summary}</div>
+                    <div className="text-[13px] font-semibold text-[var(--v2-text)]">{explainOrderResult.summary}</div>
                     {explainOrderResult.blockers.length > 0 ? (
-                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                      <ul className="list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                         {explainOrderResult.blockers.map((b, i) => (
                           <li key={i}>{b}</li>
                         ))}
                       </ul>
                     ) : null}
                     {explainOrderResult.next_steps.length > 0 ? (
-                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                      <ul className="list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                         {explainOrderResult.next_steps.slice(0, 4).map((s, i) => (
                           <li key={i}>{s}</li>
                         ))}
@@ -2219,45 +2301,44 @@ export function AdminDashboardClient() {
                 ) : null}
               </div>
 
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3">
-                <div className="text-xs font-semibold text-[var(--foreground)]">P2P order</div>
+              <div className={"p-3 " + v2MiniPanelClass}>
+                <div className="text-[13px] font-semibold text-[var(--v2-text)]">P2P order</div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
+                  <V2Input
                     placeholder="P2P Order ID (uuid)"
-                    className="w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-xs outline-none transition focus:border-[var(--accent)]"
+                    className="h-10 text-[13px]"
                     value={explainP2pOrderId}
                     onChange={(e) => setExplainP2pOrderId(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void runExplainP2pOrder();
                     }}
                   />
-                  <button
-                    type="button"
-                    className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
+                  <V2Button
+                    size="sm"
+                    variant="ghost"
                     disabled={explainP2pOrderLoading || !explainP2pOrderId.trim()}
                     onClick={() => void runExplainP2pOrder()}
                   >
                     {explainP2pOrderLoading ? "Loading…" : "Explain"}
-                  </button>
+                  </V2Button>
                 </div>
                 {explainP2pOrderError ? (
-                  <div className="mt-2 text-xs text-[var(--muted)]">Unable to load: {explainP2pOrderError}</div>
+                  <div className="mt-2 text-[12px] text-[var(--v2-muted)]">Unable to load: {explainP2pOrderError}</div>
                 ) : explainP2pOrderResult ? (
-                  <div className="mt-3 grid gap-2 text-xs">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                  <div className="mt-3 grid gap-2 text-[12px]">
+                    <div className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--v2-muted)]">
                       {explainP2pOrderResult.status} · {explainP2pOrderResult.state}
                     </div>
-                    <div className="text-sm font-semibold text-[var(--foreground)]">{explainP2pOrderResult.summary}</div>
+                    <div className="text-[13px] font-semibold text-[var(--v2-text)]">{explainP2pOrderResult.summary}</div>
                     {explainP2pOrderResult.blockers.length > 0 ? (
-                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                      <ul className="list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                         {explainP2pOrderResult.blockers.map((b, i) => (
                           <li key={i}>{b}</li>
                         ))}
                       </ul>
                     ) : null}
                     {explainP2pOrderResult.next_steps.length > 0 ? (
-                      <ul className="list-disc pl-5 text-[11px] text-[var(--muted)]">
+                      <ul className="list-disc pl-5 text-[12px] text-[var(--v2-muted)]">
                         {explainP2pOrderResult.next_steps.slice(0, 4).map((s, i) => (
                           <li key={i}>{s}</li>
                         ))}
@@ -2267,38 +2348,34 @@ export function AdminDashboardClient() {
                 ) : null}
               </div>
             </div>
-          </div>
+          </V2Card>
 
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="text"
+            <V2Input
               placeholder="Filter by action (e.g. auth.totp)"
-              className="rounded border border-[var(--border)] bg-transparent px-3 py-1.5 text-xs outline-none transition focus:border-[var(--accent)]"
+              className="h-10 text-[13px]"
               value={auditFilter}
               onChange={(e) => setAuditFilter(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") fetchAuditLog(0); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") fetchAuditLog(0);
+              }}
             />
-            <button
-              type="button"
-              className="text-[11px] text-[var(--muted)] hover:text-[var(--foreground)]"
-              onClick={() => fetchAuditLog(0)}
-              disabled={auditLoading}
-            >
+            <V2Button size="sm" variant="ghost" onClick={() => fetchAuditLog(0)} disabled={auditLoading}>
               {auditLoading ? "Loading..." : "Search"}
-            </button>
-            <span className="ml-auto text-[11px] text-[var(--muted)]">
+            </V2Button>
+            <span className="ml-auto text-[12px] text-[var(--v2-muted)]">
               {auditTotal} total · showing {auditOffset + 1}–{Math.min(auditOffset + 50, auditTotal)}
             </span>
           </div>
 
           {auditRows.length === 0 && !auditLoading ? (
-            <p className="text-xs text-[var(--muted)]">No audit log entries match this filter.</p>
+            <p className="text-[13px] text-[var(--v2-muted)]">No audit log entries match this filter.</p>
           ) : null}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
+          <div className="overflow-x-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] shadow-[var(--v2-shadow-sm)]">
+            <table className="w-full text-[12px]">
               <thead>
-                <tr className="border-b border-[var(--border)] text-left text-[var(--muted)]">
+                <tr className="border-b border-[var(--v2-border)] text-left text-[var(--v2-muted)]">
                   <th className="px-2 py-1.5 font-medium">Time</th>
                   <th className="px-2 py-1.5 font-medium">Action</th>
                   <th className="px-2 py-1.5 font-medium">Actor</th>
@@ -2309,8 +2386,8 @@ export function AdminDashboardClient() {
               </thead>
               <tbody>
                 {auditRows.map((row) => (
-                  <tr key={row.id} className="border-b border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--card)_80%,transparent)]">
-                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[var(--muted)]">
+                  <tr key={row.id} className="border-b border-[var(--v2-border)] hover:bg-[var(--v2-surface-2)]">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-[var(--v2-muted)]">
                       {new Date(row.created_at).toLocaleString()}
                     </td>
                     <td className="px-2 py-1.5">
@@ -2326,8 +2403,8 @@ export function AdminDashboardClient() {
                         </span>
                       ) : "—"}
                     </td>
-                    <td className="px-2 py-1.5 font-mono text-[var(--muted)]">{row.ip ?? "—"}</td>
-                    <td className="max-w-[200px] truncate px-2 py-1.5 font-mono text-[10px] text-[var(--muted)]">
+                    <td className="px-2 py-1.5 font-mono text-[var(--v2-muted)]">{row.ip ?? "—"}</td>
+                    <td className="max-w-[200px] truncate px-2 py-1.5 font-mono text-[11px] text-[var(--v2-muted)]">
                       {Object.keys(row.detail ?? {}).length > 0 ? JSON.stringify(row.detail) : "—"}
                     </td>
                   </tr>
@@ -2339,22 +2416,22 @@ export function AdminDashboardClient() {
           {/* Pagination */}
           {auditTotal > 50 && (
             <div className="flex items-center gap-3">
-              <button
-                type="button"
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={auditOffset === 0 || auditLoading}
                 onClick={() => fetchAuditLog(Math.max(0, auditOffset - 50))}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 ← Prev
-              </button>
-              <button
-                type="button"
+              </V2Button>
+              <V2Button
+                size="sm"
+                variant="ghost"
                 disabled={auditOffset + 50 >= auditTotal || auditLoading}
                 onClick={() => fetchAuditLog(auditOffset + 50)}
-                className="rounded border border-[var(--border)] px-3 py-2 text-[11px] transition hover:text-[var(--foreground)] disabled:opacity-40"
               >
                 Next →
-              </button>
+              </V2Button>
             </div>
           )}
         </div>
@@ -2367,7 +2444,7 @@ export function AdminDashboardClient() {
         description="Please provide a reason for rejection. This will be recorded in the audit log."
         variant="prompt"
         confirmLabel="Reject"
-        confirmClass="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+        confirmClass="inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-xl transition focus:outline-none focus:ring-2 focus:ring-[var(--v2-ring)] disabled:pointer-events-none disabled:opacity-55 h-9 px-3 text-[13px] bg-[var(--v2-down)] text-white font-semibold shadow-[var(--v2-shadow-sm)] hover:brightness-105"
         promptPlaceholder="Enter rejection reason…"
         loading={rejectLoading}
         onConfirm={submitReject}

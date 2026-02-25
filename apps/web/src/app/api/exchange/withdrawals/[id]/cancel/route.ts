@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { getSql } from "@/lib/db";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { responseForDbError } from "@/lib/dbTransient";
@@ -25,6 +26,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "exchange.withdrawals.cancel",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

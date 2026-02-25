@@ -4,6 +4,7 @@ import { apiError, apiZodError } from "@/lib/api/errors";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { amount3818PositiveSchema } from "@/lib/exchange/amount";
 import { isSha256Hex, randomSeedB64, sha256Hex } from "@/lib/uncertainty/hash";
@@ -26,6 +27,15 @@ export async function POST(request: Request) {
   if (!actingUserId) return apiError("missing_x_user_id");
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.vaults.create",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const activeErr = await retryOnceOnTransientDbError(() => requireActiveUser(sql, actingUserId));

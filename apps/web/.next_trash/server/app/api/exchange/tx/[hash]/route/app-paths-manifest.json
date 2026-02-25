@@ -1,0 +1,3 @@
+{
+  "/api/exchange/tx/[hash]/route": "app/api/exchange/tx/[hash]/route.js"
+}

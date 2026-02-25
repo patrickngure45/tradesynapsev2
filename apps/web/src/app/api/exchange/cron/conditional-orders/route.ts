@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { enqueueOutbox } from "@/lib/outbox";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { tryAcquireJobLock, releaseJobLock } from "@/lib/system/jobLock";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,10 +29,7 @@ function isEnabledInProd(): boolean {
 }
 
 function checkCronSecret(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
-  if (!expected) return false;
-  const got = request.headers.get("x-cron-secret") ?? new URL(request.url).searchParams.get("secret") ?? "";
-  return got === expected;
+  return !requireCronRequestAuth(request, { allowInNonProd: true });
 }
 
 /**

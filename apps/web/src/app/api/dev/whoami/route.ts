@@ -4,6 +4,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return Response.json({ error: "not_found" }, { status: 404 });
+  }
+
   const headerUserId = request.headers.get("x-user-id");
   const actingUserId = getActingUserId(request);
 

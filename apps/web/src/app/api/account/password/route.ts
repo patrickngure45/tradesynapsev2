@@ -9,6 +9,7 @@ import { enforceTotpIfEnabled } from "@/lib/auth/requireTotp";
 import { sendMail } from "@/lib/email/transport";
 import { securityAlertEmail } from "@/lib/email/templates";
 import { writeAuditLog, auditContextFromRequest } from "@/lib/auditLog";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,16 @@ export async function POST(request: Request) {
   const authed = await requireSessionUserId(sql as any, request);
   if (!authed.ok) return authed.response;
   const actingUserId = authed.userId;
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.password.change",
+    windowMs: 60_000,
+    max: 8,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   const body = await request.json().catch(() => ({}));
   const parsed = schema.safeParse(body);

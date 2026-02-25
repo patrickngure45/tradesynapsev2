@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { apiError } from "@/lib/api/errors";
+import { auditContextFromRequest, writeAuditLog } from "@/lib/auditLog";
 import {
   countDeadLetters,
   getDeadLetterById,
@@ -61,6 +62,8 @@ export async function POST(request: Request) {
   if (action !== "retry" && action !== "resolve") return apiError("invalid_input");
 
   try {
+    const ctx = auditContextFromRequest(request);
+
     const ok =
       action === "resolve"
         ? await resolveDeadLetter(sql, { id })
@@ -71,6 +74,23 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
+
+    try {
+      await writeAuditLog(sql as any, {
+        actorId: admin.userId,
+        actorType: "admin",
+        action: action === "resolve" ? "admin.outbox.dead_letter.resolved" : "admin.outbox.dead_letter.retried",
+        resourceType: "outbox_event",
+        resourceId: id,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        requestId: ctx.requestId,
+        detail: { id, action },
+      });
+    } catch {
+      // ignore
+    }
+
     return Response.json(action === "resolve" ? { resolved: true, id } : { retried: true, id });
   } catch (e) {
     const resp = responseForDbError("admin.outbox.dead-letters.retry", e);

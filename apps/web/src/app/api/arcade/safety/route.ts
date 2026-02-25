@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { getSql } from "@/lib/db";
 import { retryOnceOnTransientDbError, responseForDbError } from "@/lib/dbTransient";
 import { getArcadeSafetyLimits, upsertArcadeSafetyLimits } from "@/lib/arcade/safety";
@@ -54,6 +55,15 @@ export async function POST(request: Request) {
   const selfExcludedUntil = hours && hours > 0 ? new Date(Date.now() + hours * 3600_000).toISOString() : null;
 
   const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "arcade.safety.update",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rateLimitRes) return rateLimitRes;
 
   try {
     const limits = await retryOnceOnTransientDbError(async () => {

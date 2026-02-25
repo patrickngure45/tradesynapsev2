@@ -35,13 +35,13 @@ export async function GET(request: Request) {
       return await (sql as any)`
         SELECT
           id, actor_id, actor_type, action, resource_type, resource_id,
-          ip, user_agent, request_id, detail, created_at
+          ip, user_agent, request_id, detail, ts::text AS created_at
         FROM audit_log
         WHERE 1 = 1
           ${action ? sql`AND action LIKE ${action + "%"}` : sql``}
           ${actorId ? sql`AND actor_id = ${actorId}` : sql``}
           ${resourceType ? sql`AND resource_type = ${resourceType}` : sql``}
-        ORDER BY created_at DESC
+        ORDER BY ts DESC
         LIMIT ${limit}
         OFFSET ${offset}
       `;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { apiError } from "@/lib/api/errors";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { listServiceHeartbeats, type HeartbeatRow } from "@/lib/system/heartbeat";
 
 export const runtime = "nodejs";
@@ -178,6 +179,16 @@ export async function GET() {
   });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request,
+    limiterName: "status.post",
+    windowMs: 60_000,
+    max: 15,
+    includeIp: true,
+  });
+  if (rateLimitRes) return rateLimitRes;
   return apiError("invalid_input");
 }

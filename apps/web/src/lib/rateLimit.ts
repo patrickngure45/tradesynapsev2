@@ -95,5 +95,8 @@ export const apiLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 /** Auth endpoints: 20 req / min per IP (brute-force mitigation). */
 export const authLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
+/** General mutating API endpoints (POST/PUT/PATCH/DELETE): 80 req / min per IP. */
+export const apiWriteLimiter = createRateLimiter({ windowMs: 60_000, max: 80 });
+
 /** Exchange write endpoints (orders, withdrawals): 40 req / min per IP. */
 export const exchangeWriteLimiter = createRateLimiter({ windowMs: 60_000, max: 40 });

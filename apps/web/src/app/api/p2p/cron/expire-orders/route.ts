@@ -1,22 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function requireCronAuth(req: NextRequest): string | null {
-	// In production, require a shared secret.
-	// In dev, allow unauthenticated calls for local testing.
-	if (process.env.NODE_ENV !== "production") return null;
-
-	// Prefer a dedicated P2P secret, but allow reusing the existing exchange/cron secret.
-	const configured = process.env.P2P_CRON_SECRET ?? process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET;
-	if (!configured) return "cron_secret_not_configured";
-
-	const provided = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
-	if (!provided || provided !== configured) return "cron_unauthorized";
-	return null;
+	return requireCronRequestAuth(req, {
+		secretEnvKeys: ["P2P_CRON_SECRET", "EXCHANGE_CRON_SECRET", "CRON_SECRET"],
+		allowlistEnvKeys: ["P2P_CRON_ALLOWED_IPS", "EXCHANGE_CRON_ALLOWED_IPS", "CRON_ALLOWED_IPS"],
+	});
 }
 
 type ExpiredOrder = {

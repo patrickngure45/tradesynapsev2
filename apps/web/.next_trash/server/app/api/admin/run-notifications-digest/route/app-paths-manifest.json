@@ -1,0 +1,3 @@
+{
+  "/api/admin/run-notifications-digest/route": "app/api/admin/run-notifications-digest/route.js"
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { getActingUserId } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import {
   getPublicLeaders,
   registerLeader,
@@ -34,14 +35,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const sql = getSql();
+  const rateLimitRes = await enforceAccountSecurityRateLimit({
+    sql,
+    request: req,
+    limiterName: "exchange.copy_trading.leaders",
+    windowMs: 60_000,
+    max: 20,
+    userId,
+  });
+  if (rateLimitRes) return rateLimitRes;
+
   try {
     const body = await req.json();
     const displayName = body.displayName?.trim();
     if (!displayName || displayName.length < 2) {
       return NextResponse.json({ error: "Display name required (min 2 chars)" }, { status: 400 });
     }
-
-    const sql = getSql();
     const leader = await registerLeader(sql, userId, displayName, body.bio);
     return NextResponse.json({ leader }, { status: 201 });
   } catch (err: unknown) {

@@ -182,10 +182,10 @@ export async function GET(request: Request) {
             user_agent,
             request_id,
             detail,
-            created_at
+            ts::text AS created_at
           FROM audit_log
           WHERE actor_id = ${userId}::uuid
-          ORDER BY created_at DESC
+          ORDER BY ts DESC
           LIMIT ${limit}
         `;
       }),

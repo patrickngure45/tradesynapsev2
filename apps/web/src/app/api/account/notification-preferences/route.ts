@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError, apiZodError } from "@/lib/api/errors";
 import { requireActiveUser } from "@/lib/auth/activeUser";
 import { getActingUserId, requireActingUserIdInProd } from "@/lib/auth/party";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 
@@ -95,6 +96,16 @@ export async function PUT(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("unauthorized", { status: 401 });
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "account.notification_preferences.put",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   let body: unknown;
   try {

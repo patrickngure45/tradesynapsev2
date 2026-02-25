@@ -2,20 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getSql } from "@/lib/db";
 import { responseForDbError } from "@/lib/dbTransient";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function requireCronAuth(req: NextRequest): string | null {
-  if (process.env.NODE_ENV !== "production") return null;
-
-  const configured = process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET;
-  if (!configured) return "cron_secret_not_configured";
-
-  const provided = req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
-  if (!provided || provided !== configured) return "cron_unauthorized";
-  return null;
-}
 
 /**
  * Move due scheduled arcade actions into `ready` state and emit outbox events.
@@ -24,7 +14,7 @@ function requireCronAuth(req: NextRequest): string | null {
  * but we need a scheduled transition to create tension + notifications.
  */
 export async function POST(req: NextRequest) {
-  const authErr = requireCronAuth(req);
+  const authErr = requireCronRequestAuth(req);
   if (authErr) {
     const status = authErr === "cron_unauthorized" ? 401 : 500;
     return NextResponse.json({ error: authErr }, { status });

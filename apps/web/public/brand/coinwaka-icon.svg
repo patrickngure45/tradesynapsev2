@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="cw-ember" x1="96" y1="96" x2="416" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="55%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+    <radialGradient id="cw-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(170 140) rotate(35) scale(340 300)">
+      <stop offset="0%" stop-color="#F97316" stop-opacity="0.28"/>
+      <stop offset="70%" stop-color="#F97316" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="#0B1220"/>
+  <rect width="512" height="512" rx="116" fill="url(#cw-glow)"/>
+
+  <circle cx="256" cy="256" r="152" fill="#0C101B" stroke="url(#cw-ember)" stroke-width="28"/>
+  <circle cx="256" cy="256" r="108" stroke="rgba(255,255,255,0.10)" stroke-width="10"/>
+
+  <path d="M256 176c28 38 42 68 42 92 0 34-19 55-42 55s-42-21-42-55c0-24 14-54 42-92Z" fill="url(#cw-ember)"/>
+</svg>

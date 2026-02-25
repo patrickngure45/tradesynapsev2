@@ -15,6 +15,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import {
   apiLimiter,
+  apiWriteLimiter,
   authLimiter,
   exchangeWriteLimiter,
   type RateLimitResult,
@@ -122,17 +123,27 @@ function attachCsrfCookieIfMissing(request: NextRequest, response: NextResponse)
 
 // ── Route classification for tiered rate limiting ─────────────────────
 
-function classifyRoute(pathname: string, method: string): "auth" | "exchange-write" | "api" | "page" {
+function classifyRoute(pathname: string, method: string): "auth" | "exchange-write" | "api-write" | "api" | "page" {
+  const isMutatingMethod = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
   if (pathname.startsWith("/api/auth")) return "auth";
 
   if (
     pathname.startsWith("/api/exchange/orders") ||
     pathname.startsWith("/api/exchange/withdrawals")
   ) {
-    if (method === "POST" || method === "DELETE") return "exchange-write";
+    if (isMutatingMethod) return "exchange-write";
   }
 
-  if (pathname.startsWith("/api/")) return "api";
+  if (pathname.startsWith("/api/")) {
+    const isCronPath =
+      pathname.startsWith("/api/cron/") ||
+      pathname.startsWith("/api/arcade/cron/") ||
+      pathname.startsWith("/api/exchange/cron/") ||
+      pathname.startsWith("/api/p2p/cron/");
+
+    if (isMutatingMethod && !isCronPath) return "api-write";
+    return "api";
+  }
 
   return "page";
 }
@@ -144,6 +155,7 @@ function classifyRoute(pathname: string, method: string): "auth" | "exchange-wri
 let pgLimiters: {
   auth: PgRateLimiter;
   exchangeWrite: PgRateLimiter;
+  apiWrite: PgRateLimiter;
   api: PgRateLimiter;
 } | null = null;
 let pgInitFailed = false;
@@ -158,6 +170,7 @@ function getPgLimiters() {
     pgLimiters = {
       api: createPgRateLimiter(sql, { name: "api", windowMs: 60_000, max: 120 }),
       auth: createPgRateLimiter(sql, { name: "auth", windowMs: 60_000, max: 20 }),
+      apiWrite: createPgRateLimiter(sql, { name: "api-write", windowMs: 60_000, max: 80 }),
       exchangeWrite: createPgRateLimiter(sql, { name: "exchange-write", windowMs: 60_000, max: 40 }),
     };
     return pgLimiters;
@@ -186,6 +199,8 @@ async function checkRateLimit(
           return await pg.auth.consume(clientIp);
         case "exchange-write":
           return await pg.exchangeWrite.consume(clientIp);
+        case "api-write":
+          return await pg.apiWrite.consume(clientIp);
         default:
           return await pg.api.consume(clientIp);
       }
@@ -200,6 +215,8 @@ async function checkRateLimit(
       return authLimiter.consume(clientIp);
     case "exchange-write":
       return exchangeWriteLimiter.consume(clientIp);
+    case "api-write":
+      return apiWriteLimiter.consume(clientIp);
     default:
       return apiLimiter.consume(clientIp);
   }
@@ -211,9 +228,22 @@ async function checkRateLimit(
 const PROTECTED_PREFIXES = [
   "/portfolio", "/order-history", "/account", "/admin",
   "/arbitrage", "/copy-trading", "/wallet", "/connections",
-  "/exchange", "/trades", "/ai", "/notifications",
+  "/exchange", "/trades", "/ai", "/notifications", "/arcade",
   "/home", "/terminal",
   "/p2p/orders",
+
+  // v2 authenticated-only pages (read-only pages like /v2/markets, /v2/trade, /v2/p2p remain public)
+  "/v2/wallet",
+  "/v2/orders",
+  "/v2/account",
+  "/v2/earn",
+  "/v2/convert",
+  "/v2/copy",
+  "/v2/dca",
+  "/v2/conditional",
+  "/v2/p2p/orders",
+  "/v2/p2p/my-ads",
+  "/v2/p2p/payment-methods",
 ];
 
 // HTTP methods that need CSRF origin check
@@ -225,6 +255,26 @@ export default async function proxy(request: NextRequest) {
   const clientIp = extractClientIp(request) ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   const { pathname } = request.nextUrl;
   const method = request.method;
+
+  if (
+    isProd &&
+    (
+      pathname === "/api/dev" || pathname.startsWith("/api/dev/") ||
+      pathname === "/api/exchange/dev" || pathname.startsWith("/api/exchange/dev/") ||
+      pathname === "/api/earn/dev" || pathname.startsWith("/api/earn/dev/")
+    )
+  ) {
+    return NextResponse.json(
+      { error: "not_found" },
+      {
+        status: 404,
+        headers: {
+          "x-request-id": requestId,
+          ...SECURITY_HEADERS,
+        },
+      },
+    );
+  }
 
   // ── HTTPS redirect in production ──────────────────────────────────
   if (isProd && request.headers.get("x-forwarded-proto") === "http") {
@@ -433,7 +483,8 @@ export default async function proxy(request: NextRequest) {
 
     if (!authenticated) {
       const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", pathname);
+      loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+      loginUrl.searchParams.set("reason", token ? "session_expired" : "auth_required");
       return NextResponse.redirect(loginUrl);
     }
   }

@@ -82,9 +82,9 @@ export function AiAdvisorClient() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-[var(--border)] p-6 bg-[var(--card)]">
+      <div className="rounded-xl border border-[var(--v2-border)] p-6 bg-[var(--v2-surface)]">
         <h2 className="text-lg font-medium mb-4">Safety Center: Scam Typologies</h2>
-        <p className="text-sm text-[var(--muted)] mb-6">
+        <p className="text-sm text-[var(--v2-muted)] mb-6">
           Our AI Risk Engine protects your account by analyzing transaction patterns in real-time. 
           Below are common threats we monitor for. Stay vigilant.
         </p>
@@ -93,7 +93,7 @@ export function AiAdvisorClient() {
           {SCAM_TYPOLOGIES.map((typology) => (
             <div
               key={typology.name}
-              className={`rounded-lg border border-[var(--border)] p-4 transition-colors hover:bg-[var(--card)]`}
+              className={`rounded-lg border border-[var(--v2-border)] p-4 transition-colors hover:bg-[var(--v2-surface-2)]`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -107,13 +107,13 @@ export function AiAdvisorClient() {
                       {typology.risk} Risk
                     </span>
                   </div>
-                  <div className="mt-2 text-sm text-[var(--muted)]">
+                  <div className="mt-2 text-sm text-[var(--v2-muted)]">
                     <ul className="mb-2 list-inside list-disc space-y-1">
                       {typology.indicators.map((i, idx) => (
                         <li key={idx}>{i}</li>
                       ))}
                     </ul>
-                    <div className="mt-3 rounded bg-[var(--background)] p-3 text-xs text-[var(--foreground)]">
+                    <div className="mt-3 rounded bg-[var(--v2-bg)] p-3 text-xs text-[var(--v2-text)]">
                       <span className="font-semibold text-emerald-500">Advice:</span> {typology.advice}
                     </div>
                   </div>

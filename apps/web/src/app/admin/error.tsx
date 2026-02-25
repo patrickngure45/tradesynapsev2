@@ -13,7 +13,7 @@ export default function AdminError({
         !
       </div>
       <h2 className="text-lg font-semibold">Admin Error</h2>
-      <p className="max-w-md text-sm text-[var(--muted)]">
+      <p className="max-w-md text-sm text-[var(--v2-muted)]">
         The admin dashboard encountered an error.
         {error.message ? (
           <span className="mt-2 block font-mono text-xs">{error.message}</span>
@@ -24,7 +24,7 @@ export default function AdminError({
       </p>
       <button
         onClick={() => reset()}
-        className="rounded-lg bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]/80"
+        className="rounded-lg bg-[var(--v2-accent)] px-5 py-2 text-sm font-semibold text-white transition hover:brightness-110"
       >
         Reload
       </button>

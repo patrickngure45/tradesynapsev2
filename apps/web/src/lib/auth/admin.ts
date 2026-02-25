@@ -2,6 +2,7 @@ import type { Sql } from "postgres";
 import { getActingUserId } from "@/lib/auth/party";
 import { apiError } from "@/lib/api/errors";
 import { getSessionTokenFromRequest, serializeClearSessionCookie } from "@/lib/auth/session";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export type AdminCheckResult =
   | { ok: true; userId: string }
@@ -50,7 +51,24 @@ export async function requireAdminForApi(
   const secure = process.env.NODE_ENV === "production";
 
   const admin = await requireAdmin(sql, request);
-  if (admin.ok) return admin;
+  if (admin.ok) {
+    const method = request.method.toUpperCase();
+    const isMutating = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+
+    if (isMutating) {
+      const rl = await enforceAccountSecurityRateLimit({
+        sql: sql as any,
+        request,
+        limiterName: "admin.write",
+        windowMs: 60_000,
+        max: 40,
+        userId: admin.userId,
+      });
+      if (rl) return { ok: false, response: rl };
+    }
+
+    return admin;
+  }
 
   if (admin.error === "user_not_found" || admin.error === "auth_required") {
     const headers: HeadersInit | undefined = sessionToken

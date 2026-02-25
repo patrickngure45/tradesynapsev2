@@ -5,17 +5,10 @@ import { getSql } from "@/lib/db";
 import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
 import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
 import { sendMail, isEmailConfigured } from "@/lib/email/transport";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function cronAuthed(request: Request): boolean {
-  const expected = String(process.env.EXCHANGE_CRON_SECRET ?? process.env.CRON_SECRET ?? "").trim();
-  if (!expected) return false;
-  const url = new URL(request.url);
-  const provided = String(request.headers.get("x-cron-secret") ?? url.searchParams.get("secret") ?? "").trim();
-  return !!provided && provided === expected;
-}
 
 const querySchema = z.object({
   max: z
@@ -33,7 +26,8 @@ function nowIso() {
 }
 
 export async function POST(request: Request) {
-  if (!cronAuthed(request)) return apiError("unauthorized", { status: 401 });
+  const authErr = requireCronRequestAuth(request);
+  if (authErr) return apiError("unauthorized", { status: authErr === "cron_unauthorized" ? 401 : 500 });
 
   const url = new URL(request.url);
   let q: z.infer<typeof querySchema>;

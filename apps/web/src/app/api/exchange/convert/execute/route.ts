@@ -11,6 +11,7 @@ import { buildConvertJournalLines, convertFeeBps, quoteConvert } from "@/lib/exc
 import { toBigInt3818 } from "@/lib/exchange/fixed3818";
 import { recordInternalChainTx } from "@/lib/exchange/internalChain";
 import { logArcadeConsumption } from "@/lib/arcade/consumption";
+import { enforceAccountSecurityRateLimit } from "@/lib/auth/securityRateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,16 @@ export async function POST(request: Request) {
   const authErr = requireActingUserIdInProd(actingUserId);
   if (authErr) return apiError(authErr);
   if (!actingUserId) return apiError("missing_x_user_id");
+
+  const rl = await enforceAccountSecurityRateLimit({
+    sql: sql as any,
+    request,
+    limiterName: "exchange.convert.execute",
+    windowMs: 60_000,
+    max: 20,
+    userId: actingUserId,
+  });
+  if (rl) return rl;
 
   try {
     const activeErr = await requireActiveUser(sql, actingUserId);

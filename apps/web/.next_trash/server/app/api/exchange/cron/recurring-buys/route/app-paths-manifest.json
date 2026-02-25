@@ -1,0 +1,3 @@
+{
+  "/api/exchange/cron/recurring-buys/route": "app/api/exchange/cron/recurring-buys/route.js"
+}

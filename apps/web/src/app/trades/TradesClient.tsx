@@ -18,6 +18,9 @@ import {
 } from "@/lib/state/actingUser";
 import { copyToClipboard } from "@/lib/ui/copyToClipboard";
 import { Toast, type ToastKind } from "@/components/Toast";
+import { V2Button } from "@/components/v2/Button";
+import { V2Card, V2CardBody, V2CardHeader } from "@/components/v2/Card";
+import { V2Input } from "@/components/v2/Input";
 
 type User = {
   id: string;
@@ -83,12 +86,10 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
 
     const cls =
       role === "buyer"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200"
-        : "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-200";
+        ? "border-[color-mix(in_srgb,var(--v2-up)_35%,var(--v2-border))] bg-[color-mix(in_srgb,var(--v2-up)_10%,transparent)] text-[var(--v2-up)]"
+        : "border-[color-mix(in_srgb,var(--v2-accent-2)_35%,var(--v2-border))] bg-[color-mix(in_srgb,var(--v2-accent-2)_10%,transparent)] text-[var(--v2-accent-2)]";
 
-    return (
-      <span className={`rounded border px-2 py-0.5 text-[11px] ${cls}`}>{role}</span>
-    );
+    return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{role}</span>;
   };
 
   const actionTitle = (
@@ -524,21 +525,20 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
       />
       <ApiErrorBanner error={error} />
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Create trade</h2>
-          <button
-            className="text-sm underline"
-            onClick={() => void refreshTrades()}
-          >
-            Refresh trades
-          </button>
-        </div>
-
-        <div className="mt-3 grid gap-1 text-sm">
-          <span className="text-zinc-500">Acting user (scopes trade list)</span>
-          <select
-            className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-xs dark:border-zinc-800"
+      <V2Card>
+        <V2CardHeader
+          title="Create trade"
+          right={
+            <V2Button variant="ghost" size="sm" onClick={() => void refreshTrades()}>
+              Refresh trades
+            </V2Button>
+          }
+        />
+        <V2CardBody>
+          <div className="grid gap-1">
+            <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Acting user (scopes trade list)</span>
+            <select
+              className="h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 font-mono text-[12px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
             value={actingUserId}
             onChange={(e) => {
               const next = e.target.value;
@@ -572,11 +572,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
             ))}
           </select>
 
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-              <span className="text-zinc-500">Auth mode</span>
-              <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-1 text-xs dark:border-zinc-800"
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-[12px] text-[var(--v2-muted)]">
+                <span className="font-semibold">Auth mode</span>
+                <select
+                  className="h-9 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[12px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
                 value={authMode}
                 onChange={(e) => {
                   const next = e.target.value as typeof authMode;
@@ -599,34 +599,34 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
             </label>
 
             {authMode === "session" ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-                <span className="text-zinc-500">Session</span>
+              <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--v2-muted)]">
+                <span className="font-semibold">Session</span>
                 <span className="font-mono">
                   {sessionUserId ? `${sessionUserId.slice(0, 8)}…` : "(none)"}
                 </span>
-                <button
-                  type="button"
-                  className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                <V2Button
+                  size="sm"
+                  variant="secondary"
                   disabled={!actingUserId || sessionLoading}
                   onClick={() => void signInAs(actingUserId)}
                 >
                   Sign in
-                </button>
-                <button
-                  type="button"
-                  className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                </V2Button>
+                <V2Button
+                  size="sm"
+                  variant="secondary"
                   disabled={sessionLoading}
                   onClick={() => void signOut()}
                 >
                   Sign out
-                </button>
+                </V2Button>
                 <details>
-                  <summary className="cursor-pointer text-[11px] text-zinc-500">prod bootstrap</summary>
+                  <summary className="cursor-pointer text-[11px] font-semibold text-[var(--v2-muted)]">prod bootstrap</summary>
                   <div className="mt-2 grid gap-1">
                     <label className="grid gap-1">
-                      <span className="text-[11px] text-zinc-500">x-session-bootstrap-key</span>
-                      <input
-                        className="rounded border border-zinc-200 bg-transparent px-2 py-1 font-mono text-xs dark:border-zinc-800"
+                      <span className="text-[11px] font-semibold text-[var(--v2-muted)]">x-session-bootstrap-key</span>
+                      <V2Input
+                        className="h-10 font-mono text-[12px]"
                         value={sessionBootstrapKey}
                         type="password"
                         placeholder="(only needed in production)"
@@ -637,30 +637,29 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                 </details>
               </div>
             ) : (
-              <div className="text-xs text-zinc-500">Requests send x-user-id.</div>
+              <div className="text-[12px] text-[var(--v2-muted)]">Requests send x-user-id.</div>
             )}
           </div>
-        </div>
 
-        <div className="mt-4 grid gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              className="rounded bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <V2Button
+                variant="secondary"
               disabled={loading}
               onClick={() => void createDevUser()}
             >
               + Dev user
-            </button>
-            <div className="text-sm text-zinc-500">
-              Need users? Create two, then submit.
+              </V2Button>
+              <div className="text-[13px] text-[var(--v2-muted)]">Need users? Create two, then submit.</div>
             </div>
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Buyer</span>
-              <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-xs dark:border-zinc-800"
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Buyer</span>
+                <select
+                  className="h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 font-mono text-[12px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
                 value={buyerUserId}
                 onChange={(e) => setBuyerUserId(e.target.value)}
               >
@@ -672,10 +671,10 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
               </select>
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Seller</span>
-              <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-xs dark:border-zinc-800"
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Seller</span>
+                <select
+                  className="h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 font-mono text-[12px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
                 value={sellerUserId}
                 onChange={(e) => setSellerUserId(e.target.value)}
               >
@@ -689,28 +688,28 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Fiat</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Fiat</span>
+              <V2Input
+                className="font-mono"
                 value={fiatCurrency}
                 onChange={(e) => setFiatCurrency(e.target.value)}
               />
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Asset</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Asset</span>
+              <V2Input
+                className="font-mono"
                 value={cryptoAsset}
                 onChange={(e) => setCryptoAsset(e.target.value)}
               />
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Price</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Price</span>
+              <V2Input
+                className="font-mono"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
               />
@@ -718,19 +717,19 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Fiat amount</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Fiat amount</span>
+              <V2Input
+                className="font-mono"
                 value={fiatAmount}
                 onChange={(e) => setFiatAmount(e.target.value)}
               />
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Crypto amount</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Crypto amount</span>
+              <V2Input
+                className="font-mono"
                 value={cryptoAmount}
                 onChange={(e) => setCryptoAmount(e.target.value)}
               />
@@ -738,19 +737,18 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Payment label</span>
-              <input
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 text-sm dark:border-zinc-800"
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Payment label</span>
+              <V2Input
                 value={paymentMethodLabel}
                 onChange={(e) => setPaymentMethodLabel(e.target.value)}
               />
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="text-zinc-500">Payment risk</span>
+            <label className="grid gap-1">
+              <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Payment risk</span>
               <select
-                className="rounded border border-zinc-200 bg-transparent px-2 py-2 text-sm dark:border-zinc-800"
+                className="h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[14px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
                 value={paymentMethodRiskClass}
                 onChange={(e) =>
                   setPaymentMethodRiskClass(e.target.value as typeof paymentMethodRiskClass)
@@ -763,12 +761,13 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 text-sm">
+          <div className="flex flex-wrap items-center gap-4 text-[13px] text-[var(--v2-text)]">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={assessRisk}
                 onChange={(e) => setAssessRisk(e.target.checked)}
+                className="accent-[var(--v2-accent)]"
               />
               Assess risk (v0)
             </label>
@@ -778,6 +777,7 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                 type="checkbox"
                 checked={useReferenceMarket}
                 onChange={(e) => setUseReferenceMarket(e.target.checked)}
+                className="accent-[var(--v2-accent)]"
               />
               Attach reference market
             </label>
@@ -785,10 +785,10 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
 
           {useReferenceMarket ? (
             <div className="grid gap-3 md:grid-cols-4">
-              <label className="grid gap-1 text-sm">
-                <span className="text-zinc-500">Exchange</span>
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Exchange</span>
                 <select
-                  className="rounded border border-zinc-200 bg-transparent px-2 py-2 text-sm dark:border-zinc-800"
+                  className="h-11 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 text-[14px] font-semibold text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]"
                   value={exchange}
                   onChange={(e) => setExchange(e.target.value as typeof exchange)}
                 >
@@ -797,62 +797,57 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                 </select>
               </label>
 
-              <label className="grid gap-1 text-sm md:col-span-2">
-                <span className="text-zinc-500">Symbol</span>
-                <input
-                  className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+              <label className="grid gap-1 md:col-span-2">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Symbol</span>
+                <V2Input
+                  className="font-mono"
                   value={symbol}
                   onChange={(e) => setSymbol(e.target.value)}
                 />
               </label>
 
-              <label className="grid gap-1 text-sm">
-                <span className="text-zinc-500">Band pct</span>
-                <input
-                  className="rounded border border-zinc-200 bg-transparent px-2 py-2 font-mono text-sm dark:border-zinc-800"
+              <label className="grid gap-1">
+                <span className="text-[12px] font-semibold text-[var(--v2-muted)]">Band pct</span>
+                <V2Input
+                  className="font-mono"
                   value={bandPct}
                   onChange={(e) => setBandPct(e.target.value)}
                 />
               </label>
 
-              <label className="flex items-center gap-2 text-sm md:col-span-4">
+              <label className="flex items-center gap-2 text-[13px] text-[var(--v2-text)] md:col-span-4">
                 <input
                   type="checkbox"
                   checked={persistSnapshot}
                   onChange={(e) => setPersistSnapshot(e.target.checked)}
+                  className="accent-[var(--v2-accent)]"
                 />
                 Persist snapshot to DB
               </label>
             </div>
           ) : null}
 
-          <button
-            className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          <V2Button
+            variant="primary"
             disabled={loading || !canSubmit}
             onClick={() => void createTrade()}
           >
             {loading ? "Working…" : "Create trade"}
-          </button>
+          </V2Button>
 
           {!canSubmit ? (
-            <div className="text-sm text-zinc-500">
-              Select two different users to submit.
-            </div>
+            <div className="text-[13px] text-[var(--v2-muted)]">Select two different users to submit.</div>
           ) : null}
-        </div>
-      </section>
+          </div>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="rounded border border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Recent trades</h2>
-          <Link className="text-sm underline" href="/">
-            Home
-          </Link>
-        </div>
-
-        <div className="mt-4 overflow-x-auto rounded border border-zinc-200 dark:border-zinc-800">
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+      <V2Card>
+        <V2CardHeader title="Recent trades" right={<Link className="text-[13px] font-semibold text-[var(--v2-accent-2)] underline" href="/">Home</Link>} />
+        <V2CardBody>
+          <div className="overflow-x-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+            <table className="w-full text-[13px]">
+              <thead className="bg-[var(--v2-surface-2)] text-left text-[var(--v2-muted)]">
               <tr>
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Pair</th>
@@ -868,16 +863,16 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
               {trades.map((t) => (
                 <tr
                   key={t.id}
-                  className="border-t border-zinc-200 dark:border-zinc-800"
+                  className="border-t border-[var(--v2-border)]"
                 >
                   <td className="px-3 py-2 font-mono">
                     <div className="flex items-center gap-2">
-                      <Link className="underline" href={tradeHrefFor(t.id)}>
+                      <Link className="font-semibold text-[var(--v2-accent-2)] underline" href={tradeHrefFor(t.id)}>
                         {t.id.slice(0, 8)}…
                       </Link>
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         onClick={async () => {
                           try {
                             const relative = tradeHrefFor(t.id);
@@ -892,7 +887,7 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         }}
                       >
                         Copy
-                      </button>
+                      </V2Button>
                     </div>
                   </td>
                   <td className="px-3 py-2">
@@ -904,15 +899,15 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <span>{t.status}</span>
+                      <span className="font-semibold text-[var(--v2-text)]">{t.status}</span>
                       {roleBadgeFor(t)}
                     </div>
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         disabled={
                           transitioningTradeId === t.id ||
                           !canTransitionTrade(t.status, "awaiting_payment")
@@ -924,11 +919,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         })}
                       >
                         Awaiting
-                      </button>
+                      </V2Button>
 
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         disabled={
                           transitioningTradeId === t.id ||
                           !canTransitionTrade(t.status, "paid_marked") ||
@@ -942,11 +937,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         })}
                       >
                         Paid
-                      </button>
+                      </V2Button>
 
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         disabled={
                           transitioningTradeId === t.id ||
                           !canTransitionTrade(t.status, "released") ||
@@ -960,11 +955,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         })}
                       >
                         Release
-                      </button>
+                      </V2Button>
 
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         disabled={
                           transitioningTradeId === t.id ||
                           !canTransitionTrade(t.status, "resolved")
@@ -973,11 +968,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         title={actionTitle(t, { label: "Resolve trade", to: "resolved" })}
                       >
                         Resolve
-                      </button>
+                      </V2Button>
 
-                      <button
-                        type="button"
-                        className="rounded border border-red-200 px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/40"
+                      <V2Button
+                        size="sm"
+                        variant="danger"
                         disabled={
                           transitioningTradeId === t.id ||
                           t.status === "disputed" ||
@@ -987,11 +982,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         title={actionTitle(t, { label: "Cancel trade", to: "canceled" })}
                       >
                         Cancel
-                      </button>
+                      </V2Button>
 
-                      <button
-                        type="button"
-                        className="rounded border border-amber-200 px-2 py-1 text-[11px] text-amber-800 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-950/40"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         disabled={
                           transitioningTradeId === t.id ||
                           !scopeUserId ||
@@ -1001,19 +996,19 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         title={actionTitle(t, { label: "Open dispute", kind: "dispute" })}
                       >
                         Dispute
-                      </button>
+                      </V2Button>
                     </div>
                   </td>
 
                   <td className="px-3 py-2 font-mono">{t.created_at}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <a className="text-xs underline" href={proofPackHrefFor(t.id)}>
+                      <a className="text-[12px] font-semibold text-[var(--v2-accent-2)] underline" href={proofPackHrefFor(t.id)}>
                         ZIP
                       </a>
-                      <button
-                        type="button"
-                        className="rounded border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-950"
+                      <V2Button
+                        size="sm"
+                        variant="secondary"
                         onClick={async () => {
                           try {
                             const href = proofPackHrefFor(t.id);
@@ -1033,14 +1028,14 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
                         }}
                       >
                         Copy link
-                      </button>
+                      </V2Button>
                     </div>
                   </td>
                 </tr>
               ))}
               {trades.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-sm text-zinc-500" colSpan={8}>
+                  <td className="px-3 py-4 text-[13px] text-[var(--v2-muted)]" colSpan={8}>
                     No trades yet.
                   </td>
                 </tr>
@@ -1048,13 +1043,11 @@ export function TradesClient({ initialTrades }: { initialTrades: TradeRow[] }) {
             </tbody>
           </table>
         </div>
-      </section>
+        </V2CardBody>
+      </V2Card>
 
-      <section className="text-xs text-zinc-500">
-        <div>
-          Pro tip: after creating a trade, open it and upload evidence, then
-          download the Proof Pack ZIP.
-        </div>
+      <section className="text-[12px] text-[var(--v2-muted)]">
+        <div>Pro tip: after creating a trade, open it and upload evidence, then download the Proof Pack ZIP.</div>
       </section>
     </div>
   );
