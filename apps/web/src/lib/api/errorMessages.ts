@@ -197,6 +197,10 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
     title: "Country not supported",
     message: "P2P is not available in your country yet.",
   },
+  kyc_required: {
+    title: "Verification required",
+    message: "Complete Basic KYC before posting SELL ads.",
+  },
 
   // P2P Ads
   ad_limit_reached: {
@@ -230,6 +234,14 @@ const CODE_MAP: Record<string, Omit<ClientErrorInfo, "code">> = {
   p2p_ad_closed: {
     title: "Ad closed",
     message: "This ad is closed and can’t be changed.",
+  },
+  invalid_asset: {
+    title: "Asset unavailable",
+    message: "That asset is unavailable for P2P ads right now.",
+  },
+  insufficient_funds: {
+    title: "Insufficient available balance",
+    message: "You do not have enough available balance (after existing holds) to post this SELL ad.",
   },
 
   p2p_open_orders_limit: {
