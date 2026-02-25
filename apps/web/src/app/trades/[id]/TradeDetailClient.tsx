@@ -117,6 +117,7 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
   const [risk, setRisk] = useState<RiskAssessment>(null);
   const [dispute, setDispute] = useState<Dispute>(null);
   const [disputeDecisions, setDisputeDecisions] = useState<DisputeDecision[]>([]);
+  const [disputeActionError, setDisputeActionError] = useState<ClientApiError | null>(null);
 
   const evidenceCompleteness = useMemo(() => computeEvidenceCompleteness(evidence), [evidence]);
 
@@ -418,16 +419,16 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
 
   async function openDispute() {
     if (!disputeOpenedBy) {
-      setError({ code: "missing_opened_by_user_id" });
+      setDisputeActionError({ code: "missing_opened_by_user_id" });
       return;
     }
 
     setOpeningDispute(true);
-    setError(null);
+    setDisputeActionError(null);
 
     try {
       if (authMode === "session" && sessionUserId && disputeOpenedBy && sessionUserId !== disputeOpenedBy) {
-        setError({ code: "session_user_mismatch" });
+        setDisputeActionError({ code: "session_user_mismatch" });
         return;
       }
 
@@ -442,12 +443,14 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
           reason_code: disputeReason,
         }),
       });
+      setToastKind("success");
+      setToastMessage("Dispute opened.");
       await refreshAll();
     } catch (e) {
       if (e instanceof ApiError) {
-        setError({ code: e.code, details: e.details });
+        setDisputeActionError({ code: e.code, details: e.details });
       } else {
-        setError({ code: e instanceof Error ? e.message : "open_dispute_failed" });
+        setDisputeActionError({ code: e instanceof Error ? e.message : "open_dispute_failed" });
       }
     } finally {
       setOpeningDispute(false);
@@ -456,12 +459,12 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
 
   async function submitDecision() {
     if (!decisionBy) {
-      setError({ code: "missing_decided_by" });
+      setDisputeActionError({ code: "missing_decided_by" });
       return;
     }
 
     setSubmittingDecision(true);
-    setError(null);
+    setDisputeActionError(null);
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -478,12 +481,14 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
       });
 
       setDecisionRationale("");
+      setToastKind("success");
+      setToastMessage("Decision submitted.");
       await refreshAll();
     } catch (e) {
       if (e instanceof ApiError) {
-        setError({ code: e.code, details: e.details });
+        setDisputeActionError({ code: e.code, details: e.details });
       } else {
-        setError({ code: e instanceof Error ? e.message : "submit_decision_failed" });
+        setDisputeActionError({ code: e instanceof Error ? e.message : "submit_decision_failed" });
       }
     } finally {
       setSubmittingDecision(false);
@@ -552,6 +557,26 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
     "min-h-20 w-full rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-2 text-[13px] text-[var(--v2-text)] shadow-[var(--v2-shadow-sm)] outline-none focus:ring-2 focus:ring-[var(--v2-ring)]";
   const preClass =
     "overflow-auto rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2 font-mono text-[12px] text-[var(--v2-text)]";
+
+  const disputeStatusBadgeClass = (status: string) =>
+    status === "resolved"
+      ? "rounded-full border border-[color-mix(in_srgb,var(--v2-up)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-up)_16%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-up)]"
+      : status === "open"
+        ? "rounded-full border border-[color-mix(in_srgb,var(--v2-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--v2-accent)_18%,transparent)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-accent)]"
+        : "rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--v2-muted)]";
+
+  const disputeDecisionBadgeClass = (decision: string) => {
+    if (decision === "release_to_buyer" || decision === "refund_buyer") {
+      return "rounded-full border border-[color-mix(in_srgb,var(--v2-up)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-up)_16%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-up)]";
+    }
+    if (decision === "release_to_seller") {
+      return "rounded-full border border-[color-mix(in_srgb,var(--v2-accent-2)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-accent-2)_16%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-accent-2)]";
+    }
+    if (decision === "cancel_trade") {
+      return "rounded-full border border-[color-mix(in_srgb,var(--v2-down)_35%,transparent)] bg-[color-mix(in_srgb,var(--v2-down)_14%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-down)]";
+    }
+    return "rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--v2-muted)]";
+  };
 
   return (
     <div className="mt-6 grid gap-6">
@@ -1056,10 +1081,15 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
         <V2CardHeader title="Dispute" />
         <V2CardBody>
 
+        {disputeActionError ? (
+          <ApiErrorBanner error={disputeActionError} className="mb-3" />
+        ) : null}
+
         {dispute ? (
           <div className="grid gap-3 text-[13px]">
-            <div>
-              <span className="text-[var(--v2-muted)]">Status:</span> {dispute.status}
+            <div className="flex items-center gap-2">
+              <span className="text-[var(--v2-muted)]">Status:</span>
+              <span className={disputeStatusBadgeClass(dispute.status)}>{dispute.status}</span>
             </div>
             <div>
               <span className="text-[var(--v2-muted)]">Reason:</span> {dispute.reason_code}
@@ -1077,7 +1107,7 @@ export function TradeDetailClient({ tradeId }: { tradeId: string }) {
                   <li key={d.id} className="px-3 py-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[var(--v2-muted)]">{d.decision}</span> — {d.decided_by}
+                        <span className={disputeDecisionBadgeClass(d.decision)}>{d.decision}</span> — {d.decided_by}
                       </div>
                       <div className="text-[12px] text-[var(--v2-muted)]">{d.created_at}</div>
                     </div>
