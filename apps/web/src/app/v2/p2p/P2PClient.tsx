@@ -119,6 +119,20 @@ function paymentMethodRules(identifierRaw: string): { requiredKeys: string[]; ti
   };
 }
 
+function paymentMethodExample(identifierRaw: string): { label: string; json: string } {
+  const identifier = identifierRaw.trim().toLowerCase();
+  if (identifier === "bank_transfer" || identifier === "bank") {
+    return {
+      label: "bank_transfer",
+      json: '{\n  "bankName": "Example Bank",\n  "accountName": "Jane Doe",\n  "accountNumber": "1234567890",\n  "branchCode": "001"\n}',
+    };
+  }
+  return {
+    label: "mpesa",
+    json: '{\n  "phoneNumber": "0712345678"\n}',
+  };
+}
+
 function humanizeActionError(codeOrMessage: string): string {
   const info = describeClientError(codeOrMessage);
   return info.message;
@@ -269,6 +283,7 @@ export function P2PClient() {
 
   const addMethodParsed = useMemo(() => parseJsonSafe(newMethodDetailsJson), [newMethodDetailsJson]);
   const addMethodRules = useMemo(() => paymentMethodRules(newMethodIdentifier), [newMethodIdentifier]);
+  const addMethodExample = useMemo(() => paymentMethodExample(newMethodIdentifier), [newMethodIdentifier]);
   const addMethodMissingRequired = useMemo(() => {
     if (addMethodParsed.error || !addMethodParsed.value || typeof addMethodParsed.value !== "object") {
       return addMethodRules.requiredKeys;
@@ -656,14 +671,14 @@ export function P2PClient() {
 
                     <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--v2-muted)]">
                       <span>
-                        Example (mpesa): <span className="font-mono">{"{\"phoneNumber\":\"0712345678\"}"}</span>
+                        Example ({addMethodExample.label}): <span className="font-mono">{addMethodExample.json}</span>
                       </span>
                       <button
                         type="button"
                         className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-2 py-1 text-[11px] font-semibold text-[var(--v2-muted)] hover:bg-[var(--v2-surface)]"
-                        onClick={() => setNewMethodDetailsJson("{\n  \"phoneNumber\": \"0712345678\"\n}")}
+                        onClick={() => setNewMethodDetailsJson(addMethodExample.json)}
                       >
-                        Use example
+                        Use {addMethodExample.label} example
                       </button>
                     </div>
 
