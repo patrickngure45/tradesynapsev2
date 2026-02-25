@@ -379,6 +379,32 @@ export function MyAdsClient() {
   const createErrText = errText(createErr);
   const editErrText = errText(editErr);
 
+  const createFixedPriceNum = toNum(createFixedPrice);
+  const createTotalAmountNum = toNum(createTotalAmount);
+  const createMinLimitNum = toNum(createMinLimit);
+  const createMaxLimitNum = toNum(createMaxLimit);
+  const createLiquidityFiat =
+    createFixedPriceNum != null && createTotalAmountNum != null ? createFixedPriceNum * createTotalAmountNum : null;
+  const createMaxByLiquidity =
+    createLiquidityFiat != null && Number.isFinite(createLiquidityFiat) ? Math.floor(createLiquidityFiat) : null;
+  const createHasRangeIssue =
+    createMinLimitNum != null && createMaxLimitNum != null && createMinLimitNum > createMaxLimitNum;
+  const createHasLiquidityIssue =
+    createMaxLimitNum != null && createMaxByLiquidity != null && createMaxByLiquidity > 0 && createMaxLimitNum > createMaxByLiquidity;
+
+  const editFixedPriceNum = toNum(editFixedPrice);
+  const editMinLimitNum = toNum(editMinLimit);
+  const editMaxLimitNum = toNum(editMaxLimit);
+  const editRemainingAmountNum = toNum(editAd?.remaining_amount);
+  const editLiquidityFiat =
+    editFixedPriceNum != null && editRemainingAmountNum != null ? editFixedPriceNum * editRemainingAmountNum : null;
+  const editMaxByLiquidity =
+    editLiquidityFiat != null && Number.isFinite(editLiquidityFiat) ? Math.floor(editLiquidityFiat) : null;
+  const editHasRangeIssue =
+    editMinLimitNum != null && editMaxLimitNum != null && editMinLimitNum > editMaxLimitNum;
+  const editHasLiquidityIssue =
+    editMaxLimitNum != null && editMaxByLiquidity != null && editMaxByLiquidity > 0 && editMaxLimitNum > editMaxByLiquidity;
+
   return (
     <main className="space-y-4">
       <header className="space-y-2">
@@ -538,6 +564,27 @@ export function MyAdsClient() {
           <V2Input value={createWindow} onChange={(e) => setCreateWindow(e.target.value)} placeholder="Payment window minutes (15-180)" inputMode="numeric" />
           <V2Input value={createTerms} onChange={(e) => setCreateTerms(e.target.value)} placeholder="Terms (optional)" />
 
+          <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3 text-[12px] text-[var(--v2-muted)]">
+            <div className="font-semibold text-[var(--v2-text)]">Pre-submit checks</div>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              <li>
+                Estimated liquidity: {createLiquidityFiat != null ? fmtMoney(String(createLiquidityFiat), fiat) : "—"}
+              </li>
+              <li>
+                Maximum allowed by liquidity: {createMaxByLiquidity != null ? fmtMoney(String(createMaxByLiquidity), fiat) : "—"}
+              </li>
+              {createHasRangeIssue ? (
+                <li className="text-[var(--v2-down)]">Min trade must be less than or equal to max trade.</li>
+              ) : null}
+              {createHasLiquidityIssue ? (
+                <li className="text-[var(--v2-down)]">Max trade exceeds current ad liquidity. Lower max or increase amount/price.</li>
+              ) : null}
+              {createSide === "SELL" && createPaymentMethodIds.length === 0 ? (
+                <li className="text-[var(--v2-down)]">SELL ads require at least one payout method.</li>
+              ) : null}
+            </ul>
+          </div>
+
           {createSide === "SELL" ? (
             <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3">
               <div className="text-[12px] font-semibold text-[var(--v2-text)]">Payment methods</div>
@@ -625,6 +672,24 @@ export function MyAdsClient() {
             <V2Input value={editMaxLimit} onChange={(e) => setEditMaxLimit(e.target.value)} placeholder={`Max trade (${fiat})`} inputMode="decimal" />
             <V2Input value={editWindow} onChange={(e) => setEditWindow(e.target.value)} placeholder="Payment window minutes (15-180)" inputMode="numeric" />
             <V2Input value={editTerms} onChange={(e) => setEditTerms(e.target.value)} placeholder="Terms (optional)" />
+
+            <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3 text-[12px] text-[var(--v2-muted)]">
+              <div className="font-semibold text-[var(--v2-text)]">Pre-submit checks</div>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                <li>
+                  Remaining liquidity estimate: {editLiquidityFiat != null ? fmtMoney(String(editLiquidityFiat), fiat) : "—"}
+                </li>
+                <li>
+                  Maximum allowed by remaining liquidity: {editMaxByLiquidity != null ? fmtMoney(String(editMaxByLiquidity), fiat) : "—"}
+                </li>
+                {editHasRangeIssue ? (
+                  <li className="text-[var(--v2-down)]">Min trade must be less than or equal to max trade.</li>
+                ) : null}
+                {editHasLiquidityIssue ? (
+                  <li className="text-[var(--v2-down)]">Max trade exceeds remaining ad liquidity. Reduce max or increase price.</li>
+                ) : null}
+              </ul>
+            </div>
 
             {editErrText ? (
               <div className="rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-3 py-3">
