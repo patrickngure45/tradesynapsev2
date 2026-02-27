@@ -1,0 +1,23 @@
+{
+  "projectId": "<your-project-id>",
+  "services": [
+    {
+      "name": "web",
+      "plugin": "docker",
+      "build": { "dockerfilePath": "apps/web/Dockerfile" },
+      "startCommand": "npm run start"
+    },
+    {
+      "name": "outbox-worker",
+      "plugin": "docker",
+      "build": { "dockerfilePath": "apps/web/Dockerfile" },
+      "startCommand": "npm run outbox:worker"
+    },
+    {
+      "name": "deposit-worker",
+      "plugin": "docker",
+      "build": { "dockerfilePath": "apps/web/Dockerfile" },
+      "startCommand": "npm run deposit:watch:bsc"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <linearGradient id="cw-bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#070A11"/>
+      <stop offset="55%" stop-color="#0B1220"/>
+      <stop offset="100%" stop-color="#101626"/>
+    </linearGradient>
+    <linearGradient id="cw-ember" x1="380" y1="250" x2="820" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="55%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+    <radialGradient id="cw-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(320 120) rotate(28) scale(720 420)">
+      <stop offset="0%" stop-color="#F97316" stop-opacity="0.18"/>
+      <stop offset="65%" stop-color="#F97316" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cw-glow2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(980 130) rotate(155) scale(640 380)">
+      <stop offset="0%" stop-color="#FBBF24" stop-opacity="0.14"/>
+      <stop offset="70%" stop-color="#FBBF24" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#cw-bg)"/>
+  <rect width="1200" height="630" fill="url(#cw-glow)"/>
+  <rect width="1200" height="630" fill="url(#cw-glow2)"/>
+
+  <!-- Mark -->
+  <g transform="translate(520 150)">
+    <rect x="0" y="0" width="160" height="160" rx="36" fill="rgba(255,255,255,0.06)"/>
+    <rect x="0" y="0" width="160" height="160" rx="36" stroke="rgba(255,255,255,0.08)"/>
+    <circle cx="80" cy="80" r="48" fill="#0C101B" stroke="url(#cw-ember)" stroke-width="8"/>
+    <circle cx="80" cy="80" r="34" stroke="rgba(255,255,255,0.10)" stroke-width="2"/>
+    <path d="M80 50c9 12 14 22 14 30 0 10.8-6.5 17.4-14 17.4s-14-6.6-14-17.4c0-8 5-18 14-30Z" fill="url(#cw-ember)"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="600" y="365" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="78" font-weight="800" fill="#FFFFFF">
+    <tspan>Coin</tspan><tspan fill="url(#cw-ember)">waka</tspan>
+  </text>
+
+  <text x="600" y="418" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="26" fill="rgba(234,240,255,0.72)">
+    Wallet rails · P2P settlement · Growth-first UX
+  </text>
+
+  <rect x="0" y="606" width="1200" height="24" fill="url(#cw-ember)" opacity="0.9"/>
+</svg>

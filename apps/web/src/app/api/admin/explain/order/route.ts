@@ -1,0 +1,151 @@
+import { z } from "zod";
+
+import { apiError, apiZodError } from "@/lib/api/errors";
+import { requireAdminForApi } from "@/lib/auth/admin";
+import { getSql } from "@/lib/db";
+import { responseForDbError, retryOnceOnTransientDbError } from "@/lib/dbTransient";
+import { maybeRephraseExplainFields, wantAiFromQueryParam } from "@/lib/explain/aiRephrase";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const querySchema = z.object({
+  id: z.string().uuid(),
+  ai: z.string().optional(),
+});
+
+function explain(status: string) {
+  switch (status) {
+    case "open":
+      return {
+        state: "open",
+        summary: "Order is open in the book.",
+        blockers: ["Waiting for a match"],
+        next_steps: ["Wait for fills", "Cancel if you changed your mind"],
+      };
+    case "partially_filled":
+      return {
+        state: "partially_filled",
+        summary: "Order has partial fills.",
+        blockers: ["Remaining quantity still open"],
+        next_steps: ["Wait for the rest to fill", "Cancel the remainder"],
+      };
+    case "filled":
+      return {
+        state: "filled",
+        summary: "Order fully filled.",
+        blockers: [],
+        next_steps: ["No action needed"],
+      };
+    case "canceled":
+      return {
+        state: "canceled",
+        summary: "Order canceled.",
+        blockers: [],
+        next_steps: ["No action needed"],
+      };
+    default:
+      return {
+        state: status,
+        summary: "Order status updated.",
+        blockers: [],
+        next_steps: ["Check order details"],
+      };
+  }
+}
+
+/**
+ * GET /api/admin/explain/order?id=<uuid>[&ai=1]
+ */
+export async function GET(request: Request) {
+  const sql = getSql();
+
+  const admin = await requireAdminForApi(sql, request);
+  if (!admin.ok) return admin.response;
+
+  try {
+    const url = new URL(request.url);
+    let q: z.infer<typeof querySchema>;
+    try {
+      q = querySchema.parse({
+        id: url.searchParams.get("id") ?? "",
+        ai: url.searchParams.get("ai") ?? undefined,
+      });
+    } catch (e) {
+      return apiZodError(e) ?? apiError("invalid_input");
+    }
+
+    const row = await retryOnceOnTransientDbError(async () => {
+      const rows = await sql<
+        {
+          id: string;
+          status: string;
+          side: string;
+          price: string;
+          quantity: string;
+          remaining_quantity: string;
+          market_symbol: string;
+          created_at: string;
+          updated_at: string;
+        }[]
+      >`
+        SELECT
+          o.id::text,
+          o.status,
+          o.side,
+          o.price::text,
+          o.quantity::text,
+          o.remaining_quantity::text,
+          m.symbol AS market_symbol,
+          o.created_at,
+          o.updated_at
+        FROM ex_order o
+        JOIN ex_market m ON m.id = o.market_id
+        WHERE o.id = ${q.id}::uuid
+        LIMIT 1
+      `;
+      return rows[0] ?? null;
+    });
+
+    if (!row) return apiError("not_found");
+
+    const ex = explain(row.status);
+    const ai = await maybeRephraseExplainFields({
+      sql,
+      actingUserId: admin.userId,
+      wantAi: wantAiFromQueryParam(q.ai ?? null),
+      kind: "exchange_order",
+      fields: {
+        summary: ex.summary,
+        blockers: ex.blockers,
+        next_steps: ex.next_steps,
+      },
+      headers: request.headers,
+      context: {
+        status: row.status,
+        market: row.market_symbol,
+        side: row.side,
+      },
+    });
+
+    return Response.json({
+      ok: true,
+      kind: "exchange_order",
+      id: row.id,
+      status: row.status,
+      market: row.market_symbol,
+      side: row.side,
+      price: row.price,
+      quantity: row.quantity,
+      remaining_quantity: row.remaining_quantity,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      ...ex,
+      ...(ai ?? {}),
+    });
+  } catch (e) {
+    const resp = responseForDbError("admin.explain.order", e);
+    if (resp) return resp;
+    return apiError("internal_error");
+  }
+}

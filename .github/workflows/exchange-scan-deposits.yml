@@ -1,0 +1,44 @@
+name: Exchange - Scan Deposits
+
+on:
+  schedule:
+    # GitHub schedules are best-effort; keep idempotent endpoints.
+    # Run every 2 minutes to catch deposits faster (per go-live checklist).
+    - cron: "*/2 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: exchange-scan-deposits
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call scan-deposits cron endpoint
+        env:
+          BASE_URL: ${{ secrets.RAILWAY_BASE_URL }}
+          EXCHANGE_CRON_SECRET: ${{ secrets.EXCHANGE_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_URL:-}" ]; then
+            echo "Missing secret: RAILWAY_BASE_URL" >&2
+            exit 2
+          fi
+          if [ -z "${EXCHANGE_CRON_SECRET:-}" ]; then
+            echo "Missing secret: EXCHANGE_CRON_SECRET" >&2
+            exit 2
+          fi
+
+          # Tune these via query params if you need to reduce load.
+          # Keep confirmations small in early stage for faster UX.
+          URL="${BASE_URL%/}/api/exchange/cron/scan-deposits?confirmations=2"
+
+          echo "POST $URL"
+          curl -fsS -X POST "$URL" \
+            -H "x-cron-secret: $EXCHANGE_CRON_SECRET" \
+            -H "content-type: application/json" \
+            --data '{}' \
+            | head -c 6000
+          echo

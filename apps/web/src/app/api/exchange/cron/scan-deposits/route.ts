@@ -1,0 +1,246 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { getSql } from "@/lib/db";
+import { upsertServiceHeartbeat } from "@/lib/system/heartbeat";
+import {
+  finalizePendingBscDeposits,
+  ingestNativeBnbDepositTx,
+  scanAndCreditBscDeposits,
+} from "@/lib/blockchain/depositIngest";
+import { releaseJobLock, renewJobLock, tryAcquireJobLock } from "@/lib/system/jobLock";
+import { requireCronRequestAuth } from "@/lib/auth/cronAuth";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function requireEnabledInProd(): string | null {
+  if (process.env.NODE_ENV !== "production") return null;
+
+  // Safety default: never run heavy deposit scans unless explicitly enabled.
+  const enabled = String(process.env.EXCHANGE_ENABLE_DEPOSIT_SCAN ?? "").trim();
+  if (enabled !== "1" && enabled.toLowerCase() !== "true") return "deposit_scan_disabled";
+  return null;
+}
+
+export async function POST(req: NextRequest) {
+  const authErr = requireCronRequestAuth(req);
+  if (authErr) {
+    const status = authErr === "cron_unauthorized" ? 401 : 500;
+    return NextResponse.json({ error: authErr }, { status });
+  }
+
+  const enabledErr = requireEnabledInProd();
+  if (enabledErr) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: enabledErr,
+        hint: "Set EXCHANGE_ENABLE_DEPOSIT_SCAN=1 in production to enable this endpoint.",
+      },
+      { status: 403 },
+    );
+  }
+
+  const sql = getSql();
+
+  // Distributed lock across replicas (TTL-based).
+  // Default to a short TTL so a crash/restart doesn't block deposits for long.
+  // The lock is renewed during long scans.
+  const lockTtlMs = clampInt(Number(process.env.EXCHANGE_SCAN_LOCK_TTL_MS ?? 120_000), 30_000, 60 * 60_000);
+  const lockKey = "exchange:scan-deposits:bsc";
+  const holderId = `${process.env.RAILWAY_SERVICE_NAME ?? process.env.SERVICE_NAME ?? "web"}:${crypto.randomUUID()}`;
+  const lock = await tryAcquireJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs });
+  if (!lock.acquired) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "scan_in_progress",
+        held_until: lock.held_until,
+        holder_id: lock.holder_id,
+        hint: "Another scan is already running; wait for it to finish or increase EXCHANGE_SCAN_LOCK_TTL_MS.",
+      },
+      { status: 429 },
+    );
+  }
+
+  // Keep the lock alive while scanning. This allows a short TTL (fast recovery after crashes)
+  // without having long-running scans expire the lock and overlap.
+  const renewEveryMs = clampInt(Math.floor(lockTtlMs / 2), 10_000, 30_000);
+  let renewTimer: ReturnType<typeof setInterval> | null = null;
+  try {
+    renewTimer = setInterval(() => {
+      renewJobLock(sql as any, { key: lockKey, holderId, ttlMs: lockTtlMs }).catch(() => {
+        // ignore
+      });
+    }, renewEveryMs);
+  } catch {
+    // ignore
+  }
+
+  const beat = async (details?: Record<string, unknown>) => {
+    try {
+      await upsertServiceHeartbeat(sql as any, {
+        service: "deposit-scan:bsc",
+        status: "ok",
+        details: { ...(details ?? {}) },
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const url = new URL(req.url);
+  const nativeTx = url.searchParams.get("native_tx") ?? url.searchParams.get("tx_hash");
+  const fromBlockRaw = url.searchParams.get("from_block");
+  const maxBlocksRaw = url.searchParams.get("max_blocks");
+  const confirmationsRaw = url.searchParams.get("confirmations");
+  const blocksPerBatchRaw = url.searchParams.get("blocks_per_batch");
+  const maxMsRaw = url.searchParams.get("max_ms");
+  const tokensRaw = url.searchParams.get("tokens");
+  const nativeRaw = url.searchParams.get("native");
+  const symbolsRaw = url.searchParams.get("symbols");
+  const finalizeRaw = url.searchParams.get("finalize");
+
+  const fromBlock = fromBlockRaw ? Number(fromBlockRaw) : undefined;
+  // Hard cap request override values; use env vars for bigger backfills.
+  const maxBlocks = maxBlocksRaw ? clampInt(Number(maxBlocksRaw), 10, 20_000) : undefined;
+  const confirmations = confirmationsRaw ? Number(confirmationsRaw) : undefined;
+  const blocksPerBatch = blocksPerBatchRaw ? clampInt(Number(blocksPerBatchRaw), 10, 3_000) : undefined;
+  const maxMs = maxMsRaw ? clampInt(Number(maxMsRaw), 1_000, 120_000) : undefined;
+  const effectiveConfirmations = Number.isFinite(confirmations as any) ? (confirmations as number) : undefined;
+
+  // Cron providers commonly enforce ~30s HTTP timeouts. In production, default to a
+  // conservative time budget and small block range unless the caller explicitly overrides.
+  const isProd = process.env.NODE_ENV === "production";
+  const effectiveMaxMs = Number.isFinite(maxMs as any) ? (maxMs as number) : isProd ? 25_000 : undefined;
+  const effectiveMaxBlocks = Number.isFinite(maxBlocks as any) ? (maxBlocks as number) : isProd ? 80 : undefined;
+  const effectiveBlocksPerBatch = Number.isFinite(blocksPerBatch as any) ? (blocksPerBatch as number) : isProd ? 40 : undefined;
+
+  // Optional: run a quick finalize pass after scanning (credits any now-confirmed pending events).
+  // Gated by query/env so it can be rolled out safely.
+  const finalizeAfterScan =
+    finalizeRaw == null
+      ? String(process.env.EXCHANGE_FINALIZE_AFTER_SCAN ?? "").trim() === "1"
+      : !(finalizeRaw.trim() === "0" || finalizeRaw.trim().toLowerCase() === "false");
+
+  const scanTokensRaw = tokensRaw == null ? undefined : !(tokensRaw.trim() === "0" || tokensRaw.trim().toLowerCase() === "false");
+  const scanNative = nativeRaw == null ? undefined : !(nativeRaw.trim() === "0" || nativeRaw.trim().toLowerCase() === "false");
+
+  const tokenSymbols = (symbolsRaw ?? "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+  // Production-safe default: do NOT scan all enabled tokens unless explicitly allowlisted.
+  // Token scans can be very expensive (many assets × many addresses × getLogs ranges).
+  const allowTokenScanAll = String(process.env.ALLOW_TOKEN_SCAN_ALL ?? "").trim() === "1";
+
+  if (process.env.NODE_ENV === "production" && scanTokensRaw === true && tokenSymbols.length === 0 && !allowTokenScanAll) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "token_symbols_required",
+        hint: "Pass symbols=USDT,USDC (recommended) or set ALLOW_TOKEN_SCAN_ALL=1 to scan all enabled tokens (not recommended).",
+      },
+      { status: 400 },
+    );
+  }
+
+  const scanTokens =
+    scanTokensRaw ??
+    (tokenSymbols.length > 0
+      ? true
+      : allowTokenScanAll
+        ? true
+        : false);
+
+  try {
+    const startedAtMs = Date.now();
+    await beat({ event: "start" });
+    if (nativeTx) {
+      const out = await ingestNativeBnbDepositTx(sql as any, {
+        txHash: nativeTx,
+        confirmations: effectiveConfirmations,
+      });
+      await beat({ event: "native_tx", ok: out.ok, tx_hash: nativeTx });
+      const status = out.ok ? 200 : out.error === "tx_not_confirmed" ? 202 : 400;
+      return NextResponse.json(out, { status });
+    }
+
+    const result = await scanAndCreditBscDeposits(sql as any, {
+      fromBlock: Number.isFinite(fromBlock as any) ? (fromBlock as number) : undefined,
+      maxBlocks: effectiveMaxBlocks,
+      confirmations: effectiveConfirmations,
+      blocksPerBatch: effectiveBlocksPerBatch,
+      maxMs: effectiveMaxMs,
+      scanTokens,
+      scanNative,
+      tokenSymbols: tokenSymbols.length ? tokenSymbols : undefined,
+    });
+
+    let finalize: Awaited<ReturnType<typeof finalizePendingBscDeposits>> | null = null;
+    if (finalizeAfterScan) {
+      const spentMs = Date.now() - startedAtMs;
+      const timeLeftMs = effectiveMaxMs ? effectiveMaxMs - spentMs : undefined;
+      const finalizeMaxMs =
+        timeLeftMs == null
+          ? clampInt(Number(process.env.BSC_DEPOSIT_FINALIZE_MAX_MS_ON_SCAN ?? 3_000), 250, 60_000)
+          : clampInt(Math.floor(timeLeftMs - 250), 0, 60_000);
+
+      // If we're basically out of time, skip finalize to avoid cron timeouts.
+      if (finalizeMaxMs >= 500) {
+        const finalizeMax = clampInt(Number(process.env.BSC_DEPOSIT_FINALIZE_MAX_ON_SCAN ?? 50), 1, 500);
+        try {
+          finalize = await finalizePendingBscDeposits(sql as any, {
+            confirmations: effectiveConfirmations,
+            max: finalizeMax,
+            maxMs: finalizeMaxMs,
+          });
+        } catch {
+          // Don't fail the scan if finalize errors; scan is the more important job.
+        }
+      }
+    }
+
+    await beat({ event: "done", ...result, ...(finalize ? { finalize } : {}) });
+
+    return NextResponse.json({ ...result, ...(finalize ? { finalize } : {}) });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await beat({ event: "error", message });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "scan_failed",
+        message,
+        hint:
+          "Check BSC RPC connectivity (BSC_RPC_URL) and that DATABASE_URL is reachable. See Railway logs for full stack.",
+      },
+      { status: 500 },
+    );
+  } finally {
+    if (renewTimer) {
+      try {
+        clearInterval(renewTimer);
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      await releaseJobLock(sql as any, { key: lockKey, holderId });
+    } catch {
+      // ignore
+    }
+  }
+}
+
+// Allow simple cron providers that only support GET.
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+

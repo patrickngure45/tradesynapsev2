@@ -1,0 +1,26 @@
+# Node/Next
+**/node_modules/
+**/.next/
+**/out/
+
+# Local scratch artifacts
+**/.tmp/
+
+# Env files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs
+**/*.log
+
+# Curl cookie jars
+cookies*.txt
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# accidental nested directory created locally
+apps/web/apps/web/

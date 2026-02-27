@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Database Connection
+      - DATABASE_URL=${DATABASE_URL}
+      
+      # App Settings
+      - NODE_ENV=production
+      - PORT=3000
+      
+      # NextAuth / Auth (if used)
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      
+      # Public Vars
+      - NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+      # Gas fees (BNB)
+      - GAS_ENABLED=${GAS_ENABLED:-false}
+      - GAS_FEE_MODE=${GAS_FEE_MODE:-realtime}
+      - GAS_ACTION_FEE_BNB=${GAS_ACTION_FEE_BNB:-0}
+      - GAS_USER_TRANSFER_FEE_BNB=${GAS_USER_TRANSFER_FEE_BNB:-0}
+      - GAS_BURN_BPS=${GAS_BURN_BPS:-25}
+    
+    restart: always
+
+  deposit_scan_bsc:
+    build: .
+    command: ["npm", "run", "deposit:watch:bsc"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=production
+      # Fast settlement knobs
+      - DEPOSIT_SCAN_CHAIN=bsc
+      - DEPOSIT_CONFIRMATIONS=${DEPOSIT_CONFIRMATIONS:-2}
+      - DEPOSIT_SCAN_POLL_MS=${DEPOSIT_SCAN_POLL_MS:-120000}
+      - DEPOSIT_SCAN_NATIVE=${DEPOSIT_SCAN_NATIVE:-1}
+      - DEPOSIT_SCAN_TOKENS=${DEPOSIT_SCAN_TOKENS:-1}
+      - DEPOSIT_SCAN_SYMBOLS=${DEPOSIT_SCAN_SYMBOLS:-USDT,USDC}
+      - DEPOSIT_SCAN_MAX_MS=${DEPOSIT_SCAN_MAX_MS:-20000}
+      - DEPOSIT_SCAN_MAX_BLOCKS=${DEPOSIT_SCAN_MAX_BLOCKS:-120}
+      - DEPOSIT_SCAN_BLOCKS_PER_BATCH=${DEPOSIT_SCAN_BLOCKS_PER_BATCH:-60}
+      - EXCHANGE_SCAN_LOCK_TTL_MS=${EXCHANGE_SCAN_LOCK_TTL_MS:-120000}
+      # RPC
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      - BSC_RPC_URLS=${BSC_RPC_URLS}
+      - NEXT_PUBLIC_USE_MAINNET=${NEXT_PUBLIC_USE_MAINNET:-1}
+    restart: always
+
+  deposit_scan_eth:
+    build: .
+    command: ["npm", "run", "deposit:watch:eth"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NODE_ENV=production
+      # Fast settlement knobs
+      - DEPOSIT_SCAN_CHAIN=eth
+      - DEPOSIT_CONFIRMATIONS=${DEPOSIT_CONFIRMATIONS_ETH:-3}
+      - DEPOSIT_SCAN_POLL_MS=${DEPOSIT_SCAN_POLL_MS:-15000}
+      - DEPOSIT_SCAN_BLOCK_CHUNK=${DEPOSIT_SCAN_BLOCK_CHUNK:-50}
+      - DEPOSIT_SCAN_RETRIES=${DEPOSIT_SCAN_RETRIES:-6}
+      # RPC
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - NEXT_PUBLIC_USE_MAINNET=${NEXT_PUBLIC_USE_MAINNET:-1}
+    restart: always

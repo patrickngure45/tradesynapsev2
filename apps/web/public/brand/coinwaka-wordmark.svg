@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" fill="none">
+  <defs>
+    <linearGradient id="cw-ember" x1="60" y1="40" x2="240" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="55%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon mark (transparent background) -->
+  <g transform="translate(40,30)">
+    <circle cx="120" cy="120" r="92" fill="#0B1220"/>
+    <circle cx="120" cy="120" r="72" fill="#0C101B" stroke="url(#cw-ember)" stroke-width="16"/>
+    <path d="M120 78c16 22 24 40 24 54 0 20-11 32-24 32s-24-12-24-32c0-14 8-32 24-54Z" fill="url(#cw-ember)"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(300,82)">
+    <text
+      x="0"
+      y="110"
+      font-size="110"
+      font-weight="800"
+      letter-spacing="-1"
+      font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+      fill="#0B1220"
+    >
+      Coinwaka
+    </text>
+    <rect x="4" y="136" width="560" height="12" rx="6" fill="url(#cw-ember)" opacity="0.9"/>
+  </g>
+</svg>
